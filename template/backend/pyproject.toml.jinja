@@ -1,0 +1,151 @@
+# ---- Project Info and Dependencies ----
+
+[project]
+name = "{{ package_name }}-backend"
+version = "0.0.0"
+description = "{{ package_description }} -- backend"
+authors = [
+    { name="{{ package_author_name }}", email="{{ package_author_email }}" },
+]
+{%- if package_license == 'None' %}
+# No license chosen yet. When you pick one, set an SPDX expression here and add a
+# LICENSE file at the repository root, or re-answer the template question:
+# uvx --exclude-newer "14 days" copier@9.16.0 update --data package_license=MIT
+{%- else %}
+license = "{{ 'LicenseRef-Proprietary' if package_license == 'Proprietary' else package_license }}"
+{%- endif %}
+# One version, not a range: this half is an application deployed on a runtime it
+# chooses, not a library that must span its users' runtimes. .python-version pins
+# the same number so uv, CI and your laptop agree.
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.140.0",
+    "uvicorn[standard]>=0.38.0",
+    "pydantic>=2.12.0",
+]
+
+# There is deliberately no [build-system] table and no [project.scripts]. This half
+# is never built into a wheel or published, so a build backend and dynamic
+# versioning would be ceremony around an artifact nobody produces. `package = false`
+# below tells uv the same thing.
+
+
+# ---- Dev dependencies ----
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-sugar>=1.1.1",
+    "httpx>=0.28.1",
+    "ruff>=0.15.20",
+    "codespell>=2.4.2",
+    "rich>=15.0.0",
+    "basedpyright>=1.39.9",
+    "funlog>=0.2.1",
+]
+
+
+# ---- Settings ----
+
+[tool.uv]
+# Fail fast on old uv versions rather than misbehave. 0.9 is the floor where
+# exclude-newer accepts a relative duration like "14 days".
+required-version = ">=0.9"
+# Safe project-level default for every uv command. CI and the Makefile repeat it so
+# copied commands and tool execution outside project discovery retain the same policy.
+exclude-newer = "14 days"
+# An application, not a package: nothing here is installed into the environment, so
+# `app` is importable from the project root rather than from site-packages. That is
+# why pytest sets pythonpath below and devtools/export_openapi.py adjusts sys.path.
+package = false
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E", # https://docs.astral.sh/ruff/rules/#error-e
+    "F", # https://docs.astral.sh/ruff/rules/#pyflakes-f
+    "UP", # https://docs.astral.sh/ruff/rules/#pyupgrade-up
+    "B", # https://docs.astral.sh/ruff/rules/#flake8-bugbear-b
+    "I", # https://docs.astral.sh/ruff/rules/#isort-i
+    "C90", # https://docs.astral.sh/ruff/rules/#mccabe-c90
+    # Verbosity: these catch the mechanical half of what makes agent-written code
+    # bloat -- if/else ladders, needless nesting, single-use temporaries, rebuilt
+    # comprehensions, commented-out code.
+    "SIM", # https://docs.astral.sh/ruff/rules/#flake8-simplify-sim
+    "RET", # https://docs.astral.sh/ruff/rules/#flake8-return-ret
+    "PIE", # https://docs.astral.sh/ruff/rules/#flake8-pie-pie
+    "C4", # https://docs.astral.sh/ruff/rules/#flake8-comprehensions-c4
+    "PERF", # https://docs.astral.sh/ruff/rules/#perflint-perf
+    "ERA", # https://docs.astral.sh/ruff/rules/#eradicate-era
+    # Function volume, which C901 cannot see: a long straight-line function has a
+    # complexity of 1.
+    "PLR0915", # https://docs.astral.sh/ruff/rules/too-many-statements/
+]
+ignore = [
+    "E501", # https://docs.astral.sh/ruff/rules/line-too-long/
+    "E402", # https://docs.astral.sh/ruff/rules/module-import-not-at-top-of-file/
+    "E731", # https://docs.astral.sh/ruff/rules/lambda-assignment/
+    # We use both ruff formatter and linter so some rules should always be disabled.
+    "W191", "E111", "E114", "E117", "D206", "D300",
+    "Q000", "Q001", "Q002", "Q003",
+    "COM812", "COM819", "ISC002",
+]
+
+[tool.ruff.lint.mccabe]
+# The per-function hard gate. Measured across httpx and flask, p95 complexity is
+# 6 and p99 is 9-11, so 8 flags roughly the top 2% of what excellent Python does
+# while leaving normal code alone. Raising this number is not the fix for a failing
+# build -- split the function instead.
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+# Statements per function. Complexity and volume are independent: a 60-line
+# sequence of assignments scores 1 on C901.
+max-statements = 25
+
+[tool.complexity]
+# Codebase-wide checks that a per-function gate cannot see, run by
+# devtools/complexity.py. Measured against Python codebases; the frontend half
+# gates its own density separately with its own numbers, in its own unit. The two
+# are not comparable and must not be merged.
+tolerance = 0.05
+ceiling = 3.0
+min-callables = 50
+
+[tool.basedpyright]
+include = ["app", "tests", "devtools"]
+reportIgnoreCommentWithoutRule = false
+reportUnnecessaryTypeIgnoreComment = false
+reportMissingTypeStubs = false
+reportUnusedCallResult = false
+reportAny = false
+reportExplicitAny = false
+reportImplicitStringConcatenation = false
+reportUnreachable = false
+# basedpyright exits non-zero on warnings as well as errors, and these four fire on
+# ordinary use of the stack rather than on anything you wrote: `response.json()`
+# returns Any, so every assertion against a response body is "unknown", and pytest
+# fixtures look unused because the framework calls them. Type your own code; do not
+# spend the day annotating other people's return values.
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnusedFunction = false
+
+[tool.codespell]
+# Add here as needed:
+# ignore-words-list = "foo,bar"
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+testpaths = ["tests"]
+# `package = false` installs nothing, so the project root has to be importable for
+# `from app.main import app` to resolve.
+pythonpath = ["."]
+norecursedirs = []
+filterwarnings = []

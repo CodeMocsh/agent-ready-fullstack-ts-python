@@ -1,0 +1,283 @@
+# Project Instructions for AI Agents
+
+Instructions for AI coding agents working on {{ package_name }}. Follows the
+[AGENTS.md](https://agents.md) convention.
+
+## Approach
+
+You are a principal engineer. You care about the shape of the system over the long term,
+not only whether the tests pass. Elegance is less code doing more: every line must earn
+its keep.
+
+Resolve ambiguity before building, not after. A request you could satisfy two different
+ways is a request you do not understand yet. Ask, or state the assumption you are
+proceeding on and why. Guessing and building is the expensive failure; asking costs one
+round.
+
+Never swallow an error or return a silent default in its place.
+
+Code is the source of truth for behaviour; docs are the source of truth for intent. When
+they disagree the doc is wrong. Fix the doc, not the code.
+
+Tests validate outcomes, not implementation. A test earns its keep by failing when
+behaviour breaks: one that mirrors the implementation only makes refactoring expensive,
+and one that cannot fail is dead weight. Cover the seams and the edges that actually
+bite. Coverage percentage is not the goal, and deleting a test that no longer
+distinguishes anything is a real improvement.
+
+## Zero comments
+
+No explanatory comments, no docblocks, no TODO/FIXME notes, no lint or type suppression
+directives (`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`),
+no commented-out code. Shebangs are executable directives, not comments.
+
+Express intent through names, structure, types, and tests. Rationale goes in the commit
+message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
+so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
+explanation.
+
+One carve-out: a published public API. Where a package is consumed outside this repo its
+exported surface carries JSDoc or a docstring, because that text is shipped documentation,
+not an explanation aimed at a reader of the source. Everything internal stays bare. Such a
+doc states contracts, not reasoning: behaviour, failure, timing, ownership, safe use. Link
+the rationale; don't restate it.
+
+Scope: source, tests, scripts. Config files may carry comments where the format offers no
+other way to explain a rule. **Vendored and generated code is out of scope entirely** —
+see below.
+
+The guardrails this project ships are described in
+[docs/agent-tooling.md](docs/agent-tooling.md), including where each threshold came from,
+why the conformance checks fail closed, and why the agent guard fails open.
+
+## The two halves
+
+This repository is one application in two halves:
+
+- **`frontend/`** — a React app. Everything pnpm touches lives here.
+- **`backend/`** — a FastAPI service. Everything uv touches lives here.
+
+Each half installs, lints, tests and builds on its own, without the other's toolchain
+present. Run `pnpm` from `frontend/` and `uv` from `backend/`, or use the root `make`
+targets, which fan out to both. There is no root `package.json`, and `pnpm install` at the
+root will fail — that is deliberate.
+
+## The contract
+
+`openapi.json` at the repository root is what the halves agree on, and it is derived from
+the backend, never written by hand:
+
+```
+backend/app/{models,routes}.py  ->  openapi.json  ->  frontend/src/api/schema.ts
+                                                       -> types.ts, mocks/handlers.ts
+```
+
+After any change to a pydantic model or a route, run **`make openapi`** and commit
+`openapi.json` and `frontend/src/api/schema.ts` alongside the source change. CI fails
+otherwise, and so does `make openapi-check`.
+
+Both artifacts are committed so each half stays independently operable — the frontend
+regenerates types, tests and builds with no Python installed at all.
+
+Three things about the spec are deliberate and should not be "fixed":
+
+- **`422` responses appear on every route with a parameter or a body.** FastAPI adds them,
+  along with `HTTPValidationError` and `ValidationError` schemas. They describe real
+  behaviour.
+- **Every error response declares a `model`.** A `404` declared without one says the
+  response has no body, while `HTTPException` returns `{"detail": ...}` — the spec would be
+  lying, and the typed handlers would refuse to mock it.
+- **`redirect_slashes` is off.** With it on, `/api/tasks/` answers with a redirect to the
+  backend's own origin, which escapes the dev proxy and fails CORS in a browser.
+
+If the two artifacts conflict during a merge, do not hand-merge them. Take either side and
+run `make openapi`.
+
+**The mock handlers and the backend are two implementations of one contract.**
+`frontend/tests/contract.test.ts` is run against both — `pnpm test` uses the handlers,
+`make test-contract` starts both halves and runs the same file against the real service
+through the dev proxy. Assertions there describe the contract only: shapes and status
+codes, never seed data, which the two are free to differ on.
+
+## Vendored and generated code — do not tidy
+
+Two kinds of file here were written by a tool, and neither is yours to style.
+
+**Vendored** — a tool wrote it, this project owns it, and you may change how it *behaves*:
+
+- `frontend/src/components/ui/**` and `frontend/src/lib/utils.ts` —
+  [shadcn](https://ui.shadcn.com/) components, added with `pnpm dlx shadcn@latest add
+  <component>`. shadcn copies source into the repo; that source is yours.
+- `frontend/public/mockServiceWorker.js` — written by Mock Service Worker's installer.
+  Never hand-edit it; regenerate with `pnpm dlx msw init public --save`.
+
+**Generated** — regenerate-only, and a hand edit is a bug:
+
+- `openapi.json` and `frontend/src/api/schema.ts` — see *The contract*. Change the backend
+  and run `make openapi`.
+
+Both kinds are excluded from lint, from the complexity ratchet, and from the conformance
+checks. Do not reformat them, strip their comments, or "simplify" them to match house
+style.
+
+## Build and Test
+
+`make` at the root is the interface across both halves:
+
+```bash
+make install        # both halves, then activate the versioned git hooks
+make dev            # both halves: backend on :8000, frontend on :5173 in live mode
+make dev-frontend   # frontend only, mock mode -- no backend required
+make dev-backend    # backend only, with reload
+make lint           # auto-fix and lint both halves
+make lint-check     # check-only variant, matching CI
+make test           # both halves, then the contract suite against the real backend
+make test-fast      # both halves only
+make test-contract  # the contract suite against the backend half
+make openapi        # regenerate the contract artifacts
+make openapi-check  # fail if the committed artifacts are stale
+make build          # production build of the frontend
+make upgrade        # update both halves' dependencies, then regenerate the contract
+```
+
+Or work in one half with its own tools: `pnpm -C frontend test:watch`,
+`cd backend && uv run pytest -q tests/test_tasks.py`, `pnpm -C frontend add some-package`,
+`cd backend && uv add some-package`.
+
+## See what you built
+
+You have a browser. Use it. After a UI change, run the app and look at it rather than
+inferring from the JSX:
+
+```bash
+pnpm -C frontend exec playwright install chromium   # once per machine
+pnpm -C frontend test:e2e                           # the mock-mode specs in e2e/
+```
+
+To check the real system end to end, run `make dev` in one terminal and then:
+
+```bash
+pnpm -C frontend exec playwright test --config playwright.live.config.ts
+```
+
+To look at a screen the specs don't cover, add a throwaway spec in `frontend/e2e/` that
+navigates to it and calls `await page.screenshot({ path: "shot.png" })`, run it, and read
+the image. Delete the spec afterwards unless it earned its keep as a test. A screenshot is
+evidence; reasoning about markup is a guess.
+
+The end-to-end specs deliberately do not run in CI, so they are yours to keep honest.
+
+## Frontend conventions
+
+- **Layout**: `src/api/` is the contract with the backend (generated types plus a typed
+  `fetch` wrapper), `src/mocks/` is the fake implementation of that contract,
+  `src/components/` is UI, `src/router.tsx` wires routes. Component tests live in `tests/`,
+  end-to-end specs in `e2e/`.
+
+- **The mock layer is permanent.** `src/mocks/handlers.ts` is both a zero-backend
+  development mode and the fixture layer every component test runs against. It is typed
+  against the spec by [openapi-msw](https://github.com/christoph-fricke/openapi-msw), so a
+  handler that returns an undeclared status code or the wrong shape is a type error rather
+  than a surprise at runtime. Do not delete `src/mocks/` when the backend feels real
+  enough — you would delete the test suite's foundation with it.
+
+- **Modes**: `.env.development` and `.env.mock` set `VITE_ENABLE_MSW=true`; `.env.live`
+  turns it off so requests reach the backend through the `/api` proxy in
+  `vite.config.ts`. All three are committed and hold no secrets. The agent guard blocks
+  writes to any `.env*` file, which is the right default and applies here too — if one
+  needs to change, say so and let a human edit it.
+
+- **Never assume the app is served from `/`.** The service worker's registration URL, the
+  API base in `src/api/base.ts`, and the router's basepath all derive from
+  `import.meta.env.BASE_URL`. A hard-coded leading slash works on your laptop and breaks
+  under a subpath, including the worker's scope, which silently stops it intercepting
+  anything. The Playwright suite runs against a subpath build to catch exactly this.
+
+- **Imports**: use the `@/` alias for anything under `src/`.
+
+- **TypeScript**: `strict`, plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
+  Request and response types come from `src/api/types.ts`, which aliases the generated
+  schema — change the backend, not those aliases.
+
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/) v4, configured in CSS. There is no
+  `tailwind.config.js` — the theme is the `@theme` block in `src/index.css`, and it is the
+  only place a colour or a type size is defined. Reach for design tokens
+  (`bg-background`, `text-muted-foreground`) over raw colours, and for the type and
+  spacing scales (`text-sm`, `p-4`, `gap-6`) over arbitrary values. This is enforced:
+  `pnpm conformance` fails on a hex literal, a colour keyword, a fixed palette step like
+  `bg-blue-500`, a `text-[13px]`, and a `p-[7px]`. The reason is dark mode and drift — a
+  literal renders perfectly in the theme you are looking at and keeps its value in the one
+  you are not. Add a token to `src/index.css` instead.
+
+  Two arbitrary values stay legal, because neither is an escape from the theme: sizing
+  (`w-[240px]`, `max-w-[65ch]` — there is no token for how wide a sidebar is) and any
+  value that reads a theme variable (`gap-[--spacing(var(--gap))]`).
+
+- **Data**: server state comes from TanStack Query hooks against `src/api/client.ts`.
+  Never fetch in a `useEffect`: it skips the cache, the deduplication, and the loading and
+  error states the rest of the UI is written against. Effects are for synchronising with
+  something outside React — a subscription, an event listener, imperative DOM work — and
+  those are fine. Derived values are computed during render, not stored in state and
+  refreshed by an effect.
+
+- **Components**: prefer composing what is already in `src/components/ui/`. To add
+  another, run `pnpm dlx shadcn@latest add <name>` rather than writing it by hand.
+
+- **Lint/format**: [biome](https://biomejs.dev/) handles both, with its React domain rules
+  on. Type checking is `tsc --noEmit`.
+
+## Backend conventions
+
+- **Layout**: `app/` is the service — `main.py` builds the FastAPI app, `models.py` holds
+  the pydantic models the contract is made of, `routes.py` declares the endpoints,
+  `store.py` is the data layer. Tests live in `tests/`.
+
+- **It is an application, not a library.** There is no build backend, no version, and
+  nothing is published, so `[tool.uv] package = false` and `app` is importable from the
+  project root rather than from site-packages. That is why `pytest` sets `pythonpath` and
+  `devtools/export_openapi.py` adjusts `sys.path`.
+
+- **The store is in memory and resets on restart.** It exists so the demo runs with no
+  infrastructure. Replacing it with a real database is expected, and the five methods on
+  `TaskStore` are the seam to do it behind.
+
+- **Declare responses fully.** Every status code a route can return belongs in the
+  decorator, with a `model` for anything that has a body. The spec is generated from those
+  declarations, and the frontend's handlers are typed from the spec, so an undeclared
+  status code is invisible to the other half.
+
+- **Lint/format**: [ruff](https://docs.astral.sh/ruff/) for both, `basedpyright` for types,
+  `codespell` for prose. `uv run python devtools/lint.py` runs the lot, which is what
+  `make lint` calls.
+
+## Both halves
+
+- **Complexity**: each half gates its own, in its own unit, and the numbers do not
+  transfer. The frontend gates per-function cognitive complexity, function length and file
+  length, then checks codebase-wide density against `frontend/.complexity-baseline.json`.
+  The backend gates cyclomatic complexity and statements per function, then checks its own
+  density baseline. When any of them fails, split the function; raising a threshold or
+  re-recording a baseline is a deliberate, reviewable decision, not the quick way to green.
+
+- **Dependencies**: `pnpm add` in `frontend/`, `uv add` in `backend/`. Commit both
+  lockfiles. A 14-day supply-chain cool-off applies on both sides, so a package published
+  in the last fortnight will not resolve — including via `pnpm dlx shadcn add`. See
+  [docs/development.md](docs/development.md), which also explains where the two halves'
+  protections differ.
+
+- **Agent session tracking**: this project ships [Entire](https://entire.io) hooks in
+  `.claude/settings.json` that checkpoint agent coding sessions alongside git history.
+  They no-op unless the `entire` CLI is on `PATH`; install it and run `entire enable` to
+  activate, or delete `.claude/` and `.entire/` to opt out.
+
+- **Agent guardrails**: `.claude/hooks/agent_guard.py` is a small, dependency-free
+  `PreToolUse` hook that blocks a few unambiguously dangerous actions (`rm -rf /`, disk
+  wipes, force-push to `main`/`master`, writing `.env` files or hard-coded secrets). It's
+  a seatbelt, not a scanner, and fails open. Edit the patterns in that file, or remove its
+  `PreToolUse` entry in `.claude/settings.json`, to change or drop it.
+
+- This project was built from the
+  [agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python)
+  template.
+
+See [docs/development.md](docs/development.md) for full developer workflows.

@@ -1,0 +1,78 @@
+# One ignore file for both halves. Paths are unanchored, so `dist/` covers
+# frontend/dist and `__pycache__/` covers anything under backend/.
+
+*.bak
+*.orig
+tmp/
+trash/
+attic/
+
+# ---- Frontend ----
+
+node_modules/
+.pnpm-store/
+dist/
+build/
+*.tsbuildinfo
+
+coverage/
+.vitest/
+.cache/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+.npm
+.node_repl_history
+
+# Environments. .env.development, .env.mock and .env.live hold no secrets -- they
+# only choose whether the mock handlers answer -- and the app does not run without
+# them, so they are committed.
+.env
+.env.*
+!.env.example
+!.env.development
+!.env.mock
+!.env.live
+
+# ---- Backend ----
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+*.egg-info/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.kash/
+
+# ---- Agent tooling ----
+
+# Entire session-tracking local state.
+.entire/tmp/
+.entire/settings.local.json
+.entire/metadata/
+.entire/logs/
+.entire/redactors/local/
+
+.claude/settings.local.json
+
+# ---- Editors and OS ----
+
+.DS_Store
+.idea/
+*.swp

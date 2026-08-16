@@ -1,0 +1,32 @@
+# Supply-chain policy applied to every install in this project, including CI.
+# See docs/development.md for the reasoning.
+
+# Cool-off period, in minutes (14 days). A release younger than this is not
+# considered during resolution; most malicious publishes are caught within days.
+minimumReleaseAge: 20160
+
+# Fail when a package's trust evidence gets weaker than the version you already
+# have -- a trusted-publisher release replaced by one with only provenance, or
+# with none at all. That downgrade is what a compromised maintainer account
+# looks like.
+trustPolicy: no-downgrade
+
+# The check compares publish dates, not semver, so a maintained older release
+# line looks like a downgrade: semver 6.3.1 is a 2023 maintenance release that
+# happens to postdate a 7.x with provenance. It reaches this project through
+# shadcn -> @babel/core, and without this line neither `pnpm install` nor
+# `pnpm dlx shadcn add` can run at all.
+#
+# Exclusions are pinned to an exact version on purpose. Widening one to a range,
+# or reaching for `trustPolicy: off`, gives up the check everywhere -- if you
+# need a second entry, that is a decision worth arguing for in the PR.
+trustPolicyExclude:
+  - 'semver@6.3.1'
+
+# pnpm blocks dependency install scripts by default, which is the right default
+# and the reason this list is short. msw is the one exception: its postinstall
+# rewrites public/mockServiceWorker.js to match the installed msw version, and
+# a worker script that drifts from the library fails at runtime with an
+# integrity mismatch rather than at install time.
+allowBuilds:
+  msw: true

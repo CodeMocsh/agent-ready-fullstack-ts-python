@@ -1,0 +1,88 @@
+# Questions asked when generating a project. Six, matching the single-stack siblings:
+# this generates one application, so there is nothing to publish and no module name to
+# choose (the backend package is always `app`).
+#
+# Defaults here must stay behavior-preserving so `copier update --defaults` is a no-op
+# for existing projects.
+
+_min_copier_version: "9.5.0"
+_subdirectory: template
+
+package_name:
+  type: str
+  help: |
+    Project name (used for the GitHub repo, the frontend package name and the
+    backend project name).
+  default: changeme
+  validator: >-
+    {% if not (package_name | regex_search('^[a-z][a-z0-9]*(-[a-z0-9]+)*$')) %}
+    package_name must be lowercase kebab-case: start with a letter, then letters,
+    digits and single hyphens (e.g. my-app). One name has to satisfy npm, PEP 503,
+    GitHub and your filesystem at once, and this is their intersection.
+    {% endif %}
+
+package_description:
+  type: str
+  help: One-line description of the project.
+  default: changeme
+
+package_author_name:
+  type: str
+  help: Author name.
+  default: changeme
+
+package_author_email:
+  type: str
+  help: Author email.
+  default: changeme@example.com
+
+package_github_org:
+  type: str
+  help: GitHub org or username.
+  default: changeme
+
+package_license:
+  type: str
+  help: Which license?
+  default: MIT
+  choices:
+    - MIT
+    - Apache-2.0
+    - BSD-3-Clause
+    - AGPL-3.0-or-later
+    - Proprietary
+    - None
+
+# Computed, never asked. The frontend package.json needs an SPDX expression, and npm
+# spells "no license" as UNLICENSED.
+package_license_spdx:
+  type: str
+  when: false
+  default: >-
+    {% if package_license in ['None', 'Proprietary'] %}UNLICENSED{% else %}{{ package_license }}{% endif %}
+
+_message_after_copy: |
+
+  Your project is ready at {{ _copier_conf.dst_path }}.
+
+      cd {{ _copier_conf.dst_path }}
+      git init && git add . && git commit -m "Initial commit from agent-ready-fullstack-ts-python"
+      make install
+
+  Commit before `make install`: the installer activates this project's git hooks, and
+  that needs a repository to install them into.
+
+  Then, in one terminal:
+
+      make dev            # both halves: backend on :8000, frontend on :5173
+      make dev-frontend   # or just the frontend, in mock mode, with no backend at all
+
+  Check everything works:
+
+      make lint test      # both halves, then the contract suite across both
+
+  The agent-ready layer is opt-in. To use it, install Entire and enable it:
+
+      curl -fsSL https://entire.io/install.sh | bash && entire enable
+
+  Or delete `.claude/` and `.entire/` to opt out entirely.

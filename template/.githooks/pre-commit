@@ -1,0 +1,22 @@
+#!/bin/sh
+# Lint both halves before a commit lands. Each half is skipped when its toolchain
+# is absent rather than failing the commit, so a clone that has only run one half's
+# install still commits; CI runs both unconditionally.
+set -eu
+
+cd "$(git rev-parse --show-toplevel)"
+failed=0
+
+if command -v pnpm >/dev/null 2>&1 && [ -d frontend/node_modules ]; then
+    pnpm -C frontend lint:check || failed=1
+else
+    echo "pre-commit: skipping frontend checks (run 'make install' to enable them)"
+fi
+
+if command -v uv >/dev/null 2>&1 && [ -d backend/.venv ]; then
+    (cd backend && uv run --no-sync python devtools/lint.py --check) || failed=1
+else
+    echo "pre-commit: skipping backend checks (run 'make install' to enable them)"
+fi
+
+exit "$failed"

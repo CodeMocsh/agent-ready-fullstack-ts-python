@@ -1,0 +1,16 @@
+*.bak
+*.orig
+tmp/
+trash/
+attic/
+
+.DS_Store
+.idea/
+*.swp
+
+.entire/tmp/
+.entire/settings.local.json
+.entire/metadata/
+.entire/logs/
+.entire/redactors/local/
+.claude/settings.local.json

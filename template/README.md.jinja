@@ -1,0 +1,66 @@
+# {{ package_name }}
+
+{{ package_description }}
+
+A React frontend and a FastAPI backend in one repository, agreeing on a generated
+OpenAPI contract.
+
+## Quickstart
+
+```bash
+make install        # both halves, and the git hooks
+make dev            # backend on :8000, frontend on :5173
+```
+
+Or run the frontend alone, with no backend and no Python at all:
+
+```bash
+make dev-frontend   # mock mode: the handlers in frontend/src/mocks answer
+```
+
+## Layout
+
+```
+frontend/     React 19, Vite, TanStack Router + Query, Tailwind v4, MSW
+backend/      FastAPI, pydantic v2, uvicorn
+openapi.json  the contract -- generated from the backend, consumed by the frontend
+```
+
+Each half installs, lints, tests and builds on its own. `pnpm` runs in `frontend/`,
+`uv` in `backend/`, and `make` at the root fans out to both.
+
+## The contract
+
+The backend is the source of truth. After changing a model or a route:
+
+```bash
+make openapi        # regenerates openapi.json and frontend/src/api/schema.ts
+```
+
+Commit both alongside the change; CI fails if they drift. The frontend's mock handlers
+are typed against the spec, so a mock that disagrees with the backend is a build error
+rather than a surprise at runtime — and `make test-contract` runs one test suite against
+both implementations to prove they still agree.
+
+## Everyday commands
+
+```bash
+make lint           # both halves
+make test           # both halves, then the contract suite across both
+make build          # production build of the frontend
+make upgrade        # update dependencies, then regenerate the contract
+```
+
+See [docs/installation.md](docs/installation.md) for prerequisites,
+[docs/development.md](docs/development.md) for workflows, and
+[AGENTS.md](AGENTS.md) for how AI coding agents should work in this repo.
+
+## License
+
+{% if package_license == 'None' -%}
+No license has been chosen yet.
+{%- elif package_license == 'Proprietary' -%}
+Proprietary and confidential. See [LICENSE](LICENSE).
+{%- else -%}
+{{ package_license }}. See [LICENSE](LICENSE).
+{%- endif %}
