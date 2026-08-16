@@ -49,9 +49,11 @@ dev = [
 # ---- Settings ----
 
 [tool.uv]
-# Fail fast on old uv versions rather than misbehave. 0.9 is the floor where
-# exclude-newer accepts a relative duration like "14 days".
-required-version = ">=0.9"
+# Fail fast on old uv versions rather than misbehave. 0.11.25 is the floor where
+# exclude-newer accepts a relative duration rather than only an absolute date: 0.9.7
+# rejects "14 days" outright, and the failure names a date-parsing error rather than
+# the version, which is a bad afternoon.
+required-version = ">=0.11.25"
 # Safe project-level default for every uv command. CI and the Makefile repeat it so
 # copied commands and tool execution outside project discovery retain the same policy.
 exclude-newer = "14 days"

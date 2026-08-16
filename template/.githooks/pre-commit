@@ -1,22 +1,36 @@
 #!/bin/sh
-# Lint both halves before a commit lands. Each half is skipped when its toolchain
-# is absent rather than failing the commit, so a clone that has only run one half's
-# install still commits; CI runs both unconditionally.
+# Lint both halves, then check them against each other.
+#
+# Each step is skipped when its toolchain is absent rather than failing the commit,
+# so a clone that has installed only one half still commits. CI runs the two halves
+# unconditionally; the contract suite needs both toolchains in one place, which is
+# what a development machine is and what a single-toolchain CI job is not. That is
+# why it runs here.
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"
 failed=0
+has_frontend=0
+has_backend=0
 
 if command -v pnpm >/dev/null 2>&1 && [ -d frontend/node_modules ]; then
+    has_frontend=1
     pnpm -C frontend lint:check || failed=1
 else
     echo "pre-commit: skipping frontend checks (run 'make install' to enable them)"
 fi
 
 if command -v uv >/dev/null 2>&1 && [ -d backend/.venv ]; then
+    has_backend=1
     (cd backend && uv run --no-sync python devtools/lint.py --check) || failed=1
 else
     echo "pre-commit: skipping backend checks (run 'make install' to enable them)"
+fi
+
+if [ "$has_frontend" = "1" ] && [ "$has_backend" = "1" ]; then
+    sh devtools/contract-test.sh || failed=1
+else
+    echo "pre-commit: skipping the contract suite (it needs both halves installed)"
 fi
 
 exit "$failed"

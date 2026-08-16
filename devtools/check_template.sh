@@ -253,6 +253,9 @@ need_grep 'CONTRACT_TARGET' frontend/tests/contract.test.ts
 # Starting the mock worker during the live run would intercept the very requests
 # that run exists to make, and the suite would pass while proving nothing.
 need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
+# The contract suite has no CI job by design, so the hook is its only gate. A hook
+# that lints but never runs it would leave the check with nowhere to fire.
+need_grep 'contract-test.sh' .githooks/pre-commit
 
 echo "==> assert the quality gates"
 need_grep 'noExcessiveCognitiveComplexity' frontend/biome.json
@@ -294,6 +297,11 @@ need_grep 'minimumReleaseAge: 20160' frontend/pnpm-workspace.yaml
 need_grep 'trustPolicy: no-downgrade' frontend/pnpm-workspace.yaml
 need_grep 'semver@6.3.1' frontend/pnpm-workspace.yaml
 need_grep 'exclude-newer = "14 days"' backend/pyproject.toml
+# A relative duration needs a uv new enough to parse one. 0.9.7 rejects "14 days"
+# with a date-parsing error that names neither uv nor the version, so the floor and
+# the version CI installs have to agree, and both have to be at least this.
+need_grep 'required-version = ">=0.11.25"' backend/pyproject.toml
+need_grep 'version: "0.11.25"' .github/workflows/ci.yml
 need_grep 'UV_EXCLUDE_NEWER' Makefile
 need_grep 'UV_EXCLUDE_NEWER' .github/workflows/ci.yml
 # A tag moves; a commit does not.
