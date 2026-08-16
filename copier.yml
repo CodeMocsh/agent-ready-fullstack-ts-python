@@ -68,9 +68,13 @@ _message_after_copy: |
       cd {{ _copier_conf.dst_path }}
       git init && git add . && git commit -m "Initial commit from agent-ready-fullstack-ts-python"
       make install
+      git add frontend/pnpm-lock.yaml backend/uv.lock && git commit -m "Add lockfiles"
 
   Commit before `make install`: the installer activates this project's git hooks, and
-  that needs a repository to install them into.
+  that needs a repository to install them into. Commit the lockfiles it produces too --
+  no lockfile ships with the template, because a fresh project should resolve against
+  today's registry rather than the day the template was written, and CI installs from
+  the lockfiles with --frozen.
 
   Then, in one terminal:
 

@@ -314,6 +314,11 @@ fi
 # the action at that file the workflow dies before installing anything, which local
 # checks cannot see because they never run the workflow.
 need_grep 'package_json_file: frontend/package.json' .github/workflows/ci.yml
+# No lockfile ships, and CI installs frozen, so the first push of a generated project
+# fails unless the setup instructions say to commit the ones `make install` writes.
+need_absent frontend/pnpm-lock.yaml
+need_absent backend/uv.lock
+need_grep 'pnpm-lock.yaml' docs/installation.md
 
 echo "==> assert hook activation is worktree-safe"
 (

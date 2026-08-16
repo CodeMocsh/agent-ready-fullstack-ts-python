@@ -32,6 +32,12 @@ That runs `pnpm install` in `frontend/`, `uv sync --all-groups` in `backend/` (w
 installs the Python version pinned in `backend/.python-version`), and activates the
 versioned git hooks.
 
+It also writes `frontend/pnpm-lock.yaml` and `backend/uv.lock`, which do not ship with
+the template: a project generated today should resolve against today's registry rather
+than against whichever day the template was last touched. **Commit both.** CI installs
+from them with `--frozen-lockfile` and `--frozen`, so a push without them fails before
+it runs anything.
+
 If you only work on one half, install just that one:
 
 ```bash
