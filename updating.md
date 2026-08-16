@@ -13,8 +13,9 @@ Review the diff and resolve any `.rej` conflict files before committing. Two thi
 this project make an update slightly different from a single-stack one:
 
 - **`openapi.json` and `frontend/src/api/schema.ts` are contract artifacts.** If either
-  lands in a `.rej`, do not resolve it by hand. Take whichever side you like, then run `make
-  openapi` and commit what it produces. Hand-merging a generated file produces something
+  lands in a `.rej`, do not resolve it by hand. Take whichever side you like, run
+  `make openapi`, and commit what it produces. Hand-merging a generated file produces
+  something
   neither the backend nor the generator would ever emit, and the next `make openapi-check`
   says so.
 - **Run `make openapi` after any update that touched `backend/`.** `app.openapi()` is
@@ -76,8 +77,9 @@ a divergence looks exactly like a clean run.
   the layer that sits outside `template/`.
 - `template/AGENTS.md.jinja` — the *Approach* and *Zero comments* sections are meant to be
   word-for-word identical apart from language-specific examples. This repo's suppression
-  list names both ecosystems (`biome-ignore`, `@ts-expect-error`, `# noqa`, `# type:
-  ignore`) because it has both; that is a language difference, not drift.
+  list names all four suppressions — `biome-ignore`, `@ts-expect-error`, `# noqa` and
+  `# type: ignore` — because it has both ecosystems. That is a language difference, not
+  drift.
 - `template/devtools/install-hooks.sh` and the repo's own `devtools/install-hooks.sh` — the
   shim installer, and the reasoning comment about `core.hooksPath` that comes with it.
 - `template/frontend/devtools/complexity.mjs` and `conformance.mjs` — byte-identical to
@@ -166,33 +168,37 @@ There is no tooling for this. The honest process, assuming the siblings are chec
 beside this repo:
 
 ```bash
+py=../agent-ready-python
+ts=../agent-ready-ts
+
 # The guard: byte-identical, no exceptions.
-diff ../agent-ready-python/template/.claude/hooks/agent_guard.py \
-     template/.claude/hooks/agent_guard.py
+diff $py/template/.claude/hooks/agent_guard.py template/.claude/hooks/agent_guard.py
 
 # The Entire wiring, in the template and in this repo itself.
-diff ../agent-ready-python/template/.claude/settings.json template/.claude/settings.json
-diff ../agent-ready-python/.claude/settings.json          .claude/settings.json
-diff ../agent-ready-python/.entire/settings.json          .entire/settings.json
+diff $py/template/.claude/settings.json template/.claude/settings.json
+diff $py/.claude/settings.json          .claude/settings.json
+diff $py/.entire/settings.json          .entire/settings.json
 
 # The hook installer, both copies.
-diff ../agent-ready-python/devtools/install-hooks.sh          devtools/install-hooks.sh
-diff ../agent-ready-python/template/devtools/install-hooks.sh template/devtools/install-hooks.sh
+diff $py/devtools/install-hooks.sh          devtools/install-hooks.sh
+diff $py/template/devtools/install-hooks.sh template/devtools/install-hooks.sh
 
-# The frontend gate scripts: byte-identical to agent-ready-ts's, including the
-# metric name recorded in baselines.
-diff ../agent-ready-ts/template/devtools/complexity.mjs  template/frontend/devtools/complexity.mjs
-diff ../agent-ready-ts/template/devtools/conformance.mjs template/frontend/devtools/conformance.mjs
+# The frontend gate scripts, including the metric name recorded in baselines.
+diff $ts/template/devtools/complexity.mjs  template/frontend/devtools/complexity.mjs
+diff $ts/template/devtools/conformance.mjs template/frontend/devtools/conformance.mjs
 ```
 
 The shared `AGENTS.md` prose needs a range, because the section that follows it differs per
 repo:
 
 ```bash
-shared() { sed -n '/^## Approach/,/^## \(Build and Test\|Vendored\|The two halves\)/p' "$1" | sed '$d'; }
+shared() {
+  sed -n "/^## Approach/,/^## \(Build and Test\|Vendored\|The two halves\)/p" "$1" |
+    sed '$d'
+}
 
-diff <(shared ../agent-ready-python/template/AGENTS.md.jinja) <(shared template/AGENTS.md.jinja)
-diff <(shared ../agent-ready-ts/template/AGENTS.md)           <(shared template/AGENTS.md.jinja)
+diff <(shared $py/template/AGENTS.md.jinja) <(shared template/AGENTS.md.jinja)
+diff <(shared $ts/template/AGENTS.md)       <(shared template/AGENTS.md.jinja)
 ```
 
 Anything that differs is either a deliberate language difference — a docstring against a

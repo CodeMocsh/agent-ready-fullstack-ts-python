@@ -7,9 +7,9 @@ Accepted, 2026-08-16.
 ## Context
 
 This template has two siblings with two different answers to the same question.
-agent-ready-ts ships a bespoke, zero-dependency Node CLI: `render.ts` implements `{{ token
-}}` substitution in file contents and path names, plus a `.if-license` filename suffix for
-conditional files, and `cli.ts` handles prompts and disk. agent-ready-python uses
+agent-ready-ts ships a bespoke, zero-dependency Node CLI: `render.ts` substitutes a
+double-braced token in file contents and path names, plus a `.if-license` filename suffix
+for conditional files, and `cli.ts` handles prompts and disk. agent-ready-python uses
 [Copier](https://copier.readthedocs.io/) and ships no generator code at all.
 
 Either precedent is defensible here. This template's frontend half is lifted from
@@ -64,10 +64,10 @@ so pulling a later template improvement is one command and a conflict resolution
 a manual diff.
 
 There is no `src/`, no `package.json`, no `licenses/` directory and no unit-test job in CI.
-Conditional files are expressed as Jinja in the filename (`{% if package_license != 'None'
-%}LICENSE{% endif %}.jinja`) and license bodies as a single if/elif chain, because Copier
-already has the expression language that `.if-license` and a `licenses/` directory exist to
-work around. The repo's own checks collapse to one script.
+Conditional files are expressed as Jinja in the filename — the LICENSE file is emitted by a
+name that evaluates empty when no license was chosen — and license bodies as a single
+if/elif chain, because Copier already has the expression language that `.if-license` and a
+`licenses/` directory exist to work around. The repo's own checks collapse to one script.
 
 **Negative.** The mechanics now diverge from agent-ready-ts, which is the sibling this
 template shares the most *content* with. A frontend change ported from there cannot be

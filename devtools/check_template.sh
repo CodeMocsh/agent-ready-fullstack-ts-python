@@ -301,6 +301,11 @@ if grep -E 'uses: .*@v[0-9]' .github/workflows/ci.yml; then
     echo "the workflow above pins an action by tag rather than by commit" >&2
     exit 1
 fi
+# pnpm/action-setup reads its version from a package.json at the repository root, and
+# this project deliberately has none -- the frontend half owns it. Without pointing
+# the action at that file the workflow dies before installing anything, which local
+# checks cannot see because they never run the workflow.
+need_grep 'package_json_file: frontend/package.json' .github/workflows/ci.yml
 
 echo "==> assert hook activation is worktree-safe"
 (

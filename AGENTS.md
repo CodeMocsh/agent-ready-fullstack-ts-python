@@ -109,8 +109,8 @@ it is invisible to every automatic skip. It has to be named in `files.includes` 
 and in `conformance.exclude` in the same file. Two out of three passes today and fails later
 for reasons that will not be obvious. `check_template.sh` asserts all three.
 
-`devtools/check_template.sh` catches every one of these, but only in a full run — `make
-fast` will not.
+`devtools/check_template.sh` catches every one of these, but only in a full run.
+`make fast` will not.
 
 ## Making Changes
 
@@ -138,8 +138,8 @@ all pass green on a project whose frontend cannot reach its backend at all.
 
 No step downloads a browser. The generated project ships Playwright specs, in mock mode and
 in live mode, and neither runs in CI — a deliberate trade recorded in
-`template/docs/development.md`. If you change UI in `template/frontend/`, run `pnpm
-test:e2e` inside a rendered project yourself.
+`template/docs/development.md`. If you change UI in `template/frontend/`, run
+`pnpm test:e2e` inside a rendered project yourself.
 
 ## Distribution
 

@@ -19,9 +19,10 @@ runtime it chooses for itself. A build backend with no wheel to build, a version
 reads, and a compatibility matrix across four interpreters the deployment will never use are
 all ceremony around an artifact that is never produced.
 
-There is a second reason to be deliberate here. A spike found that with `requires-python =
-">=3.12"` and no `.python-version`, uv resolved the environment to whatever the system
-happened to offer — Python 3.14.7 on the machine in question. A range plus no pin is not
+There is a second reason to be deliberate here. A spike found that with a `requires-python`
+lower bound of 3.12 and no `.python-version`, uv resolved the environment to whatever the
+system happened to offer — Python 3.14.7 on the machine in question. A range plus no pin is
+not
 "supports many versions"; it is "runs on whichever one you happened to have", which is the
 failure mode a matrix is supposed to prevent and does not.
 

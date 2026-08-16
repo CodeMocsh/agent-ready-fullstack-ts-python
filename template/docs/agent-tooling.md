@@ -287,8 +287,9 @@ rather than a silent one. `conformance.exclude` mirrors the paths that `biome.js
 ### Why a script and not biome rules
 
 Biome has no rule for Tailwind tokens; `noHexColors` reaches CSS only, and the nursery rules
-that come closest are renamed and promoted between minor releases, which would break `pnpm
-lint` on an upgrade. A script also has somewhere to put an exception. The one check biome
+that come closest are renamed and promoted between minor releases, which would break
+`pnpm lint` on an upgrade. A script also has somewhere to put an exception. The one check
+biome
 *does* have — the per-file limit — is configured in `biome.json` rather than reimplemented
 here, so it lights up in the editor as you type.
 

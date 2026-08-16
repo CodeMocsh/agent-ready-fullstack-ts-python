@@ -22,9 +22,10 @@ tested in place; it only becomes any of those once rendered.
 _Avoid_: boilerplate, skeleton, starter
 
 **Generated project**:
-The output of running the generator — a real project on a user's disk, no longer coupled to
-this repo. It records the answers it was rendered from in `.copier-answers.yml`, which is what
-`copier update` reads. It is fine to call one "the app"; `app/` is only ever a directory name.
+The output of running the generator — a real project on a user's disk, no longer coupled
+to this repo. It records the answers it was rendered from in `.copier-answers.yml`, which
+is what `copier update` reads. It is fine to call one "the app"; `app/` is only ever a
+directory name.
 _Avoid_: rendered template, output, instance
 
 **Half**:
@@ -35,21 +36,21 @@ _Avoid_: app, side, package, workspace, service
 
 **Contract artifact**:
 A committed file derived from backend code that encodes the contract: `openapi.json` and
-`frontend/src/api/schema.ts`. Never hand-edited; changed only by `make openapi`. The opposite
-of vendored code, which a tool wrote but you own and may edit.
+`frontend/src/api/schema.ts`. Never hand-edited; changed only by `make openapi`. The
+opposite of vendored code, which a tool wrote but you own and may edit.
 _Avoid_: generated types, the schema, spec files
 
 **Agent-ready layer**:
-The portion of the template that is deliberately stack-independent: the `AGENTS.md` *Approach*
-and *Zero comments* sections, the Entire session-tracking hooks, the agent guard, and the
-one-check-script contract shared by CI and the pre-commit hook. It is the only thing kept in
-step with the two siblings.
+The portion of the template that is deliberately stack-independent: the `AGENTS.md`
+*Approach* and *Zero comments* sections, the Entire session-tracking hooks, the agent
+guard, and the one-check-script contract shared by CI and the pre-commit hook. It is the
+only thing kept in step with the two siblings.
 _Avoid_: agent tooling, agent setup, the Claude layer
 
 **Vendored code**:
 Third-party source that lands inside a generated project's own tree rather than in
-`node_modules` — shadcn components and the Mock Service Worker script. It is committed but not
-authored here, so the rules that govern authored source do not reach it.
+`node_modules` — shadcn components and the Mock Service Worker script. It is committed but
+not authored here, so the rules that govern authored source do not reach it.
 _Avoid_: generated code, copied code, third-party code
 
 **Mock mode**:

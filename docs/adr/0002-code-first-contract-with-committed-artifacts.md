@@ -81,8 +81,9 @@ guardrail before it.
 
 Generated files conflict in merges, and the conflicts are unreadable. A three-way merge of
 an OpenAPI document produces something neither the generator nor the backend would emit, and
-it will type-check. The rule is absolute: take either side wholesale, then run `make
-openapi`. That rule has to be stated in `AGENTS.md` and in `docs/development.md`, because
+it will type-check. The rule is absolute: take either side wholesale, then regenerate with
+`make openapi`. That rule has to be stated in `AGENTS.md` and in `docs/development.md`,
+because
 the default instinct — for a person and for an agent — is to resolve it by hand.
 
 The artifacts churn on dependency upgrades. `app.openapi()` is deterministic for pinned
