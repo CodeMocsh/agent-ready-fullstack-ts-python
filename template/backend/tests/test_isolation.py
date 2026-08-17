@@ -14,7 +14,7 @@ from typing import Any
 import asyncpg
 import pytest
 
-from app.store.ddl import TENANT_GUC
+from app.store.ddl import TENANT_GUC, TENANT_TABLES
 from app.store.migrate import SchemaBehindError, apply, check
 from tests.conftest import Provisioned, a_fresh_schema_name, connect, drop_schema, postgres_dsn
 
@@ -72,7 +72,8 @@ async def test_force_is_set_on_the_tenant_table_and_not_on_the_ledger(
             provisioned.schema,
         )
         state = {r["relname"]: (r["relrowsecurity"], r["relforcerowsecurity"]) for r in rows}
-        assert state["tasks"] == (True, True)
+        for table in TENANT_TABLES:
+            assert state[table] == (True, True), table
         assert state["applied_once"] == (False, False), "the ledger is not tenant data"
     finally:
         await conn.close()

@@ -347,3 +347,68 @@ def test_a_schema_name_too_long_to_derive_a_role_from_is_refused() -> None:
     schema names could silently share one role."""
     with pytest.raises(InvalidSchemaName):
         resolve_schema("s" * 57)
+
+
+EXEMPT_FROM_ISOLATION = frozenset({"applied_once"})
+"""Tables that hold no tenant data, named one at a time.
+
+The ledger is the only one: a schema version belongs to the deployment rather than to anybody,
+and a policy on it would hide it from the role whose only job is to read it. Adding a name here
+is how you say "this is not tenant data" -- out loud, in a diff, rather than by omission.
+"""
+
+
+def created_tables() -> set[str]:
+    return {
+        name
+        for _, sql in statements(DEFAULT_SCHEMA)
+        for name in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", sql)
+    }
+
+
+def test_every_table_is_isolated_or_explicitly_exempt() -> None:
+    """The rule that keeps going multi-tenant later from costing anything.
+
+    `TENANT_TABLES` drives both the policy and the `FORCE`, so a table added to `SCHEMA` and
+    not to that tuple gets neither -- no error, no failing test, just a table every tenant can
+    read. It is the exact failure this design exists to prevent, arriving through the one door
+    the design left open, and it would be found by an audit rather than by a build.
+    """
+    unaccounted = created_tables() - set(ddl.TENANT_TABLES) - EXEMPT_FROM_ISOLATION
+    assert not unaccounted, (
+        f"{sorted(unaccounted)} is created by SCHEMA but is in neither TENANT_TABLES nor "
+        f"EXEMPT_FROM_ISOLATION, so it carries no policy and is readable across every "
+        f"tenant. Add it to one or the other."
+    )
+
+
+def test_every_isolated_table_actually_exists() -> None:
+    """The mirror. A name in `TENANT_TABLES` with no table behind it emits a policy for
+    something that is not there, and fails on a real server rather than here."""
+    missing = set(ddl.TENANT_TABLES) - created_tables()
+    assert not missing, f"{sorted(missing)} is in TENANT_TABLES and created by nothing"
+
+
+def test_every_tenant_table_carries_the_column_and_the_constraint() -> None:
+    """A table can be in `TENANT_TABLES` and still be wrong.
+
+    Without the column the policy fails at migration time, which is loud and fine. The `CHECK`
+    is the quiet one: without it a row can carry an empty tenant, and an empty tenant is what
+    every connection that never set one compares against -- a cross-tenant read produced by a
+    data bug, which no policy prevents.
+    """
+    for table in ddl.TENANT_TABLES:
+        create = next(
+            (
+                s
+                for _, s in statements(DEFAULT_SCHEMA)
+                if f"CREATE TABLE IF NOT EXISTS {table}" in s
+            ),
+            None,
+        )
+        assert create is not None, table
+        assert "tenant_id" in create, f"{table} is in TENANT_TABLES and has no tenant_id column"
+        assert "tenant_id <> ''" in create, (
+            f"{table} may store an empty tenant_id, which every connection that set no tenant "
+            f"can read. Add CHECK (tenant_id <> '')."
+        )
