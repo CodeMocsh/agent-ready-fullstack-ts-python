@@ -1,11 +1,19 @@
+{%- macro q(value) -%}
+{#- Every answer below is free-form text landing in hand-written TOML, so a quote or
+    a backslash in one would produce a file no tool can parse. `tojson` emits the
+    whole literal, quotes included, and every escape it produces is also a valid TOML
+    basic-string escape; the replaces undo its HTML-safety escaping of & < > ', which
+    is valid but unreadable in a file a person opens. -#}
+{{ value | tojson | replace('\\u0027', "'") | replace('\\u0026', '&') | replace('\\u003c', '<') | replace('\\u003e', '>') }}
+{%- endmacro -%}
 # ---- Project Info and Dependencies ----
 
 [project]
-name = "{{ package_name }}-backend"
+name = {{ q(package_name ~ "-backend") }}
 version = "0.0.0"
-description = "{{ package_description }} -- backend"
+description = {{ q(package_description ~ " -- backend") }}
 authors = [
-    { name="{{ package_author_name }}", email="{{ package_author_email }}" },
+    { name = {{ q(package_author_name) }}, email = {{ q(package_author_email) }} },
 ]
 {%- if package_license == 'None' %}
 # No license chosen yet. When you pick one, set an SPDX expression here and add a
@@ -19,10 +27,23 @@ license = "{{ 'LicenseRef-Proprietary' if package_license == 'Proprietary' else 
 # the same number so uv, CI and your laptop agree.
 requires-python = ">=3.12"
 
+# Bounded on both sides, which a bare floor is not. No lockfile ships with a new
+# project, so these ranges alone decide what a generation next month resolves --
+# and `openapi.json` is a committed artifact that CI diffs. FastAPI and pydantic
+# both emit part of that spec, so a minor bump of either can turn a green project
+# red with no change to any file in it. Each cap stops at the next breaking line --
+# a minor for the two 0.x packages, 2.14 for pydantic -- which makes an upgrade a
+# deliberate edit followed by `make openapi` rather than a surprise. uvicorn writes
+# no part of the contract but is the server this half is deployed on, which is
+# reason enough not to let it change under a project nobody touched.
+#
+# Dev dependencies below are deliberately left open. Nothing they do reaches a
+# committed artifact, and a new ruff release failing the lint is an alert worth
+# having rather than a break worth preventing.
 dependencies = [
-    "fastapi>=0.140.0",
-    "uvicorn[standard]>=0.38.0",
-    "pydantic>=2.12.0",
+    "fastapi>=0.140.0,<0.142.0",
+    "uvicorn[standard]>=0.38.0,<0.53.0",
+    "pydantic>=2.12.0,<2.14.0",
 ]
 
 # There is deliberately no [build-system] table and no [project.scripts]. This half

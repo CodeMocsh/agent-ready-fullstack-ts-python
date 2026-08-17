@@ -23,6 +23,24 @@ trustPolicy: no-downgrade
 trustPolicyExclude:
   - 'semver@6.3.1'
 
+# The cool-off has a cost, and this is what it looks like: a patch that fixes a
+# high-severity advisory is unavailable for the same fortnight as everything else,
+# so a fresh install resolves the vulnerable version instead. nanoid reaches this
+# project through vite -> postcss, and every version below 3.3.18 carries
+# GHSA-2v37-7h3g-55p8 (a custom generator can loop forever when size is 0).
+#
+# The floor is the fix and stays. The exclusion is what lets the floor resolve
+# before 3.3.18 matures, and it is pinned to that exact version -- the same shape
+# as trustPolicyExclude above and for the same reason. A bare `nanoid` here would
+# exempt every future release of it from the cool-off, which is a permanent hole
+# opened to close a temporary one. Once 3.3.19 exists, this entry buys nothing and
+# should go.
+minimumReleaseAgeExclude:
+  - 'nanoid@3.3.18'
+
+overrides:
+  nanoid: '^3.3.18'
+
 # pnpm blocks dependency install scripts by default, which is the right default
 # and the reason this list is short. msw is the one exception: its postinstall
 # rewrites public/mockServiceWorker.js to match the installed msw version, and

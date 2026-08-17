@@ -16,6 +16,11 @@ import {
 
 const TASKS_KEY = ["tasks"] as const;
 
+const SERVED_BY =
+  import.meta.env.VITE_ENABLE_MSW === "true"
+    ? "Mock mode — Mock Service Worker is answering. No backend is running."
+    : "Live mode — the backend is answering.";
+
 export function TaskList() {
   const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
@@ -54,9 +59,7 @@ export function TaskList() {
     <main className="mx-auto flex max-w-2xl flex-col gap-6 p-8">
       <header className="flex flex-col gap-1">
         <h1 className="font-heading text-2xl font-semibold">Tasks</h1>
-        <p className="text-muted-foreground text-sm">
-          Served by Mock Service Worker. No backend is running.
-        </p>
+        <p className="text-muted-foreground text-sm">{SERVED_BY}</p>
       </header>
 
       <form onSubmit={submit} className="flex gap-2">

@@ -56,7 +56,9 @@ _Avoid_: generated code, copied code, third-party code
 **Mock mode**:
 A generated project's frontend running with its Mock Service Worker handlers intercepting
 network calls, so the frontend half is fully usable with no backend behind it. A build-time
-flag, not a code path the application is aware of.
+flag rather than a branch through the application: `VITE_ENABLE_MSW` decides whether the
+worker starts, and the only other thing that may read it is the line of UI saying which
+half is answering. No feature behaves differently between the modes.
 _Avoid_: mocking, offline mode, dev mode
 
 **Live mode**:

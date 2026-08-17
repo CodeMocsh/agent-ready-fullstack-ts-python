@@ -19,9 +19,20 @@ backend_pid=""
 frontend_pid=""
 log="$(mktemp)"
 
-cleanup() {
+signal_halves() {
     for pid in $frontend_pid $backend_pid; do
-        kill -- -"$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+        kill -"$1" -- -"$pid" 2>/dev/null || kill -"$1" "$pid" 2>/dev/null || true
+    done
+}
+
+cleanup() {
+    # Ask, wait a moment, then insist. A launcher that does not exit after its child
+    # is gone would leave this blocked in `wait` forever, holding :5173 -- and the
+    # next run dies on --strictPort, in CI, for a reason that is nowhere in the log.
+    signal_halves TERM
+    sleep 1
+    signal_halves KILL
+    for pid in $frontend_pid $backend_pid; do
         wait "$pid" 2>/dev/null || true
     done
     rm -f "$log"

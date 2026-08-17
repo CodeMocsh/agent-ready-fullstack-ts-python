@@ -14,6 +14,13 @@ describe("TaskList", () => {
     expect(screen.getByText("Run the app in mock mode")).toBeInTheDocument();
   });
 
+  it("says which half is answering", async () => {
+    renderWithQuery(<TaskList />);
+
+    expect(await screen.findByText(/Mock mode/)).toBeInTheDocument();
+    expect(screen.queryByText(/Live mode/)).not.toBeInTheDocument();
+  });
+
   it("adds a task and shows it in the table", async () => {
     const user = userEvent.setup();
     renderWithQuery(<TaskList />);

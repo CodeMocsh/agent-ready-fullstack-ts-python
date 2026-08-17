@@ -121,6 +121,82 @@ if [ -n "$(find . -name '*.jinja' 2>/dev/null)" ]; then
     exit 1
 fi
 
+if [ "$VARIANT" = "default" ]; then
+    echo "==> assert hostile answers stay data, not syntax"
+    # Four of the six questions are free-form prose, and two of the files they land
+    # in are hand-written JSON and TOML. An answer interpolated raw takes its quotes
+    # and backslashes with it, and the result is a manifest no tool can parse -- a
+    # failure that surfaces in someone else's project, on `pnpm install`, with
+    # nothing in the diff to suggest why. This renders what a person could plausibly
+    # type and parses both manifests back. It runs once: nothing here varies with
+    # the license.
+    HOSTILE="$WORK/hostile"
+    H_DESC='A "quoted" project: Bob'"'"'s tasks & <friends>, C:\notes'
+    H_AUTHOR='O'"'"'Brien "Bob" \ Tester'
+    H_EMAIL="o'brien@example.com"
+    H_ORG='test"org'
+    export H_DESC H_AUTHOR H_EMAIL H_ORG
+    uvx --exclude-newer "14 days" "$COPIER_SPEC" copy --defaults --quiet --trust \
+        --vcs-ref=HEAD \
+        --data package_name=smoke-test \
+        --data package_description="$H_DESC" \
+        --data package_author_name="$H_AUTHOR" \
+        --data package_author_email="$H_EMAIL" \
+        --data package_github_org="$H_ORG" \
+        "$SRC" "$HOSTILE"
+    python3 - "$HOSTILE" <<'PY'
+import json
+import os
+import sys
+import tomllib
+
+out = sys.argv[1]
+desc = os.environ["H_DESC"]
+author = os.environ["H_AUTHOR"]
+email = os.environ["H_EMAIL"]
+org = os.environ["H_ORG"]
+
+FIX = """
+check: every free-form answer must go through the q() macro that package.json.jinja
+       and pyproject.toml.jinja each define at the top -- `{{ q(package_description) }}`,
+       not `"{{ package_description }}"` -- including answers concatenated with
+       literal text. Raw interpolation carries the user's quotes and backslashes
+       into the manifest as syntax.
+"""
+
+
+def die(message):
+    print(f"check: {message}", file=sys.stderr)
+    print(FIX, file=sys.stderr)
+    raise SystemExit(1)
+
+
+try:
+    with open(f"{out}/frontend/package.json", encoding="utf-8") as handle:
+        pkg = json.load(handle)
+except ValueError as error:
+    die(f"the rendered frontend/package.json is not valid JSON: {error}")
+try:
+    with open(f"{out}/backend/pyproject.toml", "rb") as handle:
+        project = tomllib.load(handle)["project"]
+except tomllib.TOMLDecodeError as error:
+    die(f"the rendered backend/pyproject.toml is not valid TOML: {error}")
+
+# Parsing is half the check: a value can survive it and still come out mangled, so
+# every answer is compared against what went in.
+for label, got, want in (
+    ("package.json description", pkg["description"], desc),
+    ("package.json author", pkg["author"], {"name": author, "email": email}),
+    ("package.json repository url", pkg["repository"]["url"],
+     f"git+https://github.com/{org}/smoke-test.git"),
+    ("pyproject description", project["description"], f"{desc} -- backend"),
+    ("pyproject authors", project["authors"], [{"name": author, "email": email}]),
+):
+    if got != want:
+        die(f"{label} came out as {got!r}, not {want!r}")
+PY
+fi
+
 echo "==> assert the agent guard"
 # The guard is a heuristic backstop, and both directions of the heuristic have a
 # cost: a miss lets a catastrophic command through, and a false hit teaches agents
@@ -264,9 +340,24 @@ need_grep 'CONTRACT_TARGET' frontend/tests/contract.test.ts
 # Starting the mock worker during the live run would intercept the very requests
 # that run exists to make, and the suite would pass while proving nothing.
 need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
-# The contract suite has no CI job by design, so the hook is its only gate. A hook
-# that lints but never runs it would leave the check with nowhere to fire.
+# The contract suite is the only check that can fail on the two halves not
+# interoperating, and it has two callers for one reason: the hook skips itself when
+# a clone has installed only one half, so on its own it is a signal and not a gate.
 need_grep 'contract-test.sh' .githooks/pre-commit
+need_grep 'make test-contract' .github/workflows/ci.yml
+# That job is the one place the single-toolchain rule is broken on purpose, and it
+# needs both setups to be right: pnpm cannot find a version without being pointed at
+# the half's package.json, and uv below the floor rejects the relative cool-off.
+python3 - <<'PY'
+import re
+
+workflow = open(".github/workflows/ci.yml", encoding="utf-8").read()
+job = re.search(r"^  contract:\n(  .*\n|\n)*", workflow, re.M)
+assert job is not None, "the generated workflow has no contract job"
+body = job.group(0)
+assert "package_json_file: frontend/package.json" in body, body
+assert 'version: "0.11.25"' in body, body
+PY
 
 echo "==> assert the quality gates"
 need_grep 'noExcessiveCognitiveComplexity' frontend/biome.json
@@ -308,6 +399,31 @@ need_grep 'minimumReleaseAge: 20160' frontend/pnpm-workspace.yaml
 need_grep 'trustPolicy: no-downgrade' frontend/pnpm-workspace.yaml
 need_grep 'semver@6.3.1' frontend/pnpm-workspace.yaml
 need_grep 'exclude-newer = "14 days"' backend/pyproject.toml
+# An exclusion buys back one specific package from one specific policy, and the whole
+# value of that is in how narrow it is. A bare name exempts every future release of
+# it too, which is a permanent hole opened to close a temporary one.
+python3 - <<'PY'
+import re
+
+text = open("frontend/pnpm-workspace.yaml", encoding="utf-8").read()
+for key in ("trustPolicyExclude", "minimumReleaseAgeExclude"):
+    block = re.search(rf"^{key}:\n((?:[ \t]*-[ \t].*\n)+)", text, re.M)
+    if block is None:
+        continue
+    for line in block.group(1).splitlines():
+        entry = line.strip().lstrip("-").strip().strip("\"'")
+        assert "@" in entry.lstrip("@"), f"{key} entry is not pinned to a version: {entry}"
+PY
+# A floor alone lets a release published next month decide what a project generated
+# next month resolves -- and fastapi and pydantic both write part of openapi.json,
+# which is committed and diffed in CI. Runtime dependencies are bounded both ways.
+python3 - <<'PY'
+import tomllib
+
+deps = tomllib.load(open("backend/pyproject.toml", "rb"))["project"]["dependencies"]
+unbounded = [dep for dep in deps if "<" not in dep]
+assert not unbounded, f"runtime dependencies with no upper bound: {unbounded}"
+PY
 # A relative duration needs a uv new enough to parse one. 0.9.7 rejects "14 days"
 # with a date-parsing error that names neither uv nor the version, so the floor and
 # the version CI installs have to agree, and both have to be at least this.
@@ -453,6 +569,54 @@ run "pytest" sh -c 'cd backend && uv run pytest -q'
 
 echo "==> frontend: install, lint, test, build"
 run "pnpm install" pnpm -C frontend install --prefer-offline
+
+echo "==> assert a fresh install ships no known high-severity vulnerability"
+# The cool-off delays a security patch exactly as long as it delays anything else,
+# so for a fortnight after a fix the only resolvable version is the vulnerable one.
+# No file in this repository changes when that happens and no other check notices:
+# the audit runs against what a new project actually resolved, today. The fix is an
+# exact minimumReleaseAgeExclude entry naming the patched version, never a wider
+# policy. This runs against production dependencies only -- a vulnerable linter is
+# not something a user of a generated project ships.
+# Only stdout is captured: `audit` exits non-zero on a finding, so the exit status
+# cannot be trusted here, and anything it says about why it could not run belongs on
+# the console rather than in a file nobody reads.
+pnpm -C frontend audit --prod --json >"$WORK/audit.json" || true
+python3 - "$WORK/audit.json" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        report = json.load(handle)
+except (OSError, ValueError):
+    # A registry that cannot be reached is not a vulnerability, and failing here
+    # would teach people that a red run means the network. Say so and move on.
+    print("check: pnpm audit returned no report; skipping (registry unreachable?)")
+    raise SystemExit(0)
+
+serious = [
+    advisory
+    for advisory in (report.get("advisories") or {}).values()
+    if advisory.get("severity") in ("high", "critical")
+]
+for advisory in serious:
+    print(
+        f"check: {advisory['severity']} {advisory['module_name']} "
+        f"{advisory.get('vulnerable_versions')} -- {advisory.get('github_advisory_id')}\n"
+        f"       patched in {advisory.get('patched_versions')}: {advisory.get('url')}",
+        file=sys.stderr,
+    )
+if serious:
+    print(
+        "check: pin the patched version in template/frontend/pnpm-workspace.yaml, with\n"
+        "       an exact minimumReleaseAgeExclude entry if it has not aged past the\n"
+        "       cool-off yet.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+PY
+
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
 run "vite build" pnpm -C frontend build
@@ -479,5 +643,108 @@ echo "==> the contract suite, against both implementations"
 # frontend cannot reach its backend at all.
 run "contract suite (mocks)" pnpm -C frontend test:contract
 run "contract suite (live backend)" make test-contract
+
+echo "==> the dev loop starts both halves, and Ctrl-C stops both halves"
+# `make dev` is the command every user of a generated project runs first and runs
+# most, and the way it breaks leaves no trace in a diff: anything that replaces the
+# shell -- an `exec`, a `cd &&` chain ending in one -- discards the cleanup trap, so
+# stopping the frontend leaves uvicorn holding :8000. The next `make dev` dies on a
+# port nothing visible is using, in a different session, and the cause is thirty
+# lines up a file nobody is looking at. The greps above catch that one edit coming
+# back; this starts it for real and stops it the way a person does.
+#
+# It runs under a pty because nothing else is faithful. dev.sh keeps the frontend in
+# the foreground so vite owns the terminal, which means a signal sent to the script
+# alone cannot be handled until vite returns -- a plain `kill` would deadlock here
+# and prove nothing. Writing 0x03 to the pty master makes the line discipline raise
+# SIGINT on the foreground process group, which is what the key does.
+python3 - "$OUT" <<'PY'
+import os
+import pty
+import signal
+import subprocess
+import sys
+import time
+
+BACKEND = "http://localhost:8000/tasks"
+PROXY = "http://localhost:5173/api/tasks"
+
+
+def serving(url):
+    return subprocess.run(
+        ["curl", "-fsS", "--max-time", "2", url],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+
+# Before starting anything: a port already in use makes every assertion below lie.
+# dev.sh would fail to bind, the readiness probe would be answered by whatever is
+# already there, and the check would report that dev.sh stranded a server -- naming
+# the one bug it is here to catch, on a run where it did nothing wrong.
+already = " and ".join(n for n, u in ((":8000", BACKEND), (":5173", PROXY)) if serving(u))
+if already:
+    print(f"check: {already} already in use before dev.sh started -- something else is\n"
+          f"       serving it (another `make dev`?). Stop it and run this again.",
+          file=sys.stderr)
+    raise SystemExit(1)
+
+pid, master = pty.fork()
+if pid == 0:
+    os.chdir(sys.argv[1])
+    os.execvp("sh", ["sh", "devtools/dev.sh"])
+
+os.set_blocking(master, False)
+output = bytearray()
+
+
+def drain():
+    # The child writes into a pty buffer of fixed size, so a reader that stops
+    # reading wedges the very process it is testing once that buffer fills.
+    while True:
+        try:
+            chunk = os.read(master, 65536)
+        except (BlockingIOError, OSError):
+            return
+        if not chunk:
+            return
+        output.extend(chunk)
+
+
+def until(predicate, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        drain()
+        if predicate():
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def die(message):
+    drain()
+    print(f"check: {message}", file=sys.stderr)
+    print("--- dev.sh output ---", file=sys.stderr)
+    sys.stderr.write(bytes(output).decode("utf-8", "replace"))
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except OSError:
+        pass
+    raise SystemExit(1)
+
+
+# Through :5173/api, so this waits on both halves and the proxy between them rather
+# than on the backend alone.
+if not until(lambda: serving(PROXY), 120):
+    die("dev.sh did not serve :5173/api within 120s")
+
+os.write(master, b"\x03")
+
+if not until(lambda: os.waitpid(pid, os.WNOHANG)[0] == pid, 30):
+    die("dev.sh was still running 30s after Ctrl-C")
+
+if not until(lambda: not serving(BACKEND) and not serving(PROXY), 15):
+    held = " and ".join(n for n, u in ((":8000", BACKEND), (":5173", PROXY)) if serving(u))
+    die(f"dev.sh exited but {held} still answering")
+PY
 
 echo "==> OK ($VARIANT)"

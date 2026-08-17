@@ -12,14 +12,17 @@ permissions:
 env:
   UV_EXCLUDE_NEWER: "14 days"
 
-# Two jobs, one per half, neither installing the other's toolchain. Between them
-# they prove the committed contract artifacts match the backend code and each
-# other: the backend job regenerates the spec from the code, the frontend job
-# regenerates the types from the spec.
+# Three jobs. Two of them are one per half, neither installing the other's
+# toolchain: between them they prove the committed contract artifacts match the
+# backend code and each other, since the backend job regenerates the spec from the
+# code and the frontend job regenerates the types from the spec.
 #
-# The contract suite that runs both halves together is deliberately not here -- it
-# needs both toolchains in one job. It runs from the pre-commit hook and `make test`
-# instead; docs/development.md carries the job to paste in if you want it enforced.
+# The third installs both and runs the contract suite with the backend actually
+# serving the frontend. It is the only job that can fail on the two halves not
+# interoperating -- everything above it passes on a project whose frontend cannot
+# reach its backend at all. The pre-commit hook runs the same suite, but it skips
+# itself on a clone that has installed only one half, so the hook alone is not a
+# gate.
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -84,3 +87,40 @@ jobs:
           uv run python devtools/export_openapi.py ../openapi.json
           git diff --exit-code -- ../openapi.json \
             || { echo "Run 'make openapi' and commit the result." >&2; exit 1; }
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          # There is no root package.json; the version lives in the half's own.
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          # backend/pyproject.toml requires this floor: older uv rejects the
+          # relative exclude-newer with a date-parsing error naming neither.
+          version: "0.11.25"
+          enable-cache: true
+
+      # Installed directly rather than through `make install`, which resolves fresh
+      # and installs git hooks. Both other jobs install frozen and so does this one.
+      - run: pnpm -C frontend install --frozen-lockfile
+
+      - name: Install the backend
+        working-directory: backend
+        run: |
+          uv python install
+          uv sync --all-groups --frozen
+
+      - run: make test-contract
