@@ -289,13 +289,27 @@ with one it runs on Postgres. `make db` brings up a persistent Postgres, applies
 init and the schema the way a release does, and prints the `DATABASE_URL` to export.
 
 ```bash
-make db          # postgres + roles + schema, and the URL to export
-make db-demo     # two tenants against one table, so the isolation is visible
-make db-test     # the opt-in tier: contract, migration and isolation suites
-make migrate     # the release step
-make schema      # regenerate deploy/schema.sql after a migration entry
-make roles       # regenerate deploy/roles.sql after a role change
+make db               # postgres + roles + schema, and the URL to export
+make db-demo          # two tenants against one table, so the isolation is visible
+make db-test          # the opt-in tier: contract, migration and isolation suites
+make test-contract-db # the contract suite against a backend really on Postgres
+make migrate          # the release step
+make schema           # regenerate deploy/schema.sql after a migration entry
+make roles            # regenerate deploy/roles.sql after a role change
 ```
+
+`make test-contract` and `make test-contract-db` run the same file and are not the same test.
+The first is in the gate and runs against the in-memory substrate: it proves the two halves
+agree and proves nothing about the SQL underneath. The second brings up a database, applies
+the roles and the schema, and serves as **`app_app`** -- the least-privilege login a
+deployment gets -- so one run covers the pool, real SQL, and the policy deciding what comes
+back.
+
+Serving as the application role rather than the superuser is the whole point: a superuser
+bypasses row-level security whatever `FORCE` says, so a run wired to the admin connection
+would pass against a database with no isolation in force. Verified by breaking it -- delete
+the `set_config` call in `app/store/pg.py` and this target fails with three `500`s, where the
+same mutation under a superuser connection passes.
 
 ### The application does not migrate itself
 
