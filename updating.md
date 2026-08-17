@@ -206,8 +206,10 @@ JSDoc, `# noqa` against `biome-ignore` — or drift. If you cannot tell which, i
 
 ### Owed upstream
 
-Scaffolding this repo obligates two small PRs, one to each sibling, adding a pointer
-paragraph to their own `updating.md` files: that a third repo now consumes the agent-ready
-layer, that it never originates changes to it, and that a shared-layer change made there
-should be expected to arrive as a PR rather than as a fork. Neither sibling has to do
-anything differently; they just need to know the layer has a third reader.
+Nothing, now. Scaffolding this repo obligated two small PRs, one to each sibling, adding a
+pointer paragraph to their own `updating.md` files: that a third repo now consumes the
+agent-ready layer, that it never originates changes to it, and that a shared-layer change
+made there should be expected to arrive as a PR rather than as a fork. Both landed —
+agent-ready-ts#7 and agent-ready-python#15 — so the flow described above is now recorded at
+both ends rather than only at this one. Neither sibling does anything differently; they
+just know the layer has a third reader.
