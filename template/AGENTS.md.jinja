@@ -170,6 +170,7 @@ style.
 make install        # both halves, then activate the versioned git hooks
 make pre-commit     # the gate: lint-check + openapi-check + test
 make dev            # both halves: backend on :8000, frontend on :5173 in live mode
+                    #   BACKEND_PORT / FRONTEND_PORT override both, for a second checkout
 make dev-frontend   # frontend only, mock mode -- no backend required
 make dev-backend    # backend only, with reload
 make lint           # auto-fix and lint both halves

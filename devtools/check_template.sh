@@ -292,6 +292,14 @@ test "$(ls .github/workflows)" = "ci.yml"
 need_no_grep 'exec pnpm' devtools/dev.sh
 need_grep 'trap cleanup' devtools/dev.sh
 need_grep 'set -m' devtools/dev.sh
+# The ports are read from the environment in all three places rather than hard-coded in
+# each, so two checkouts can run at once and the proxy still points at the backend the
+# script started. Hard-coding meant a second worktree's `make dev` took the first one's
+# port, and this script refuses to run at all while anything else holds either.
+need_grep 'BACKEND_PORT' devtools/dev.sh
+need_grep 'FRONTEND_PORT' devtools/dev.sh
+need_grep 'BACKEND_PORT' devtools/contract-test.sh
+need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
 
 need frontend/index.html
 need frontend/vite.config.ts

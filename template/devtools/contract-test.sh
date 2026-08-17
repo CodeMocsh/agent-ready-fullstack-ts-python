@@ -14,7 +14,10 @@ set -eu
 set -m
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
-base_url="${CONTRACT_BASE_URL:-http://localhost:5173/api}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+export BACKEND_PORT FRONTEND_PORT
+base_url="${CONTRACT_BASE_URL:-http://localhost:$FRONTEND_PORT/api}"
 backend_pid=""
 frontend_pid=""
 log="$(mktemp)"
@@ -27,7 +30,7 @@ signal_halves() {
 
 cleanup() {
     # Ask, wait a moment, then insist. A launcher that does not exit after its child
-    # is gone would leave this blocked in `wait` forever, holding :5173 -- and the
+    # is gone would leave this blocked in `wait` forever, holding the frontend port -- and the
     # next run dies on --strictPort, in CI, for a reason that is nowhere in the log.
     signal_halves TERM
     sleep 1
@@ -46,11 +49,11 @@ fail() {
     exit 1
 }
 
-(cd "$here/backend" && exec uv run uvicorn app.main:app --port 8000 --log-level warning) \
+(cd "$here/backend" && exec uv run uvicorn app.main:app --port "$BACKEND_PORT" --log-level warning) \
     >>"$log" 2>&1 &
 backend_pid=$!
 
-(cd "$here/frontend" && exec pnpm dev:live --port 5173 --strictPort) >>"$log" 2>&1 &
+(cd "$here/frontend" && exec pnpm dev:live --port "$FRONTEND_PORT" --strictPort) >>"$log" 2>&1 &
 frontend_pid=$!
 
 # `--max-time` bounds a probe that can otherwise wait forever: a half that is
