@@ -152,6 +152,76 @@ else in CI passes on a project whose frontend cannot reach its backend at all.
 If `openapi.json` or `schema.ts` conflict in a merge, take either side and run
 `make openapi`. Never hand-merge them.
 
+## The store
+
+Two implementations of one contract, and both are permanent.
+
+```bash
+make dev                 # no DATABASE_URL: the in-memory substrate, no daemon needed
+make db                  # a Postgres to develop against; prints the DATABASE_URL to export
+make db-test             # the store suites against a real Postgres it starts and tears down
+make schema              # regenerate deploy/schema.sql after adding a migration entry
+```
+
+`app/wiring.py` chooses: no `DATABASE_URL` means `MemoryDatabase`, and a `DATABASE_URL` means
+`PostgresDatabase`. It is the only module that reads the environment — everything below takes
+its DSN, schema and migrate mode as arguments, which is what lets one process hold two
+substrates and why no test mutates `os.environ` to pick one.
+
+Nothing degrades from Postgres to memory. A bad `DATABASE_URL` fails at boot, because a
+deployment that silently came up on memory has data that will not be there tomorrow.
+
+### Why the in-memory one stays
+
+It is not a placeholder. `make test` and `make pre-commit` run against it, and the gate runs
+on every commit and must not need a daemon. It is also what makes a fresh clone work in about
+a minute. Deleting it costs the fast tier.
+
+And it is what makes `TaskStore` a contract rather than a shape nothing checks. One
+implementation plus a `Protocol` proves nothing: the interesting rules — a missing task is
+reported rather than raised, an id that cannot exist is a 404 and not a 500, `list()` is in
+creation order — are exactly the ones a single implementation satisfies by accident.
+`tests/test_store_contract.py` runs one suite against both, which is the same pattern this
+repository already runs one layer up for the API contract.
+
+The two are deliberately *different* where they are allowed to be: memory seeds three tasks
+and hands out ids like `"1"`, Postgres starts empty and hands out uuids. A suite that passes
+against both cannot have assumed either. Seed rows are asserted in `tests/test_tasks.py` and
+nowhere else.
+
+### The schema is data
+
+`app/store/ddl.py` holds one statement per entry under a four-digit key, so most of what can
+go wrong with the schema is assertable without a Postgres to apply it to — that is what
+`tests/test_schema.py` does, in the fast tier. `deploy/schema.sql` is generated from it by
+`make schema` and committed, the way `openapi.json` is generated from the models, and a test
+fails when the two drift.
+
+Two rules there are load-bearing:
+
+- **Never edit a shipped entry.** `CREATE TABLE IF NOT EXISTS` skips *entirely* once the table
+  exists, so a column added to a `CREATE` after that table was ever applied reaches no
+  database that already had it.
+- **A column added later lands twice** — in its table's `CREATE`, which stays the whole truth
+  about that table, and as an `ALTER TABLE … ADD COLUMN IF NOT EXISTS` in the `0200_` repair
+  band. The band sorts above everything because `migrate()` compares `max(key)` and returns
+  early when the database is not behind, so a repair sorted under an existing entry would
+  never run at all.
+
+For a deployment whose schema is owned by something else, apply `deploy/schema.sql` with
+your own tooling instead of running `make migrate`. The emitted script records a ledger row
+for every key it applies, which is what makes the app's startup check pass against it
+afterwards. There is no mode to set: the application only ever verifies.
+
+### One trap worth knowing
+
+asyncpg runs `RESET ALL` when a pooled connection is released, and `RESET ALL` *restores*
+startup parameters while *clearing* session `SET`s. So the search path is passed as a startup
+parameter, not set from a connect hook: a `SET search_path` in a hook survives exactly one
+checkout and every checkout after it resolves against `public` — silently, because the first
+query on each connection works. `tests/test_postgres.py` holds a test on this specifically,
+and it fails with `public` if you change it.
+
 ## Tests
 
 There are two tiers, and the line between them is whether a laptop can run the check
@@ -176,16 +246,22 @@ pnpm -C frontend test:watch     # component tests, watch mode
 cd backend && uv run pytest -q  # backend only
 ```
 
+The Postgres members of the store suites **skip** themselves when `TEST_DATABASE_URL` is
+unset, which is what keeps `make test` hermetic. A skip is the dangerous half of that: a run
+where every one of them skipped exits 0 and looks exactly like a run where every one passed.
+`make db-test` runs them under `-rs` so the skips are printed.
+
 Component tests run against the mock handlers, so they need no backend. Backend tests use
 FastAPI's `TestClient`, so they start no server. `backend/tests/test_gate.py` is the odd
 one out: it tests the repository rather than the app, and fails when the `pre-commit`
 target, the hook and the workflow stop agreeing about what gets checked.
 
-### End-to-end — the opt-in tier
+### The opt-in tier
 
 ```bash
 make test-e2e        # mock-mode specs; installs chromium the first time
 make test-e2e-live   # the same against a running `make dev`
+make db-test         # the store suites against a real Postgres it starts itself
 ```
 
 The default Playwright run builds in mock mode and serves it from a **subpath**, because
@@ -197,10 +273,73 @@ client or the worker setup.
 another terminal — and it is how you look at the real thing in a browser rather than
 inferring it from the JSX.
 
-Neither is in the gate and neither runs in CI: both need a browser binary that a gate has
-no business downloading, and the live one needs a second terminal. That is a deliberate
-trade, and it has a cost worth naming — **this is the one tier nothing will tell you that
-you skipped**. Opt-in is not the same as deleted. If you changed UI, run it.
+None of these is in the gate and none runs in CI: the two Playwright targets need a browser
+binary, the live one needs a second terminal, and `db-test` needs a Docker daemon. A gate that
+fetches any of those is a gate people learn to commit around, and `tests/test_gate.py` asserts
+all three stay out of it.
+
+That is a deliberate trade with a cost worth naming: **this is the one tier nothing will tell
+you that you skipped.** Opt-in is not the same as deleted. If you changed UI, run
+`make test-e2e`; if you changed `backend/app/store/`, run `make db-test`.
+
+## The database
+
+Two substrates. With no `DATABASE_URL` the app runs in memory and needs no infrastructure;
+with one it runs on Postgres. `make db` brings up a persistent Postgres, applies the roles at
+init and the schema the way a release does, and prints the `DATABASE_URL` to export.
+
+```bash
+make db          # postgres + roles + schema, and the URL to export
+make db-demo     # two tenants against one table, so the isolation is visible
+make db-test     # the opt-in tier: contract, migration and isolation suites
+make migrate     # the release step
+make schema      # regenerate deploy/schema.sql after a migration entry
+make roles       # regenerate deploy/roles.sql after a role change
+```
+
+### The application does not migrate itself
+
+It verifies the schema at startup and refuses to serve if it is behind. Applying is
+`make migrate`, run by something that is not the web process — see
+[docs/adr/0003](adr/0003-the-application-never-applies-ddl.md) for why, and note that the app
+**refuses to start** if it can see `DATABASE_OWNER_URL`.
+
+Wire it into whatever your platform calls a release command:
+
+| Platform | Hook |
+|---|---|
+| Fly | `[deploy] release_command` |
+| Heroku, Railway, Render | release / pre-deploy command |
+| Kubernetes | a `Job` with `helm.sh/hook: pre-upgrade`, or an initContainer |
+| ECS | a one-off task in the pipeline |
+| docker compose | the `migrate` service in `deploy/compose.yaml` |
+
+It is idempotent, serialises on an advisory lock, and exits 0 when already current. Skip it and
+the deploy fails at startup naming both schema versions, which is the point.
+
+**The schema version must match the build exactly**, in both directions — a database *ahead*
+of the running build is refused just as firmly as one behind
+([docs/adr/0004](adr/0004-the-schema-and-the-binary-must-match.md)). That has a cost worth
+knowing before your first rolling deploy: between the release step and the last old instance
+being replaced, any instance of the *previous* version that restarts will not come back up.
+Already-running instances are fine — they checked at boot. If that window matters, make the
+migration and the rollout one step: scale down, migrate, scale up. And plan a rollback as a
+schema rollback, because redeploying the previous build against a migrated database will not
+start.
+
+A single container that migrates and then serves must drop the credential in between:
+`env -u DATABASE_OWNER_URL uvicorn ...`.
+
+### Tenant isolation
+
+Every row carries a `tenant_id` and a forced row-level security policy enforces it, so a query
+that forgot to filter still cannot cross a tenant. `app/identity.py` decides which tenant a
+request is, and ships as a stub that authenticates nothing and returns `"default"`.
+
+Two things to know before changing anything here: a **superuser bypasses every policy**, so
+the application must connect as `<schema>_app` and the suites do too; and **every index must
+lead with `tenant_id`**, which a test enforces. The rest is
+[docs/adr/0002](adr/0002-tenant-isolation-is-forced-and-always-on.md).
 
 ## Git hooks
 
@@ -273,3 +412,9 @@ Not configured, deliberately — deployment shape is yours. The pieces:
   `VITE_API_BASE_URL` at build time, and add `CORSMiddleware` to the backend.
 - If the bundle is served from a subpath, pass `--base=/that/path/` to `vite build`.
 - Never ship mock mode: production builds must leave `VITE_ENABLE_MSW` unset.
+- **Set `DATABASE_URL`, or you are deploying the in-memory substrate.** It resets on every
+  restart, and nothing in the app will complain: it comes up, serves, and loses the data.
+  The app logs which substrate it came up on at startup (`serving on the … substrate`) —
+  grep your deploy logs for it, or assert `app.state.database.name` from a smoke test. Where
+  the schema is owned by your own migration tooling, apply `deploy/schema.sql` there first;
+  the app never applies anything either way, so give it a role that holds no `CREATE`.

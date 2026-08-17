@@ -1,0 +1,349 @@
+"""The schema, asserted without a Postgres to apply it to.
+
+`ddl.py` is data, so most of what can go wrong with it is checkable here, in milliseconds,
+in the fast tier. `tests/test_postgres.py` covers only what needs a real server.
+
+`migrate()` is drivable by a fake because `Conn` is deliberately two methods. That is the
+whole reason it is two methods.
+"""
+
+import re
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from app.store import ddl
+from app.store.conn import (
+    DEFAULT_SCHEMA,
+    InvalidSchemaName,
+    migration_lock,
+    resolve_schema,
+)
+from app.store.ddl import statements
+from app.store.migrate import (
+    SchemaBehindError,
+    SchemaTooNewError,
+    apply,
+    check,
+    emit_sql,
+    known_keys,
+    known_version,
+)
+from app.store.roles import app_role, emit_roles_sql, owner_role
+
+SCHEMA_SQL = Path(__file__).resolve().parents[2] / "deploy" / "schema.sql"
+ROLES_SQL = Path(__file__).resolve().parents[2] / "deploy" / "roles.sql"
+
+ADD_COLUMN = "ADD COLUMN IF NOT EXISTS"
+CREATE_TABLE = "CREATE TABLE IF NOT EXISTS"
+
+
+class FakeConn:
+    """`Conn` with no database behind it. Records what it was asked to run."""
+
+    def __init__(self, version: str | None = None, *, may_set_role: bool = False) -> None:
+        self.executed: list[str] = []
+        self.recorded: list[str] = []
+        self._version: str | None = version
+        self._may_set_role: bool = may_set_role
+
+    async def execute(self, query: str, *args: Any) -> str:
+        self.executed.append(query)
+        if query.startswith("INSERT INTO applied_once"):
+            self.recorded.append(str(args[0]))
+        return "OK"
+
+    async def fetchval(self, query: str, *_args: Any) -> Any:
+        if "to_regclass" in query:
+            return None if self._version is None else 12345
+        if "max(key" in query:
+            return self._version
+        if "pg_has_role" in query:
+            return self._may_set_role
+        raise AssertionError(f"the fake was asked something it does not answer: {query}")
+
+
+def stray_semicolons(sql: str) -> int:
+    """Semicolons outside dollar-quoted bodies, string literals and `--` comments.
+
+    An entry is one statement, so it carries no terminator of its own: `emit_sql` adds one and
+    the ledger records one key per statement. Any semicolon this finds is a second statement
+    hiding in an entry.
+
+    Written here rather than in `app/` because it asserts a property of the data rather than
+    doing any work at run time.
+    """
+    count = 0
+    index = 0
+    while index < len(sql):
+        if sql.startswith("--", index):
+            index = sql.find("\n", index)
+            if index == -1:
+                break
+        elif sql[index] == "'":
+            index = sql.find("'", index + 1)
+            if index == -1:
+                break
+        elif sql[index] == "$":
+            end = sql.find("$", index + 1)
+            tag = sql[index : end + 1] if end != -1 else "$"
+            closing = sql.find(tag, end + 1)
+            index = closing + len(tag) - 1 if closing != -1 else len(sql)
+        elif sql[index] == ";":
+            count += 1
+        index += 1
+    return count
+
+
+def test_every_key_is_unique() -> None:
+    keys = [key for key, _ in ddl.SCHEMA]
+    assert len(keys) == len(set(keys))
+
+
+def test_the_literal_list_is_already_in_applied_order() -> None:
+    assert [key for key, _ in ddl.SCHEMA] == sorted(key for key, _ in ddl.SCHEMA)
+
+
+def test_the_schema_entry_sorts_first() -> None:
+    assert known_keys()[0] == ddl.SCHEMA_ENTRY_KEY
+
+
+def test_every_entry_is_exactly_one_statement() -> None:
+    for key, sql in ddl.statements():
+        assert stray_semicolons(sql) == 0, (
+            f"{key} contains a `;` outside a quoted body, so it is more than one statement. "
+            f"`emit_sql` joins entries with `;` and the ledger records one key per statement."
+        )
+
+
+def test_the_repair_band_sorts_above_every_other_band() -> None:
+    repairs = [key for key in known_keys() if key.startswith(ddl.REPAIR_BAND)]
+    others = [key for key in known_keys() if not key.startswith(ddl.REPAIR_BAND)]
+    for repair in repairs:
+        assert all(repair > other for other in others), (
+            f"{repair} does not sort above every other entry. `migrate()` compares max(key) "
+            f"and returns early when the database is not behind, so a repair below an "
+            f"existing entry never runs at all."
+        )
+
+
+def test_a_column_added_by_an_alter_is_also_in_its_create() -> None:
+    entries = ddl.statements()
+    creates = {
+        body.split(CREATE_TABLE, 1)[1].split()[0]: body
+        for _, body in entries
+        if CREATE_TABLE in body
+    }
+    assert creates, "there is no CREATE TABLE in the schema at all"
+    for key, sql in entries:
+        if ADD_COLUMN not in sql:
+            continue
+        table = sql.split("ALTER TABLE", 1)[1].split()[0]
+        column = sql.split(ADD_COLUMN, 1)[1].split()[0]
+        assert table in creates, f"{key} alters {table}, which has no CREATE entry"
+        assert column in creates[table], (
+            f"{key} adds {table}.{column} and the CREATE for {table} does not mention it. "
+            f"A column has to land twice: `CREATE TABLE IF NOT EXISTS` skips entirely once "
+            f"the table exists, so the CREATE alone reaches no existing database and the "
+            f"ALTER alone leaves the CREATE lying about the table."
+        )
+
+
+def test_known_version_is_the_last_key() -> None:
+    assert known_version() == known_keys()[-1]
+
+
+def test_a_schema_name_that_is_not_an_identifier_is_refused() -> None:
+    for hostile in ('app"; DROP SCHEMA public', "App", "1app", "", "a" * 64, "public schema"):
+        with pytest.raises(InvalidSchemaName):
+            resolve_schema(hostile)
+
+
+def test_a_plain_identifier_is_accepted() -> None:
+    assert resolve_schema("tasks_app") == "tasks_app"
+    assert resolve_schema(None) == DEFAULT_SCHEMA
+
+
+def test_the_migration_lock_is_stable_and_differs_per_schema() -> None:
+    assert migration_lock("app") == migration_lock("app")
+    assert migration_lock("app") != migration_lock("other")
+    assert -(2**63) <= migration_lock("app") < 2**63
+
+
+async def test_apply_runs_every_entry_against_an_empty_database() -> None:
+    conn = FakeConn(version=None)
+
+    assert await apply(conn, "app") == known_version()
+
+    assert conn.recorded == known_keys()
+    assert any("pg_advisory_lock" in query for query in conn.executed)
+    assert any("pg_advisory_unlock" in query for query in conn.executed)
+    assert conn.executed.index('SET search_path TO "app"') < conn.executed.index(
+        ddl.APPLIED_ONCE_DDL
+    )
+
+
+async def test_apply_becomes_the_owner_where_it_may_and_carries_on_where_it_may_not() -> None:
+    """Objects created without `SET ROLE` fall outside the owner's default privileges, and the
+    application is refused at query time rather than here. Where the role does not exist at
+    all -- a developer's own Postgres -- carrying on is the bootstrap, and `FORCE` keeps those
+    objects policy-bound whoever owns them."""
+    permitted = FakeConn(version=None, may_set_role=True)
+    await apply(permitted, "app")
+    assert 'SET ROLE "app_owner"' in permitted.executed
+
+    bootstrap = FakeConn(version=None, may_set_role=False)
+    await apply(bootstrap, "app")
+    assert not any(query.startswith("SET ROLE") for query in bootstrap.executed)
+    assert bootstrap.recorded == known_keys()
+
+
+async def test_apply_applies_nothing_when_the_database_is_current() -> None:
+    conn = FakeConn(version=known_version())
+
+    assert await apply(conn, "app") == known_version()
+
+    assert conn.recorded == []
+    assert not any("pg_advisory_lock" in query for query in conn.executed)
+
+
+async def test_apply_revokes_the_ledger_even_when_the_database_is_current() -> None:
+    """The bootstrap order is migrate first, provision roles second -- so the run that creates
+    the tables is usually the one with no role to revoke from yet. If the revoke only happened
+    on the applying path, that database would keep an application role able to write its own
+    version marker, and `check` could be handed an answer it forged."""
+    conn = FakeConn(version=known_version())
+
+    await apply(conn, "app")
+
+    assert any("REVOKE" in query and "applied_once" in query for query in conn.executed)
+
+
+async def test_check_never_writes_anything() -> None:
+    """The property that lets a role holding no `CREATE` run it: it only ever reads."""
+    conn = FakeConn(version=known_version())
+
+    assert await check(conn, "app") == known_version()
+
+    assert conn.executed == []
+
+
+async def test_check_refuses_a_database_behind_this_build_and_names_the_fix() -> None:
+    conn = FakeConn(version=None)
+
+    with pytest.raises(SchemaBehindError, match="make migrate"):
+        await check(conn, "app")
+
+    assert conn.executed == []
+
+
+async def test_check_refuses_a_database_ahead_of_this_build() -> None:
+    """The version must match exactly, in both directions.
+
+    Tolerating `ahead` would be a compatibility judgement made at startup by a process with no
+    way to verify it, and the failure it lets through -- an older build writing rows to a
+    shape it does not know about -- is silent. `docs/adr/0004` records what refusing costs.
+    """
+    conn = FakeConn(version="9999_from_the_future")
+
+    with pytest.raises(SchemaTooNewError, match="newer release"):
+        await check(conn, "app")
+
+    assert conn.executed == []
+
+
+async def test_apply_refuses_a_database_ahead_of_this_build() -> None:
+    """The asymmetry with `check`: an old migrator pointed at a new database is a deploy-order
+    mistake, where an old binary *serving* a new schema is a rolling deploy working."""
+    conn = FakeConn(version="9999_from_the_future")
+
+    with pytest.raises(SchemaTooNewError):
+        await apply(conn, "app")
+
+    assert conn.executed == []
+
+
+def test_the_committed_schema_sql_is_what_the_generator_emits() -> None:
+    assert SCHEMA_SQL.exists(), f"{SCHEMA_SQL} is missing; run `make schema`"
+    assert SCHEMA_SQL.read_text() == emit_sql(DEFAULT_SCHEMA), (
+        "deploy/schema.sql does not match app/store/ddl.py. Run `make schema` and commit "
+        "the result, the same way openapi.json follows the models."
+    )
+
+
+def test_the_emitted_script_records_every_key() -> None:
+    emitted = emit_sql(DEFAULT_SCHEMA)
+    for key in known_keys(DEFAULT_SCHEMA):
+        assert f"VALUES('{key}')" in emitted, (
+            f"{key} is applied by the script and never recorded, so the startup check would "
+            f"report a database that ran the whole script as behind."
+        )
+
+
+DESTRUCTIVE = re.compile(
+    r"\bDROP\s+TABLE\b|\bDROP\s+COLUMN\b|\bALTER\s+COLUMN\s+\w+\s+TYPE\b|\bRENAME\b",
+    re.IGNORECASE,
+)
+
+
+def test_every_entry_is_additive() -> None:
+    """The rule that lets `check` serve a database ahead of this build.
+
+    An older instance can only keep running against a newer schema because no migration is
+    able to take away or reshape something it writes to. That is a convention until something
+    refuses the spelling, and a convention is what a rolling deploy would discover the hard
+    way.
+    """
+    for key, sql in statements(DEFAULT_SCHEMA):
+        found = DESTRUCTIVE.search(sql)
+        assert found is None, (
+            f"{key} contains {found.group(0)!r}. Migrations here are additive: an instance of "
+            f"the previous release is still serving while this runs, and app/store/migrate.py "
+            f"lets it because nothing can remove what it writes to."
+        )
+
+
+def test_every_created_index_leads_with_the_tenant() -> None:
+    """The one real performance constraint of row-level security, mechanised.
+
+    Every query the application makes is filtered by `tenant_id`, so an index that does not
+    lead with it cannot be used to satisfy that filter and Postgres falls back to scanning far
+    more rows than it should. It fails invisibly -- correct answers, quietly slower -- until
+    the table is large enough that fixing it means rebuilding indexes on live data.
+
+    Constraint-backed indexes are exempt and named here rather than skipped silently: a
+    primary key on a uuid and the `UNIQUE (id, tenant_id)` a child table's foreign key must
+    reference are both about uniqueness of a surrogate key, not about serving a scan.
+    """
+    for key, sql in statements(DEFAULT_SCHEMA):
+        found = re.search(r"CREATE\s+(?:UNIQUE\s+)?INDEX[^(]*\(([^)]*)\)", sql, re.IGNORECASE)
+        if found is None:
+            continue
+        leading = found.group(1).split(",")[0].strip()
+        assert leading == "tenant_id", (
+            f"{key} indexes ({found.group(1)}) and leads with {leading!r}. Every index on a "
+            f"tenant table leads with tenant_id, or the policy cannot use it."
+        )
+
+
+def test_the_committed_roles_sql_is_what_the_generator_emits() -> None:
+    assert ROLES_SQL.exists(), f"{ROLES_SQL} is missing; run `make roles`"
+    assert ROLES_SQL.read_text() == emit_roles_sql(DEFAULT_SCHEMA), (
+        "deploy/roles.sql does not match app/store/roles.py. Run `make roles` and commit it."
+    )
+
+
+def test_the_role_names_derive_from_the_schema() -> None:
+    """Roles are cluster-wide. Two projects that hard-coded the same pair would collide the
+    moment they shared a cluster, and the second to migrate would inherit the first's grants."""
+    assert owner_role("billing") == "billing_owner"
+    assert app_role("billing") == "billing_app"
+    assert owner_role("app") != owner_role("other")
+
+
+def test_a_schema_name_too_long_to_derive_a_role_from_is_refused() -> None:
+    """Postgres truncates an identifier over 63 bytes rather than refusing it, so two long
+    schema names could silently share one role."""
+    with pytest.raises(InvalidSchemaName):
+        resolve_schema("s" * 57)

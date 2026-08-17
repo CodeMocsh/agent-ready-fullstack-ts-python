@@ -1,0 +1,69 @@
+# A database to develop against, and the shape of a release step.
+#
+# There is deliberately no service for the application here. This template has never
+# shipped a deployment and this file does not start: `make dev` runs both halves on the
+# host. What it does ship is the one piece that is easy to get wrong -- a migration that
+# runs to completion before anything serves traffic.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-app}
+      # The entrypoint's own defaults, stated rather than inherited, so the init scripts
+      # stay runnable by hand: re-applying roles after a change is
+      # `docker compose exec postgres /docker-entrypoint-initdb.d/20-credentials.sh`.
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Both run once, on an empty data directory, in name order. Roles only: the schema
+      # is applied by the migrate service below, which is the whole point of this file.
+      # Creating roles needs CREATEROLE and the application never has it, so this is the
+      # one part a superuser has to do.
+      - ./roles.sql:/docker-entrypoint-initdb.d/10-roles.sql:ro
+      - ./credentials.sh:/docker-entrypoint-initdb.d/20-credentials.sh:ro
+    healthcheck:
+      # Over TCP, not the unix socket. The entrypoint runs the init scripts against a
+      # temporary server started with listen_addresses='', which answers on the socket --
+      # so a socket probe reports healthy while roles are still being created, and
+      # whatever waited on it starts against a database that is not ready. Over TCP the
+      # temporary server refuses, which is the answer we want.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The release step. `depends_on: service_completed_successfully` is how the application
+  # would wait for it; run it before every deploy, in whatever your platform calls a
+  # release command. It is idempotent, it serialises on an advisory lock, and it exits 0
+  # when the database is already current.
+  #
+  # It connects as the superuser here because a compose file has nobody else to be. In a
+  # real deployment this should be a login role that is a *member* of app_owner and
+  # nothing more -- `python -m app.migrate` issues SET ROLE either way, so every object
+  # ends up owned by app_owner and the default privileges in roles.sql bind.
+  migrate:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    working_dir: /app/backend
+    environment:
+      UV_PROJECT_ENVIRONMENT: /venv
+      DATABASE_OWNER_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres
+    volumes:
+      - ..:/app
+      - venv:/venv
+    command:
+      - sh
+      - -c
+      - uv sync --no-dev && uv run --no-sync python -m app.migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pgdata:
+  venv:
