@@ -1,12 +1,20 @@
 #!/bin/sh
-# Run both halves: the backend on :8000 and the frontend on :5173 in live mode, so
+# Run both halves: the backend and the frontend in live mode, so
 # requests go through the dev server's /api proxy to the backend rather than to the
 # mock handlers. `make dev-frontend` is the mock-mode loop, which needs no backend.
 set -eu
 
+# Both ports are overridable so two checkouts can run at once. vite.config.ts reads the
+# same two variables, which is what keeps the proxy pointed at the backend this script
+# actually started -- they used to be hard-coded in both files and had to be kept in
+# agreement by hand.
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+export BACKEND_PORT FRONTEND_PORT
+
 # Job control, so the backend becomes its own process group. `uv run` execs a
 # launcher that spawns uvicorn as a child, and killing only the pid we started
-# leaves that child holding :8000 after this script exits.
+# leaves that child holding the backend port after this script exits.
 set -m
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,8 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "==> backend  http://localhost:8000"
-(cd "$here/backend" && exec uv run uvicorn app.main:app --reload --port 8000) &
+echo "==> backend  http://localhost:$BACKEND_PORT"
+(cd "$here/backend" && exec uv run uvicorn app.main:app --reload --port "$BACKEND_PORT") &
 backend_pid=$!
 
 # Fail loudly here rather than letting vite start and serve proxy errors that look
@@ -37,23 +45,23 @@ backend_pid=$!
 # socket while the worker crash-loops, so an unbounded curl waits for a reply that
 # is never written and neither exit below is ever taken.
 deadline=$(($(date +%s) + 30))
-until curl -fsS --max-time 2 http://localhost:8000/tasks >/dev/null 2>&1; do
+until curl -fsS --max-time 2 "http://localhost:$BACKEND_PORT/tasks" >/dev/null 2>&1; do
     if ! kill -0 "$backend_pid" 2>/dev/null; then
         echo "dev: the backend exited during startup; run 'make dev-backend' to see why" >&2
         exit 1
     fi
     if [ "$(date +%s)" -ge "$deadline" ]; then
-        echo "dev: the backend did not answer on :8000 within 30s; the output above says why" >&2
+        echo "dev: the backend did not answer on :$BACKEND_PORT within 30s; the output above says why" >&2
         exit 1
     fi
     sleep 0.5
 done
 
-echo "==> frontend http://localhost:5173 (live mode -- mock handlers off)"
+echo "==> frontend http://localhost:$FRONTEND_PORT (live mode -- mock handlers off)"
 # Run the frontend in the foreground without `exec`, so this shell outlives it and
 # the cleanup trap still fires. `exec` replaces the shell and discards the trap, and
 # job control has already put the backend in a process group of its own, so a Ctrl-C
-# in the terminal reaches neither -- uvicorn keeps :8000 after vite is gone.
+# in the terminal reaches neither -- uvicorn keeps the backend port after vite is gone.
 #
 # Foreground also means vite keeps the terminal, so its keyboard shortcuts work. The
 # price is that a signal sent to this script alone cannot be handled until vite

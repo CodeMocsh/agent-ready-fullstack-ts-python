@@ -73,8 +73,17 @@ Two consequences worth knowing:
   `/api`. To look at a real build against a real backend, put a reverse proxy in front of
   both, or use `make dev`.
 
-The ports live in two files — `frontend/vite.config.ts` and `devtools/dev.sh` — and must
-agree. Changing them is a two-line edit.
+**Both ports come from the environment**, so two checkouts of this project can run at once:
+
+```bash
+BACKEND_PORT=8001 FRONTEND_PORT=5174 make dev
+```
+
+`vite.config.ts`, `devtools/dev.sh` and `devtools/contract-test.sh` read the same two
+variables, which is what keeps the proxy pointed at the backend the script actually started.
+They were hard-coded in each file and had to be kept in agreement by hand, and the failure
+was not theoretical: a second worktree running `make dev` took down the first one's port, and
+the template's own check refuses to run at all while anything else is holding either.
 
 ## The contract
 
