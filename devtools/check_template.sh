@@ -28,6 +28,7 @@ need() { [ -f "$1" ] || fail "expected file: $1"; }
 need_exec() { [ -x "$1" ] || fail "expected executable file: $1"; }
 need_absent() { [ ! -e "$1" ] || fail "expected no such file: $1"; }
 need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2"; }
+need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
 
 
 for tool in uvx uv tar python3 git node pnpm curl; do
@@ -182,6 +183,16 @@ for target in install hooks lint lint-check test test-fast test-contract dev \
 done
 # CI builds and tests; it does not deploy, and it does not publish.
 test "$(ls .github/workflows)" = "ci.yml"
+
+# `make dev` has to stop what it started. Job control puts the backend in a process
+# group of its own, so a Ctrl-C in the terminal reaches only the script -- and the
+# script's cleanup trap is the one thing that then kills the backend. Exec'ing the
+# frontend replaces the shell and discards that trap, stranding uvicorn on :8000
+# after vite is gone. That shipped once. Nothing else here runs dev.sh, so these
+# three lines are the only thing standing between a one-word edit and the bug.
+need_no_grep 'exec pnpm' devtools/dev.sh
+need_grep 'trap cleanup' devtools/dev.sh
+need_grep 'set -m' devtools/dev.sh
 
 need frontend/index.html
 need frontend/vite.config.ts

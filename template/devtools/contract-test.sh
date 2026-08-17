@@ -42,12 +42,14 @@ backend_pid=$!
 (cd "$here/frontend" && exec pnpm dev:live --port 5173 --strictPort) >>"$log" 2>&1 &
 frontend_pid=$!
 
-waited=0
-until curl -fsS "$base_url/tasks" >/dev/null 2>&1; do
+# `--max-time` bounds a probe that can otherwise wait forever: a half that is
+# listening but never replies holds the connection open, and an unbounded curl
+# hangs there rather than reaching the deadline below.
+deadline=$(($(date +%s) + 60))
+until curl -fsS --max-time 2 "$base_url/tasks" >/dev/null 2>&1; do
     kill -0 "$backend_pid" 2>/dev/null || fail "the backend exited during startup"
     kill -0 "$frontend_pid" 2>/dev/null || fail "the dev server exited during startup"
-    waited=$((waited + 1))
-    [ "$waited" -gt 120 ] && fail "$base_url/tasks did not answer within 60s"
+    [ "$(date +%s)" -ge "$deadline" ] && fail "$base_url/tasks did not answer within 60s"
     sleep 0.5
 done
 
