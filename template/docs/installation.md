@@ -55,3 +55,34 @@ make lint test
 
 The last step starts both halves and runs the contract suite against the real backend,
 so a green run means the two agree.
+
+## Updating from the template
+
+This project keeps `.copier-answers.yml`, which records the template it came from and the
+exact commit. That is what lets a later template change reach a project generated months ago:
+
+```bash
+uvx --exclude-newer "14 days" copier@9.16.0 update
+make install
+make openapi
+make pre-commit
+```
+
+Copier resolves against **tags**, so `update` brings you to the template's newest release
+rather than to whatever is on its default branch. It is a three-way merge against the commit
+you generated from, so commit or stash first.
+
+What to expect, because it is not all free:
+
+- **Files you never touched update cleanly.** Tooling, gates, `Makefile` targets, docs, ADRs,
+  and anything the template added since — those arrive without argument.
+- **Files you rewrote come back as conflicts.** `app/routes.py` and `app/models.py` are the
+  first two any real project replaces, so a template change that reaches into them is a merge
+  you do by hand. You are porting a pattern rather than accepting a patch.
+- **Regenerate the contract afterwards.** `openapi.json` and `frontend/src/api/schema.ts` are
+  generated from your code, so merging them is meaningless — run `make openapi` and commit
+  what it writes.
+- **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
+
+If you never intend to take template updates, delete `.copier-answers.yml` and the question
+stops arising. That is a legitimate choice; making it deliberately is the point.
