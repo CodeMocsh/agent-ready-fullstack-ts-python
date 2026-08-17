@@ -415,8 +415,13 @@ day-one decision.
   a seatbelt, not a scanner, and fails open. Edit the patterns in that file, or remove its
   `PreToolUse` entry in `.claude/settings.json`, to change or drop it.
 
-- This project was built from the
-  [agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python)
-  template.
+- **This project was generated from a template, and can receive its later changes.**
+  `.copier-answers.yml` records which template and which commit, so
+  `uvx --exclude-newer "14 days" copier@9.16.0 update` replays what has changed since into
+  this project as a three-way merge. Files you never touched update cleanly; files you
+  rewrote — `app/routes.py` and `app/models.py`, first among them — come back as conflicts to
+  resolve, which is the honest cost of having made the project your own. Run `make openapi`
+  afterwards, because the contract artifacts are generated rather than merged. The template
+  is [agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python).
 
 See [docs/development.md](docs/development.md) for full developer workflows.
