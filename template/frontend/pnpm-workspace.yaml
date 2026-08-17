@@ -41,6 +41,17 @@ minimumReleaseAgeExclude:
 overrides:
   nanoid: '^3.3.18'
 
+# How long a `pnpm dlx` package stays usable from the store without re-resolving,
+# in minutes (30 days). The default is a day, which would mean `make openapi` --
+# and therefore `make pre-commit`, which every commit runs -- reaching the registry
+# on the first commit of each day, and failing outright with no network.
+#
+# Safe here only because there is exactly one dlx call and it names an exact version:
+# `openapi-typescript@7.13.0` in package.json. A floating spec cached for a month
+# would be a floating spec that silently stopped floating. If you add a dlx call
+# without a pinned version, this line is wrong for it.
+dlxCacheMaxAge: 43200
+
 # pnpm blocks dependency install scripts by default, which is the right default
 # and the reason this list is short. msw is the one exception: its postinstall
 # rewrites public/mockServiceWorker.js to match the installed msw version, and

@@ -13,8 +13,9 @@ CONTRACT_BASE_URL ?= http://localhost:5173/api
 
 .DEFAULT_GOAL := default
 
-.PHONY: default install hooks lint lint-check test test-fast test-contract \
-        dev dev-frontend dev-backend openapi openapi-check build upgrade clean
+.PHONY: default install hooks pre-commit lint lint-check test test-fast test-contract \
+        test-e2e test-e2e-live dev dev-frontend dev-backend openapi openapi-check \
+        build upgrade clean
 
 default: install lint test
 
@@ -22,9 +23,23 @@ install:
 	pnpm -C frontend install
 	cd backend && uv sync --all-groups
 	@$(MAKE) --no-print-directory hooks
+# Fetches the pinned openapi-typescript into pnpm's dlx store, which is the one thing
+# `make pre-commit` needs and neither half's install brings. Doing it here makes
+# `make install` the only target that has to reach the network -- without it the first
+# commit on a fresh clone goes to the registry, and a commit with no network fails on a
+# check that has nothing to do with connectivity. Last, and after the hooks, so that
+# losing the registry costs you this line rather than an unarmed clone.
+	pnpm -C frontend openapi:types
 
 hooks:
 	@sh devtools/install-hooks.sh
+
+# The gate. This one line is what .githooks/pre-commit runs, what CI runs, and the
+# place a new check goes -- backend/tests/test_gate.py fails if the three stop
+# agreeing. Checks live here rather than in CI because a check here costs seconds
+# and the same check discovered on GitHub costs a billed minute plus the round trip
+# to find out which of your last four commits broke it.
+pre-commit: lint-check openapi-check test
 
 lint:
 	pnpm -C frontend lint
@@ -44,6 +59,18 @@ test-fast:
 
 test-contract:
 	@sh devtools/contract-test.sh
+
+# The opt-in tier, and the only checks in this file that are not in the gate. Both
+# need a browser binary the gate has no business downloading, and the live one needs
+# `make dev` running in another terminal. Opt-in means opt-in, not deleted: if you
+# changed UI, this is the run that looks at it, and nothing else will.
+test-e2e:
+	pnpm -C frontend exec playwright install chromium
+	pnpm -C frontend test:e2e
+
+test-e2e-live:
+	pnpm -C frontend exec playwright install chromium
+	pnpm -C frontend exec playwright test --config playwright.live.config.ts
 
 dev:
 	@sh devtools/dev.sh

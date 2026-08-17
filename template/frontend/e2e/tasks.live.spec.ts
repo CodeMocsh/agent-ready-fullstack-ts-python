@@ -1,9 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-// The mock-mode spec is the one Playwright runs by default. This one needs both
-// halves up -- `make dev` in another terminal -- and is how you look at the real
-// thing in a browser:
-//     pnpm exec playwright test e2e/tasks.live.spec.ts --config playwright.live.config.ts
 test("adds a task against the backend half", async ({ page }) => {
   await page.goto("./");
 

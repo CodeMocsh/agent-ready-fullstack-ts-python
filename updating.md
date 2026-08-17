@@ -206,10 +206,51 @@ JSDoc, `# noqa` against `biome-ignore` — or drift. If you cannot tell which, i
 
 ### Owed upstream
 
-Nothing, now. Scaffolding this repo obligated two small PRs, one to each sibling, adding a
+**Three PRs, and this repo is currently ahead of both siblings.** The comment gate landed
+here first, which is the direction this document forbids. It is written down rather than
+quietly kept, because a shared-layer change that exists in one repo and no record anywhere
+is how a layer stops being one.
+
+- **agent-ready-python** — the `AGENTS.md` prose. A new *Fail loudly* section between
+  *Approach* and *Zero comments*, the ADR rule that a decision cites nothing by section
+  number, and the paragraph in *Zero comments* saying the rule is enforced and by what.
+  The last of those is the one worth arguing for: the rule was adopted without a gate here
+  and immediately did not hold, and the same is true in both siblings today.
+- **agent-ready-python** — `template/devtools/comments.py`, the tokenizing Python gate.
+  Adapted from the one in [fab](https://github.com/CodeMocsh/fab), which is a downstream
+  consumer like this repo and wrote its own, so the layer now has two copies of a file it
+  does not own. Whichever lands upstream, both should then be pulled back.
+- **agent-ready-ts** — `template/frontend/devtools/comments.mjs`, the JavaScript gate. It
+  belongs beside `complexity.mjs` and `conformance.mjs` under the same owner, and it reuses
+  `conformance.mjs`'s region scanner rather than grepping, for a reason that repo already
+  knows: a line-based check fires on `/**` inside a template literal and on a regex literal
+  ending in `/`, and a gate that cries wolf is one people route around.
+
+Until those land, `diff` against either sibling reports the difference, and the answer is
+"owed", not "drift". Take the row out of this list when the PR merges and the change comes
+back down.
+
+The scaffolding debt is settled. It obligated two small PRs, one to each sibling, adding a
 pointer paragraph to their own `updating.md` files: that a third repo now consumes the
 agent-ready layer, that it never originates changes to it, and that a shared-layer change
 made there should be expected to arrive as a PR rather than as a fork. Both landed —
 agent-ready-ts#7 and agent-ready-python#15 — so the flow described above is now recorded at
 both ends rather than only at this one. Neither sibling does anything differently; they
 just know the layer has a third reader.
+
+### A fourth reader, and it has drifted both ways
+
+[fab](https://github.com/CodeMocsh/fab) is built from agent-ready-python and is a
+downstream consumer of the same layer, which makes it worth diffing against for the same
+reason the siblings are. Two divergences exist today, in opposite directions:
+
+- **fab's `agent_guard.py` blocks `git commit` when no pre-commit hook is armed**, by
+  reading `core.hooksPath` and `rev-parse --git-path hooks`. That is a genuinely good rule
+  and this repo does not have it. It belongs in agent-ready-python, not here.
+- **This repo's `rm` parsing is better than fab's.** `_rm_is_recursive_forced_and_its_targets`
+  classifies every word rather than matching a leading flag group, so `rm / -rf` and
+  `rm -rf -- /` are caught and fab's regex misses both. That fix is already upstream; fab
+  has not pulled it.
+
+Neither is actionable here — the file is read-only in this repo — but a rule missing from
+the guard fails open, so a divergence looks exactly like a clean run in both directions.

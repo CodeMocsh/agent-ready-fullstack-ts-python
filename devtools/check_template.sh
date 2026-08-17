@@ -96,6 +96,10 @@ python3 -m py_compile .claude/hooks/agent_guard.py
 need .entire/settings.json
 python3 -c "import json,sys; json.load(open('.entire/settings.json'))"
 need docs/agent-tooling.md
+# AGENTS.md sends every rationale that is not a commit message here, so the directory
+# has to exist in a fresh project rather than being somewhere an agent is told to
+# write and finds missing.
+need docs/adr/README.md
 need .copier-answers.yml
 need_grep '_src_path' .copier-answers.yml
 need_grep '_commit' .copier-answers.yml
@@ -253,10 +257,18 @@ done
 
 echo "==> assert the shape of both halves"
 need Makefile
-for target in install hooks lint lint-check test test-fast test-contract dev \
-              dev-frontend dev-backend openapi openapi-check build upgrade clean; do
+for target in install hooks pre-commit lint lint-check test test-fast test-contract \
+              test-e2e test-e2e-live dev dev-frontend dev-backend openapi \
+              openapi-check build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
+# The gate is one named list so the hook, CI and a laptop cannot drift apart, and the
+# generated project's own test_gate.py is what keeps them together from then on. Here
+# we only assert it exists and that the browser tier stayed out of it: a gate that
+# downloads a browser is a gate people learn to commit around.
+need_grep '^pre-commit: lint-check openapi-check test$' Makefile
+need_no_grep '^pre-commit:.*test-e2e' Makefile
+need backend/tests/test_gate.py
 # CI builds and tests; it does not deploy, and it does not publish.
 test "$(ls .github/workflows)" = "ci.yml"
 
@@ -341,9 +353,9 @@ need_grep 'CONTRACT_TARGET' frontend/tests/contract.test.ts
 # that run exists to make, and the suite would pass while proving nothing.
 need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
 # The contract suite is the only check that can fail on the two halves not
-# interoperating, and it has two callers for one reason: the hook skips itself when
-# a clone has installed only one half, so on its own it is a signal and not a gate.
-need_grep 'contract-test.sh' .githooks/pre-commit
+# interoperating, and it reaches the hook through the gate rather than by name.
+need_grep 'make -s pre-commit' .githooks/pre-commit
+need_grep 'test-contract' Makefile
 need_grep 'make test-contract' .github/workflows/ci.yml
 # That job is the one place the single-toolchain rule is broken on purpose, and it
 # needs both setups to be right: pnpm cannot find a version without being pointed at
@@ -377,7 +389,7 @@ need_grep 'noUncheckedIndexedAccess' frontend/tsconfig.json
 # and fail on code nobody wrote.
 node -e "
 const pkg = require('./frontend/package.json');
-for (const key of ['complexity', 'conformance']) {
+for (const key of ['complexity', 'conformance', 'comments']) {
   if (!pkg[key].exclude.includes('src/api/schema.ts')) {
     throw new Error(key + '.exclude is missing src/api/schema.ts');
   }
@@ -387,6 +399,26 @@ if (!biome.files.includes.includes('!src/api/schema.ts')) {
   throw new Error('biome.json does not exclude src/api/schema.ts');
 }
 "
+# The comment gate. Both scripts are dependency-free, so they run here rather than only
+# inside the installed halves -- which means `make fast` catches a comment too. Running
+# them is also the only way to know the rule holds in what we ship: AGENTS.md has banned
+# comments since the first commit, and the tree had twelve when the gate was written.
+need frontend/devtools/comments.mjs
+need backend/devtools/comments.py
+# The scanner is subtle enough to have shipped a false positive twice before the table
+# existed -- a regex ending in an escaped slash, and a character class holding `/*`,
+# which also opened a block comment that ran to the end of the file and hid every real
+# comment below it. A gate that cries wolf is a gate people route around, and one that
+# goes quiet is worse. The table is what holds both directions.
+need frontend/tests/comments.test.ts
+need_grep 'startsARegex' frontend/devtools/comments.mjs
+need_grep 'devtools/comments.mjs' frontend/package.json
+need_grep 'devtools/comments.py' backend/devtools/lint.py
+(cd frontend && node devtools/comments.mjs src tests e2e devtools) \
+    || fail "the rendered frontend carries a comment"
+(cd backend && python3 devtools/comments.py app tests devtools) \
+    || fail "the rendered backend carries a comment"
+
 need_grep 'max-complexity' backend/pyproject.toml
 need_grep 'max-statements' backend/pyproject.toml
 need_grep '\[tool.complexity\]' backend/pyproject.toml
@@ -396,6 +428,11 @@ done
 
 echo "==> assert the supply-chain policy"
 need_grep 'minimumReleaseAge: 20160' frontend/pnpm-workspace.yaml
+# The dlx cache is held for a month so `make pre-commit` does not reach the registry
+# on the first commit of each day. That is only safe while every dlx call names an
+# exact version, so assert the one we ship still does.
+need_grep 'dlxCacheMaxAge' frontend/pnpm-workspace.yaml
+need_grep 'openapi-typescript@7\.13\.0' frontend/package.json
 need_grep 'trustPolicy: no-downgrade' frontend/pnpm-workspace.yaml
 need_grep 'semver@6.3.1' frontend/pnpm-workspace.yaml
 need_grep 'exclude-newer = "14 days"' backend/pyproject.toml
