@@ -312,18 +312,89 @@ rules: gate what renders correctly on the screen the agent is looking at and is 
 it never opens, and leave anything an agent can verify from its own diff to `AGENTS.md`.
 Whatever the backend's version of that turns out to be, it is not these eight patterns.
 
-## The contract artifact is excluded in three places
+## The comment gate
+
+`AGENTS.md` bans comments outright — rationale goes in the commit message, a decision goes
+in `docs/adr/`, and only a published package's exported surface carries a docstring or
+JSDoc. The rule is the interesting part. The gate exists because the rule does not hold on
+its own: an agent reads `AGENTS.md` at the top of a session and explains in place anyway,
+because that is what the training data does.
+
+Two scripts, one per half, both wired into `make lint`:
+
+- `frontend/devtools/comments.mjs` over `src`, `tests`, `e2e` and `devtools`
+- `backend/devtools/comments.py` over `app`, `tests` and `devtools`
+
+**Neither greps.** The Python one tokenizes, so a `#` inside a string or a URL is not a
+finding. The JavaScript one walks the file as a sequence of regions — quoted strings,
+template literals, line comments, block comments — and reports only the comment ones, which
+is the same scanner `conformance.mjs` uses to ignore strings. That matters more here than it
+looks: `devtools/complexity.mjs` documents `--exclude` in a multi-line template literal
+containing `/**`, and both scripts carry a `/\/\*\*$/` regex literal. A line-based check
+fails on both, and a check that cries wolf is a check people route around.
+
+**Regex literals are a region too**, and they have to be. `/[/*]/` is a perfectly ordinary
+way to match a slash or a star, and to a scanner that only knows strings and comments it
+opens a block comment that runs to the end of the file — so it both rejects valid code *and*
+hides every real comment below it, which is the worse half. `/[//]/` and `/https?:\/\//` are
+the same shape: a slash inside a character class does not close the regex, and an escaped
+one against the closing slash reads as `//`.
+
+Telling a regex from a division is the one genuinely ambiguous thing in JavaScript
+lexing, and this settles it the usual way: a `/` is division when the last significant
+character was an identifier, a digit, `)` or `]`, unless that identifier was a keyword
+(`return /x/` is a regex, `x / y` is not). Two cases stay ambiguous even in real parsers —
+a regex immediately after `)` or `}`, as in `if (a) /x/.test(b)` — and this reads those as
+division. The cost is a missed comment inside such a regex, never a false positive on the
+code, which is the direction to fail in. `comments.exclude` in `package.json` is the way
+out if a file ever hits it.
+
+All of that is a table in `frontend/tests/comments.test.ts`, in both directions: every
+comment shape is found, every slash-heavy expression is left alone, and a comment *after* a
+regex holding a comment marker is still found. This is subtle code, and one example proves
+neither direction — the regex handling was added because the first version shipped without
+it and the table is what would have caught that.
+
+**Two carve-outs, and nothing else.** A `#!` shebang on line 1, and a TypeScript `///`
+directive at the start of a line — `frontend/src/vite-env.d.ts` is one, and it is an
+instruction to the compiler rather than a note to a reader. In particular there is no
+carve-out for `biome-ignore`, `@ts-expect-error`, `# noqa` or `# type: ignore`, which is the
+half of the rule most worth mechanising. A suppression is a threshold decision taken
+silently, at the point of pain, by whoever was closest to it. Refusing the spelling forces
+it to become either a fix in the code or a line in `biome.json`, `tsconfig.json` or
+`pyproject.toml`, where it sits under a heading and shows up in a diff.
+
+**What it does not cover.** Not docstrings or JSDoc, because the carve-out turns on whether
+a package is consumed outside this repo and no tokenizer can answer that — both halves here
+are private, so today the answer is "none of it", and that half of the rule is enforced by
+review. Not JSON, TOML, YAML or Markdown: config files may carry comments where the format
+offers no other way to explain a rule, which is why `pyproject.toml` and the `Makefile` are
+full of them. And not `frontend/*.config.ts` — `vite.config.ts`, `vitest.config.ts` and the
+two Playwright configs are configuration that happens to be written in TypeScript, and they
+are outside biome's linted paths for the same reason.
+
+A file that will not parse is skipped rather than reported. `ruff`, `tsc` and `biome` run
+over the same paths in the same `make lint` invocation and fail on it first, so a syntax
+error has nothing to hide behind here.
+
+To remove it, delete the two scripts and their lines in `backend/devtools/lint.py` and the
+`lint` scripts in `frontend/package.json`. Drop the *Zero comments* section from `AGENTS.md`
+at the same time, or the rule goes back to being a suggestion that reads like a requirement.
+
+## The contract artifact is excluded in four places
 
 `frontend/src/api/schema.ts` is generated by `openapi-typescript` from `openapi.json`, and
 it grows with the API — a handful of endpoints already runs to a couple of hundred lines, so
 a real API clears the 500-line file limit early. It is invisible to every automatic skip:
 `conformance.mjs` and `complexity.mjs` skip only `.d.ts`, `.test.ts` and `.spec.ts`, and
-biome's `files.includes` lists vendored paths. So it is named explicitly in all three:
+biome's `files.includes` lists vendored paths. So it is named explicitly in all four:
 
 - `files.includes` in `frontend/biome.json`
 - `complexity.exclude` in `frontend/package.json`
 - `conformance.exclude` in `frontend/package.json`
+- `comments.exclude` in `frontend/package.json`
 
-If you add another generated or vendored file under `frontend/src/`, add it to all three at
-once. Two out of three is a check that passes today and fails on the commit after next, for
-reasons that will not be obvious.
+If you add another generated or vendored file under `frontend/src/`, add it to all four at
+once. Three out of four is a check that passes today and fails on the commit after next, for
+reasons that will not be obvious. `openapi-typescript` writes the spec's descriptions out as
+JSDoc, so the comment gate is the one that fails first and loudest.

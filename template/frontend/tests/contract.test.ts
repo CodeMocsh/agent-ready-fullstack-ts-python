@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { tasksApi } from "@/api/client";
 
-// One suite, two implementations of the same contract. `pnpm test:contract` runs it
-// against the mock handlers; `make test-contract` runs it again with the backend
-// half behind the dev server's /api proxy. Assertions describe the contract only --
-// shapes and status codes, never seed data, which the two implementations are free
-// to differ on. tests/setup.ts decides which implementation answers.
 const againstLiveBackend = process.env.CONTRACT_TARGET === "live";
 
 describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers"})`, () => {

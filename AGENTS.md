@@ -102,12 +102,14 @@ load-bearing.** `shadcn` reaches `@babel/core` → `semver@6.3.1`, which the
 `pnpm dlx shadcn add` in every generated project — `dlx` reads the project's settings too.
 Keep it pinned to the exact version.
 
-**`src/api/schema.ts` must stay in three exclusion lists.** The generated contract artifact
+**`src/api/schema.ts` must stay in four exclusion lists.** The generated contract artifact
 is a plain `.ts` file that grows with the API and clears the 500-line file gate early, and
 it is invisible to every automatic skip. It has to be named in `files.includes` in
-`template/frontend/biome.json`, in `complexity.exclude` in `template/frontend/package.json`,
-and in `conformance.exclude` in the same file. Two out of three passes today and fails later
-for reasons that will not be obvious. `check_template.sh` asserts all three.
+`template/frontend/biome.json`, and in `complexity.exclude`, `conformance.exclude` and
+`comments.exclude` in `template/frontend/package.json`. Three out of four passes today and
+fails later for reasons that will not be obvious — `openapi-typescript` writes the spec's
+descriptions out as JSDoc, so the comment gate is the one that fails first.
+`check_template.sh` asserts all four.
 
 `devtools/check_template.sh` catches every one of these, but only in a full run.
 `make fast` will not.

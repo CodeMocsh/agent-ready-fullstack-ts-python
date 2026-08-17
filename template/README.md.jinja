@@ -45,11 +45,17 @@ both implementations to prove they still agree.
 ## Everyday commands
 
 ```bash
+make pre-commit     # the gate: lint, both test suites, the contract, and the artifacts
 make lint           # both halves
 make test           # both halves, then the contract suite across both
+make test-e2e       # opt-in: Playwright in mock mode, in a real browser
 make build          # production build of the frontend
 make upgrade        # update dependencies, then regenerate the contract
 ```
+
+`make pre-commit` is what the git hook runs and what CI runs, so a green commit means a
+green build. It needs no browser and no second terminal; the two Playwright targets do,
+which is why they are opt-in and why nothing will tell you that you skipped them.
 
 See [docs/installation.md](docs/installation.md) for prerequisites,
 [docs/development.md](docs/development.md) for workflows, and

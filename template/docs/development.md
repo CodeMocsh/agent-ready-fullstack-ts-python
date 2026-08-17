@@ -122,13 +122,16 @@ one pass covers the proxy, the prefix rewrite, real HTTP and the real store. Tha
 asserts shapes and status codes only, never seed data: the two implementations seed
 different rows on purpose, because seeds are convenience and the spec is the contract.
 
+`CONTRACT_TARGET=live` is what tells the two files apart, and `tests/setup.ts` reads it
+for a reason worth knowing: starting the mock worker during the live run would intercept
+the very requests that run exists to make, and the suite would pass while proving
+nothing.
+
 `make test` runs everything, including that second pass. `make test-fast` skips it.
 
-Both runs are enforced. The mock-mode pass rides along in the frontend job's `pnpm
-test`; the live pass has its own `contract` job in `.github/workflows/ci.yml`, the only
-one that installs both toolchains. The pre-commit hook runs the live pass too, but it
-skips itself on a clone that has installed only one half, so the hook is a fast signal
-and the job is the gate.
+Both runs are in `make pre-commit`, and both are in CI. The mock-mode pass rides along in
+the frontend job's `pnpm test`; the live pass has its own `contract` job in
+`.github/workflows/ci.yml`, the only one that installs both toolchains.
 
 That job is the one place the single-toolchain rule is broken on purpose. Everything
 else in CI passes on a project whose frontend cannot reach its backend at all.
@@ -151,21 +154,38 @@ If `openapi.json` or `schema.ts` conflict in a merge, take either side and run
 
 ## Tests
 
+There are two tiers, and the line between them is whether a laptop can run the check
+without going and fetching something first.
+
+**The gate** is everything `make pre-commit` runs — lint on both halves, both unit
+suites, the contract artifacts, and the contract suite with the backend actually serving
+the frontend. It needs no browser binary, no network, and no second terminal. It is what
+the git hook runs and what CI runs.
+
+The "no network" part is bought rather than free: regenerating the contract runs
+`openapi-typescript` through `pnpm dlx`, `make install` fetches it once, and
+`dlxCacheMaxAge` in `frontend/pnpm-workspace.yaml` keeps it usable for a month. Without
+those two lines the first commit of each day would reach the registry, and a commit with
+no network would fail on a check that has nothing to do with connectivity.
+
 ```bash
-make test                       # everything
+make pre-commit                 # the whole gate
+make test                       # its test half: both halves, then the cross-half suite
 make test-fast                  # both halves, without the cross-half suite
 pnpm -C frontend test:watch     # component tests, watch mode
 cd backend && uv run pytest -q  # backend only
 ```
 
 Component tests run against the mock handlers, so they need no backend. Backend tests use
-FastAPI's `TestClient`, so they start no server.
+FastAPI's `TestClient`, so they start no server. `backend/tests/test_gate.py` is the odd
+one out: it tests the repository rather than the app, and fails when the `pre-commit`
+target, the hook and the workflow stop agreeing about what gets checked.
 
-### End-to-end
+### End-to-end — the opt-in tier
 
 ```bash
-pnpm -C frontend exec playwright install chromium   # once per machine
-pnpm -C frontend test:e2e                           # mock-mode specs
+make test-e2e        # mock-mode specs; installs chromium the first time
+make test-e2e-live   # the same against a running `make dev`
 ```
 
 The default Playwright run builds in mock mode and serves it from a **subpath**, because
@@ -173,14 +193,14 @@ plenty of hosts do and everything that only works at `/` fails there — the ser
 worker's scope, the API base, the router basepath. Run it after touching routing, the API
 client or the worker setup.
 
-For the real system, start `make dev` and run the live spec:
+`e2e/tasks.live.spec.ts` is the other one. It needs both halves up — `make dev` in
+another terminal — and it is how you look at the real thing in a browser rather than
+inferring it from the JSX.
 
-```bash
-pnpm -C frontend exec playwright test --config playwright.live.config.ts
-```
-
-Neither runs in CI: the browser download is slow and the mock-mode suite is the one that
-would gate. That is a deliberate trade, and it makes these specs yours to keep honest.
+Neither is in the gate and neither runs in CI: both need a browser binary that a gate has
+no business downloading, and the live one needs a second terminal. That is a deliberate
+trade, and it has a cost worth naming — **this is the one tier nothing will tell you that
+you skipped**. Opt-in is not the same as deleted. If you changed UI, run it.
 
 ## Git hooks
 
@@ -189,8 +209,16 @@ clone's hooks directory. It does **not** set `core.hooksPath`: that key is share
 worktree of the repository and replaces hook lookup wholesale, so it would disable hooks
 other tools installed. A hook you already had is chained rather than overwritten.
 
-The pre-commit hook lints both halves and skips a half whose toolchain is missing, so a
-clone that has installed only one still commits.
+The pre-commit hook runs `make pre-commit`, and there is deliberately no environment
+variable that turns it off — a check not worth running every time belongs outside the
+gate, not behind a flag.
+
+It does skip a half this clone has not installed, because working in one half alone is
+legitimate here. That is the one dangerous thing about it: a run where everything skipped
+exits 0 and looks exactly like a run where everything passed. So a partial run prints, on
+stderr, what it did not check — including the two members that need both halves at once,
+the artifact check and the contract suite. Read that line before believing the green, and
+run `make install` to make it go away.
 
 ## Supply chain
 

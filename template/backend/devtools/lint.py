@@ -12,7 +12,7 @@ COMPLEXITY_PATHS = ["app"]
 COMPLEXITY_BASELINE = ".complexity-baseline.json"
 
 
-reconfigure(emoji=not get_console().options.legacy_windows)  # No emojis on legacy windows.
+reconfigure(emoji=not get_console().options.legacy_windows)
 
 
 def main() -> int:
@@ -32,6 +32,7 @@ def main() -> int:
         errcount += run(["ruff", "check", "--fix", *SRC_PATHS])
         errcount += run(["ruff", "format", *SRC_PATHS])
     errcount += run(["basedpyright", "--stats", *SRC_PATHS])
+    errcount += run([sys.executable, "devtools/comments.py", *SRC_PATHS])
     errcount += run(
         [
             sys.executable,

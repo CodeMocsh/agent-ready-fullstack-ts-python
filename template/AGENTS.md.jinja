@@ -14,8 +14,6 @@ ways is a request you do not understand yet. Ask, or state the assumption you ar
 proceeding on and why. Guessing and building is the expensive failure; asking costs one
 round.
 
-Never swallow an error or return a silent default in its place.
-
 Code is the source of truth for behaviour; docs are the source of truth for intent. When
 they disagree the doc is wrong. Fix the doc, not the code.
 
@@ -25,16 +23,50 @@ and one that cannot fail is dead weight. Cover the seams and the edges that actu
 bite. Coverage percentage is not the goal, and deleting a test that no longer
 distinguishes anything is a real improvement.
 
+## Fail loudly
+
+No code path continues past a condition it did not plan for. Four bans, and both halves
+are in scope:
+
+- No `except Exception`, and no `catch` that continues.
+- No default standing in for a failure — no `or {}`, no `?? []`, no quietly returned
+  `None` or `undefined`.
+- No failure signalled by a return value a caller can drop. If continuing would be
+  wrong, raise or throw.
+- No warning where the code cannot correctly proceed.
+
+Not crashing is legitimate only when all three of these hold: the design plans for the
+condition, the contract names it, and the code reports it. Fewer than three, and it
+raises.
+
+This is not a style preference, because in an app with two halves **a silent failure
+looks like an empty screen**. A route that swallows a store error answers `200 []` and
+the table renders "No tasks yet". A `catch` around a mutation leaves the optimistic
+update on screen and the write on the floor. A mock handler that answers a case the
+backend refuses makes the contract suite green against a shape the real service never
+returns. Every one of those reads as working software — and a test that asserts the
+*absence* of an effect passes just as happily against the bug. Assert the failure
+itself.
+
+The contract is where this is cheapest to get right: declare every status code a route
+can return, with a model for anything that has a body, and the other half then cannot
+fail to handle it without a type error. See *Declare responses fully* below.
+
 ## Zero comments
 
 No explanatory comments, no docblocks, no TODO/FIXME notes, no lint or type suppression
 directives (`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`),
-no commented-out code. Shebangs are executable directives, not comments.
+no commented-out code. Shebangs and TypeScript `///` directives are executable
+directives, not comments.
 
 Express intent through names, structure, types, and tests. Rationale goes in the commit
 message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
 so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
 explanation.
+
+**An ADR cites nothing by section number.** Name the thing — the route, the function,
+the rule, the invariant — and let the reader grep. A section number points into one
+revision of one document, and an ADR outlives the document whose structure it borrowed.
 
 One carve-out: a published public API. Where a package is consumed outside this repo its
 exported surface carries JSDoc or a docstring, because that text is shipped documentation,
@@ -43,8 +75,18 @@ doc states contracts, not reasoning: behaviour, failure, timing, ownership, safe
 the rationale; don't restate it.
 
 Scope: source, tests, scripts. Config files may carry comments where the format offers no
-other way to explain a rule. **Vendored and generated code is out of scope entirely** —
-see below.
+other way to explain a rule, and that includes `frontend/*.config.ts`, which is
+configuration that happens to be written in TypeScript. **Vendored and generated code is
+out of scope entirely** — see below.
+
+**The rule is enforced, because on its own it does not hold.** `make lint` fails on any
+comment token under `frontend/{src,tests,e2e,devtools}` and `backend/{app,tests,devtools}`
+— `frontend/devtools/comments.mjs` and `backend/devtools/comments.py` are the two gates.
+An agent reads this file at the top of a session and explains in place anyway, because
+that is what the training data does. The suppression half is the half most worth
+mechanising: refusing the spelling turns a threshold decision taken silently at the point
+of pain into either a fix in the code or a reviewable line in `biome.json`,
+`tsconfig.json` or `pyproject.toml`.
 
 The guardrails this project ships are described in
 [docs/agent-tooling.md](docs/agent-tooling.md), including where each threshold came from,
@@ -126,14 +168,17 @@ style.
 
 ```bash
 make install        # both halves, then activate the versioned git hooks
+make pre-commit     # the gate: lint-check + openapi-check + test
 make dev            # both halves: backend on :8000, frontend on :5173 in live mode
 make dev-frontend   # frontend only, mock mode -- no backend required
 make dev-backend    # backend only, with reload
 make lint           # auto-fix and lint both halves
-make lint-check     # check-only variant, matching CI
+make lint-check     # check-only variant
 make test           # both halves, then the contract suite against the real backend
 make test-fast      # both halves only
 make test-contract  # the contract suite against the backend half
+make test-e2e       # the opt-in tier: Playwright in mock mode (installs chromium)
+make test-e2e-live  # the same against a running `make dev`
 make openapi        # regenerate the contract artifacts
 make openapi-check  # fail if the committed artifacts are stale
 make build          # production build of the frontend
@@ -144,20 +189,36 @@ Or work in one half with its own tools: `pnpm -C frontend test:watch`,
 `cd backend && uv run pytest -q tests/test_tasks.py`, `pnpm -C frontend add some-package`,
 `cd backend && uv add some-package`.
 
+**The checks live before the commit, not in CI.** `make pre-commit` is the gate, the git
+hook `make hooks` installs runs it for you, and CI runs the same list. **New checks go in
+`make pre-commit`** — a check there costs seconds, and the same check discovered on
+GitHub costs a billed minute plus the round trip to find out which of your last four
+commits broke it. `backend/tests/test_gate.py` fails when the gate, the hook and the
+workflow stop agreeing, so the three cannot drift apart quietly.
+
+The hook skips a half this clone has not installed, because working in one half alone is
+legitimate here. That is the one dangerous thing about it — a run where everything
+skipped exits 0 and looks exactly like a run where everything passed — so a partial run
+says on stderr what it did not check. Read that before believing the green.
+
+**Two things are deliberately not in the gate**, and both are the browser: `make test-e2e`
+and `make test-e2e-live` need a Playwright binary that a gate has no business
+downloading, and the live one needs `make dev` in another terminal. Opt-in is not the
+same as deleted — see *See what you built*.
+
 ## See what you built
 
 You have a browser. Use it. After a UI change, run the app and look at it rather than
 inferring from the JSX:
 
 ```bash
-pnpm -C frontend exec playwright install chromium   # once per machine
-pnpm -C frontend test:e2e                           # the mock-mode specs in e2e/
+make test-e2e       # the mock-mode specs in e2e/; installs chromium the first time
 ```
 
 To check the real system end to end, run `make dev` in one terminal and then:
 
 ```bash
-pnpm -C frontend exec playwright test --config playwright.live.config.ts
+make test-e2e-live
 ```
 
 To look at a screen the specs don't cover, add a throwaway spec in `frontend/e2e/` that
@@ -165,7 +226,10 @@ navigates to it and calls `await page.screenshot({ path: "shot.png" })`, run it,
 the image. Delete the spec afterwards unless it earned its keep as a test. A screenshot is
 evidence; reasoning about markup is a guess.
 
-The end-to-end specs deliberately do not run in CI, so they are yours to keep honest.
+These specs run in neither the gate nor CI, which makes them the one tier nothing will
+tell you that you skipped. `frontend/e2e/tasks.live.spec.ts` is the live one and it will
+fail against a backend that is not up; that failure is the point, and it is not a reason
+to delete the spec.
 
 ## Frontend conventions
 
