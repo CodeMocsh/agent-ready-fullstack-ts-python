@@ -18,13 +18,21 @@ CI_MUST_ALSO_RUN = {
     "the contract suite against the real backend": "make test-contract",
 }
 
-OPT_IN_TIER = ["test-e2e", "test-e2e-live"]
+OPT_IN_TIER = ["test-e2e", "test-e2e-live", "db-test"]
+"""What needs something fetched or started first: a browser binary, or a database daemon.
+The gate runs on every commit, so nothing here may be in it."""
 
 
 def prerequisites_of(target: str) -> list[str]:
     found = re.search(rf"^{re.escape(target)}:(.*)$", MAKEFILE.read_text(), re.MULTILINE)
     assert found is not None, f"no `{target}:` target in the Makefile"
     return found.group(1).split()
+
+
+CONDITIONALS = ("ifdef", "ifndef", "ifeq", "ifneq", "else", "endif")
+"""Make directives that may sit *inside* a recipe, so reaching one is not the end of it.
+`db-test` has an `ifdef` in the middle: with a TEST_DATABASE_URL it uses your database and
+with none it starts a container."""
 
 
 def recipe_of(target: str) -> list[str]:
@@ -34,9 +42,12 @@ def recipe_of(target: str) -> list[str]:
         return []
     recipe: list[str] = []
     for line in lines[start + 1 :]:
+        stripped = line.strip()
         if line.startswith("\t"):
-            recipe.append(line.strip())
-        elif line.strip() != "" and not line.startswith("#"):
+            recipe.append(stripped)
+        elif stripped == "" or line.startswith("#") or stripped.startswith(CONDITIONALS):
+            continue
+        else:
             break
     return recipe
 
@@ -63,14 +74,14 @@ def test_ci_runs_everything_the_gate_runs():
         )
 
 
-def test_the_browser_tier_stays_out_of_the_gate():
+def test_the_opt_in_tier_stays_out_of_the_gate():
     reached = set(THE_GATE)
     for target in THE_GATE:
         reached.update(prerequisites_of(target))
     for target in OPT_IN_TIER:
         assert target not in reached, (
-            f"`{target}` needs a browser binary and belongs to the opt-in tier; a gate "
-            f"that downloads one is a gate people turn off"
+            f"`{target}` belongs to the opt-in tier -- it needs a browser binary or a database "
+            f"daemon -- and a gate that fetches either is a gate people commit around"
         )
     for target in OPT_IN_TIER:
         assert recipe_of(target), f"`{target}` is documented as the opt-in tier and does nothing"

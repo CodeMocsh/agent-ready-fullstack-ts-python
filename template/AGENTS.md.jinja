@@ -177,8 +177,11 @@ make lint-check     # check-only variant
 make test           # both halves, then the contract suite against the real backend
 make test-fast      # both halves only
 make test-contract  # the contract suite against the backend half
-make test-e2e       # the opt-in tier: Playwright in mock mode (installs chromium)
-make test-e2e-live  # the same against a running `make dev`
+make test-e2e       # opt-in: Playwright in mock mode (installs chromium)
+make test-e2e-live  # opt-in: the same against a running `make dev`
+make db-test        # opt-in: the store suites against a real Postgres it starts itself
+make db             # a Postgres to develop against; prints the DATABASE_URL to export
+make schema         # regenerate deploy/schema.sql after a migration entry
 make openapi        # regenerate the contract artifacts
 make openapi-check  # fail if the committed artifacts are stale
 make build          # production build of the frontend
@@ -201,10 +204,12 @@ legitimate here. That is the one dangerous thing about it — a run where everyt
 skipped exits 0 and looks exactly like a run where everything passed — so a partial run
 says on stderr what it did not check. Read that before believing the green.
 
-**Two things are deliberately not in the gate**, and both are the browser: `make test-e2e`
-and `make test-e2e-live` need a Playwright binary that a gate has no business
-downloading, and the live one needs `make dev` in another terminal. Opt-in is not the
-same as deleted — see *See what you built*.
+**Three things are deliberately not in the gate**, and all three need something fetched or
+started first. `make test-e2e` and `make test-e2e-live` need a Playwright binary, and the
+live one needs `make dev` in another terminal. `make db-test` needs a Docker daemon. A gate
+that fetches any of those is a gate people learn to commit around, and `test_gate.py`
+asserts all three stay out of it. Opt-in is not the same as deleted — see *See what you
+built*, and run `make db-test` after touching `app/store/`.
 
 ## See what you built
 
@@ -294,16 +299,48 @@ to delete the spec.
 
 - **Layout**: `app/` is the service — `main.py` builds the FastAPI app, `models.py` holds
   the pydantic models the contract is made of, `routes.py` declares the endpoints,
-  `store.py` is the data layer. Tests live in `tests/`.
+  `deps.py` is what a route is handed, `wiring.py` chooses the substrate, and `store/` is
+  the data layer. Tests live in `tests/`.
 
 - **It is an application, not a library.** There is no build backend, no version, and
   nothing is published, so `[tool.uv] package = false` and `app` is importable from the
   project root rather than from site-packages. That is why `pytest` sets `pythonpath` and
   `devtools/export_openapi.py` adjusts `sys.path`.
 
-- **The store is in memory and resets on restart.** It exists so the demo runs with no
-  infrastructure. Replacing it with a real database is expected, and the five methods on
-  `TaskStore` are the seam to do it behind.
+- **The store is two implementations of one contract, and both are permanent.**
+  `MemoryDatabase` is the default and `PostgresDatabase` takes over when `DATABASE_URL` is
+  set. `tests/test_store_contract.py` runs one suite against both, which is what makes
+  `TaskStore` a contract rather than a shape nothing checks — and it is the same pattern
+  this repository already runs one layer up, where `frontend/tests/contract.test.ts` runs
+  against the mock handlers and against this service. Do not delete the in-memory substrate
+  when Postgres feels real enough: it is what `make test` and `make pre-commit` stand on,
+  and the gate must not need a daemon. See
+  [docs/adr/0001-two-substrates-behind-one-contract.md](docs/adr/0001-two-substrates-behind-one-contract.md).
+
+- **Seed rows belong to one suite.** The in-memory substrate seeds three tasks and Postgres
+  starts empty, deliberately: a suite that passes against both cannot have assumed either.
+  `tests/test_tasks.py` is the only file allowed to know about the seeds, and ids are the
+  same trap — memory hands out `"1"`, Postgres hands out uuids, and nothing may pattern-match
+  one.
+
+- **`wiring.build()` is the only reader of the environment.** Everything below it takes its
+  DSN, schema and migrate mode as arguments. That is what lets one process hold two
+  substrates, and why no test has to mutate `os.environ` to pick one. Nothing degrades from
+  Postgres to memory on an error — a deployment that silently came up on memory has data
+  that will not be there tomorrow, so a bad `DATABASE_URL` fails at boot.
+
+- **The schema is data, and `deploy/schema.sql` is generated from it.** `app/store/ddl.py`
+  holds one statement per entry under a four-digit key; run **`make schema`** and commit the
+  result after adding one, the same way `openapi.json` follows the models.
+  `tests/test_schema.py` fails when they drift. Two rules there are load-bearing and are
+  explained in that file: never edit a shipped entry, and a column added later lands **twice**
+  — in its table's `CREATE`, and as an `ALTER TABLE … ADD COLUMN IF NOT EXISTS` in the `0200_`
+  repair band, which sorts above everything because `migrate()` compares `max(key)`.
+
+- **The Postgres tier is opt-in.** `make db-test` starts its own `postgres:17-alpine` on an
+  ephemeral port and tears it down; set `TEST_DATABASE_URL` to use your own instead. It is
+  not in `make pre-commit` and not in CI, for the same reason the Playwright specs are not.
+  `make db` gives you a database to develop against and prints the `DATABASE_URL` to export.
 
 - **Declare responses fully.** Every status code a route can return belongs in the
   decorator, with a `model` for anything that has a body. The spec is generated from those

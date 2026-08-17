@@ -258,8 +258,8 @@ done
 echo "==> assert the shape of both halves"
 need Makefile
 for target in install hooks pre-commit lint lint-check test test-fast test-contract \
-              test-e2e test-e2e-live dev dev-frontend dev-backend openapi \
-              openapi-check build upgrade clean; do
+              test-e2e test-e2e-live db-test db schema dev dev-frontend dev-backend \
+              openapi openapi-check build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
 # The gate is one named list so the hook, CI and a laptop cannot drift apart, and the
@@ -268,7 +268,12 @@ done
 # downloads a browser is a gate people learn to commit around.
 need_grep '^pre-commit: lint-check openapi-check test$' Makefile
 need_no_grep '^pre-commit:.*test-e2e' Makefile
+need_no_grep '^pre-commit:.*db-test' Makefile
 need backend/tests/test_gate.py
+# The db-test recipe traps on INT so an interrupted suite does not leak its container, and
+# `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
+# foreground command returns, which on Ctrl-C it never does.
+need_grep '^SHELL := /bin/bash' Makefile
 # CI builds and tests; it does not deploy, and it does not publish.
 test "$(ls .github/workflows)" = "ci.yml"
 
@@ -304,8 +309,35 @@ need backend/pyproject.toml
 need backend/app/main.py
 need backend/app/models.py
 need backend/app/routes.py
-need backend/app/store.py
+need backend/app/deps.py
+need backend/app/wiring.py
 need backend/tests/test_tasks.py
+# Two substrates behind one contract, and one suite over both. A store package with only
+# one implementation in it is a shape nothing checks -- see docs/adr/0001.
+need backend/app/store/__init__.py
+need backend/app/store/memory.py
+need backend/app/store/pg.py
+need backend/app/store/ddl.py
+need backend/app/store/migrate.py
+need backend/app/store/conn.py
+need backend/tests/test_store_contract.py
+need backend/tests/test_schema.py
+need backend/tests/test_postgres.py
+need docs/adr/0001-two-substrates-behind-one-contract.md
+need_absent backend/app/store.py
+# The generated schema, committed the way openapi.json is. backend/tests/test_schema.py
+# fails when it drifts, and that test is in the fast tier, so the gate catches it.
+need deploy/schema.sql
+need backend/devtools/schema.py
+need_grep 'CREATE TABLE IF NOT EXISTS tasks' deploy/schema.sql
+need_grep 'applied_once' deploy/schema.sql
+# The search path is a startup parameter, never a statement: asyncpg's RESET ALL on release
+# restores startup parameters and clears session SETs, so a `SET search_path` from a connect
+# hook survives exactly one checkout and every one after it resolves against public --
+# silently, because the first query on each connection works.
+# The behavioural guard is backend/tests/test_postgres.py, which fails with `public` if
+# this changes; this only asserts the mechanism is still the one that test is about.
+need_grep 'server_settings' backend/app/store/pg.py
 need backend/devtools/export_openapi.py
 need_grep '^3.12' backend/.python-version
 # An application, not a library: no build backend, no wheel, nothing published.
@@ -680,6 +712,22 @@ echo "==> the contract suite, against both implementations"
 # frontend cannot reach its backend at all.
 run "contract suite (mocks)" pnpm -C frontend test:contract
 run "contract suite (live backend)" make test-contract
+
+echo "==> the store, against a real Postgres"
+# The opt-in tier, exercised here when a daemon is available. Gated rather than required,
+# because this script is the generator's own gate and must run on a laptop with no Docker --
+# and printed either way, because a silently skipped tier is indistinguishable from a passing
+# one. The generated project's `make db-test` is the same command; this is the generator
+# checking that the command it ships works.
+if docker info >/dev/null 2>&1; then
+    run "make db-test" make db-test
+    echo "    postgres: yes (container) -- store contract and migration suites ran"
+else
+    echo "    postgres: NO DOCKER -- backend/tests/test_postgres.py and the Postgres half of"
+    echo "    the store contract did not run. Everything about the schema that a fake"
+    echo "    connection can answer did (backend/tests/test_schema.py), and nothing here"
+    echo "    proves the DDL parses."
+fi
 
 echo "==> the dev loop starts both halves, and Ctrl-C stops both halves"
 # `make dev` is the command every user of a generated project runs first and runs
