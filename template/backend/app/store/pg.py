@@ -8,22 +8,31 @@ query on each connection works, which is what makes it look like an intermittent
 whatever ran second. `resolve_schema` has already refused anything that is not a bare
 lowercase identifier, so the name cannot carry anything the startup packet would misread.
 
-**No environment variable is read here.** The DSN, the schema and the migrate mode are all
-constructor arguments and `wiring.py` is the only reader, which is what lets one process hold
-two of these at once — what the contract suite does.
+**The tenant is `SET LOCAL`, never `SET`.** A session-scoped setting outlives the transaction
+that made it, and the next request handed that pooled connection inherits it — one tenant
+reading another's rows, with nothing in any log to say so. `set_config(..., true)` is the
+local form and every statement below runs inside a transaction that has issued it.
+
+**No environment variable is read here.** The DSN and the schema are constructor arguments and
+`wiring.py` is the only reader, which is what lets one process hold two of these at once —
+what the contract suite does.
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import TaskStore
+from app.store import TaskStore, TenantUnset
 from app.store.conn import resolve_schema
-from app.store.migrate import migrate, schema_version
+from app.store.ddl import TENANT_GUC
+from app.store.migrate import check, schema_version
 
+_SET_TENANT = "SELECT set_config($1, $2, true)"
 _LIST = "SELECT id, title, done FROM tasks ORDER BY seq"
-_CREATE = "INSERT INTO tasks (id, title) VALUES ($1, $2) RETURNING id, title, done"
+_CREATE = "INSERT INTO tasks (id, tenant_id, title) VALUES ($1, $2, $3) RETURNING id, title, done"
 _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
 
@@ -61,34 +70,46 @@ def _as_id(id: str) -> UUID | None:
 
 
 class PostgresTaskStore:
-    """`TaskStore` against a pool. Constructed per request and cheap: the pool is shared."""
+    """`TaskStore` against a pool, scoped to one tenant. Constructed per request and cheap.
 
-    def __init__(self, database: "PostgresDatabase") -> None:
+    Every statement runs inside a transaction that has set the tenant. Nothing here filters by
+    `tenant_id` in SQL: the policy does it, which is the point — a `WHERE` clause somebody
+    forgets is a promise, and a forced policy is a mechanism.
+    """
+
+    def __init__(self, database: "PostgresDatabase", tenant_id: str) -> None:
         self._database: PostgresDatabase = database
+        self._tenant_id: str = tenant_id
+
+    @asynccontextmanager
+    async def _scoped(self) -> AsyncGenerator[Any]:
+        pool = await self._database.pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(_SET_TENANT, TENANT_GUC, self._tenant_id)
+            yield conn
 
     async def list(self) -> list[Task]:
-        pool = await self._database.pool()
-        return [_task(row) for row in await pool.fetch(_LIST)]
+        async with self._scoped() as conn:
+            return [_task(row) for row in await conn.fetch(_LIST)]
 
     async def create(self, body: CreateTaskBody) -> Task:
-        pool = await self._database.pool()
-        row = await pool.fetchrow(_CREATE, uuid4(), body.title)
-        return _task(row)
+        async with self._scoped() as conn:
+            return _task(await conn.fetchrow(_CREATE, uuid4(), self._tenant_id, body.title))
 
     async def update(self, id: str, body: UpdateTaskBody) -> Task | None:
         parsed = _as_id(id)
         if parsed is None:
             return None
-        pool = await self._database.pool()
-        row = await pool.fetchrow(_UPDATE, parsed, body.done)
-        return None if row is None else _task(row)
+        async with self._scoped() as conn:
+            row = await conn.fetchrow(_UPDATE, parsed, body.done)
+            return None if row is None else _task(row)
 
     async def remove(self, id: str) -> bool:
         parsed = _as_id(id)
         if parsed is None:
             return False
-        pool = await self._database.pool()
-        return await pool.fetchval(_REMOVE, parsed) is not None
+        async with self._scoped() as conn:
+            return await conn.fetchval(_REMOVE, parsed) is not None
 
 
 class PostgresDatabase:
@@ -101,13 +122,11 @@ class PostgresDatabase:
         *,
         dsn: str,
         schema: str | None = None,
-        mode: str | None = None,
         min_size: int = 1,
         max_size: int = 10,
     ) -> None:
         self._dsn: str = dsn
         self._schema: str = resolve_schema(schema)
-        self._mode: str | None = mode
         self._min_size: int = min_size
         self._max_size: int = max_size
         self._pool: Any = None
@@ -132,13 +151,18 @@ class PostgresDatabase:
                     )
         return self._pool
 
-    def store(self) -> TaskStore:
-        return PostgresTaskStore(self)
+    def store(self, tenant_id: str) -> TaskStore:
+        if tenant_id.strip() == "":
+            raise TenantUnset(
+                "an unset tenant matches no rows under the policy, which is indistinguishable "
+                "from a tenant that owns none; refused here instead"
+            )
+        return PostgresTaskStore(self, tenant_id)
 
-    async def migrate(self) -> str:
+    async def check(self) -> str:
         pool = await self.pool()
         async with pool.acquire() as conn:
-            return await migrate(conn, self._schema, mode=self._mode)
+            return await check(conn, self._schema)
 
     async def schema_version(self) -> str | None:
         pool = await self.pool()

@@ -258,7 +258,8 @@ done
 echo "==> assert the shape of both halves"
 need Makefile
 for target in install hooks pre-commit lint lint-check test test-fast test-contract \
-              test-e2e test-e2e-live db-test db schema dev dev-frontend dev-backend \
+              test-e2e test-e2e-live db-test db db-demo migrate roles schema dev \
+              dev-frontend dev-backend \
               openapi openapi-check build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
@@ -328,6 +329,42 @@ need_absent backend/app/store.py
 # The generated schema, committed the way openapi.json is. backend/tests/test_schema.py
 # fails when it drifts, and that test is in the fast tier, so the gate catches it.
 need deploy/schema.sql
+need deploy/roles.sql
+need deploy/compose.yaml
+need_exec deploy/credentials.sh
+need CONTEXT.md
+for adr in 0002-tenant-isolation-is-forced-and-always-on \
+           0003-the-application-never-applies-ddl \
+           0004-the-schema-and-the-binary-must-match; do
+    need "docs/adr/$adr.md"
+done
+
+echo "==> assert tenant isolation is wired, not just described"
+# FORCE, not ENABLE. A table's owner bypasses its own policies by default, so with ENABLE
+# alone the role that applied the schema reads every row -- silently, with nothing anywhere
+# reporting a problem. backend/tests/test_isolation.py proves it against a real server; this
+# catches the edit before anyone has a database to run that against.
+need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql
+need_grep 'ENABLE ROW LEVEL SECURITY' deploy/schema.sql
+# WITH CHECK as well as USING, or a tenant may insert a row it cannot then read.
+need_grep 'WITH CHECK' deploy/schema.sql
+# The constraint that makes "an unset tenant matches nothing" a mechanism rather than an
+# observation about the data: without it one row with an empty tenant is readable by every
+# connection that never set one.
+need_grep "CHECK (tenant_id <> '')" deploy/schema.sql
+# Every index on a tenant table leads with tenant_id, or the policy cannot use it.
+need_grep 'ON tasks (tenant_id,' deploy/schema.sql
+# The application refuses to hold a credential that could apply DDL.
+need_grep 'DATABASE_OWNER_URL' backend/app/migrate.py
+need_grep 'OwnerCredentialVisible' backend/app/wiring.py
+need_no_grep 'DATABASE_OWNER_URL' backend/app/store/pg.py
+# The migrate service waits for a database that is genuinely up, and the file says how an
+# application would in turn wait for the migration to *finish* rather than to start.
+need_grep 'condition: service_healthy' deploy/compose.yaml
+need_grep 'service_completed_successfully' deploy/compose.yaml
+# Over TCP, not the socket: the entrypoint runs init against a temporary server that answers
+# on the unix socket only, so a socket probe reports healthy while init is still running.
+need_grep 'pg_isready -h 127.0.0.1' deploy/compose.yaml
 need backend/devtools/schema.py
 need_grep 'CREATE TABLE IF NOT EXISTS tasks' deploy/schema.sql
 need_grep 'applied_once' deploy/schema.sql

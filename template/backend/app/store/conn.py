@@ -20,7 +20,10 @@ DEFAULT_SCHEMA = "app"
 
 SCHEMA_ENV = "DB_SCHEMA"
 
-_IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
+_IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,55}$")
+"""56 characters, not Postgres' 63. `roles.py` derives `<schema>_owner` from this name,
+and an identifier over 63 bytes is *truncated* rather than refused -- so two schemas long
+enough to collide after truncation would silently share a role."""
 
 
 class InvalidSchemaName(ValueError):
@@ -61,7 +64,8 @@ def resolve_schema(name: str | None = None) -> str:
     if not _IDENT.match(resolved):
         raise InvalidSchemaName(
             f"{SCHEMA_ENV}={resolved!r}: expected a lowercase identifier matching "
-            f"{_IDENT.pattern} (letters, digits and underscore, 63 max)"
+            f"{_IDENT.pattern} (letters, digits and underscore, 56 max so that "
+            f"the role names derived from it fit in Postgres' 63)"
         )
     return resolved
 

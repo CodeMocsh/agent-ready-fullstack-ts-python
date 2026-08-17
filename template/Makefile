@@ -19,7 +19,8 @@ CONTRACT_BASE_URL ?= http://localhost:5173/api
 .DEFAULT_GOAL := default
 
 .PHONY: default install hooks pre-commit lint lint-check test test-fast test-contract \
-        test-e2e test-e2e-live db-test db schema dev dev-frontend dev-backend openapi \
+        test-e2e test-e2e-live db-test db db-demo migrate roles schema dev dev-frontend \
+        dev-backend openapi \
         openapi-check build upgrade clean
 
 default: install lint test
@@ -90,7 +91,7 @@ test-e2e-live:
 # a fixed pair breaks both ways when two checkouts run this at once: a taken port fails the
 # run outright, and a shared name means one teardown destroys the other's database mid-suite.
 DB_TEST_IMAGE ?= postgres:17-alpine
-DB_TEST_FILES = tests/test_store_contract.py tests/test_postgres.py
+DB_TEST_FILES = tests/test_store_contract.py tests/test_postgres.py tests/test_isolation.py
 
 db-test:
 ifdef TEST_DATABASE_URL
@@ -107,26 +108,54 @@ else
 		uv run --no-sync pytest -rs $(DB_TEST_FILES)
 endif
 
-# A database to develop against: persistent, schema applied, and distinct from the throwaway
-# db-test starts. Prints the DATABASE_URL to export; without one, `make dev` uses the
-# in-memory substrate.
-DB_DEV_NAME ?= $(notdir $(CURDIR))-db
-DB_DEV_PORT ?= 5433
+# The release step, and the only thing that reads DATABASE_OWNER_URL. The application
+# refuses to start if it can see that variable, so this is the one path that can apply
+# DDL. Wire it into whatever your platform calls a release command -- see the migrate
+# service in deploy/compose.yaml for the shape, and docs/development.md for the mapping.
+migrate:
+	cd backend && uv run --no-sync python -m app.migrate
+
+# A persistent database to develop against, with the roles applied at init and the schema
+# applied the way a release would apply it. Distinct from the throwaway db-test starts.
+COMPOSE = deploy/compose.yaml
+DB_PORT ?= 5433
+DB_SUPERUSER_PASSWORD ?= postgres
+APP_DB_PASSWORD ?= app
+
+# compose reads these from its *environment*, and a make variable is not one: a
+# `make db DB_PORT=5544` that reached only the migration would start the database on 5433 and
+# then migrate whatever was already listening on 5544. `export` rather than a VAR=value prefix
+# on the recipe line, because a prefix goes through the shell and a password containing a
+# quote or a space would end the command rather than be passed to it.
+export DB_PORT
+export APP_DB_PASSWORD
+export POSTGRES_PASSWORD = $(DB_SUPERUSER_PASSWORD)
 
 db:
-	@docker inspect $(DB_DEV_NAME) >/dev/null 2>&1 \
-	  || docker run -d -p $(DB_DEV_PORT):5432 -e POSTGRES_PASSWORD=dev \
-	       --name $(DB_DEV_NAME) $(DB_TEST_IMAGE) >/dev/null
-	@docker start $(DB_DEV_NAME) >/dev/null 2>&1 || true
-	@until docker exec $(DB_DEV_NAME) pg_isready -q >/dev/null 2>&1; do sleep 0.5; done
-	@echo "export DATABASE_URL=postgres://postgres:dev@localhost:$(DB_DEV_PORT)/postgres"
-	@echo "# then: make dev-backend   (the app applies its own schema on startup)"
+	docker compose -f $(COMPOSE) up -d --wait postgres
+	@cd backend && DATABASE_OWNER_URL=postgres://postgres:$(DB_SUPERUSER_PASSWORD)@localhost:$(DB_PORT)/postgres \
+		uv run --no-sync python -m app.migrate
+	@echo ""
+# The printed URL assumes APP_DB_PASSWORD needs no percent-encoding, which the default does
+# not. It is a convenience for a local development database; a real deployment sets
+# DATABASE_URL itself and never comes through here.
+	@echo "export DATABASE_URL=postgres://app_app:$(APP_DB_PASSWORD)@localhost:$(DB_PORT)/postgres"
+	@echo "# then: make dev-backend. That role holds DML and no CREATE, so the app verifies"
+	@echo "# the schema and cannot apply it -- run 'make migrate' when you add an entry."
 
-# deploy/schema.sql is generated from app/store/ddl.py, the way openapi.json is generated
-# from the models. backend/tests/test_schema.py fails when the committed file drifts, so
-# this is how you make that test pass after adding a migration entry.
+# Isolation, made visible. Everything else about it is proved by tests nobody watches.
+db-demo:
+	@cd backend && DATABASE_URL=$${DATABASE_URL:-postgres://app_app:$(APP_DB_PASSWORD)@localhost:$(DB_PORT)/postgres} \
+		uv run --no-sync python devtools/isolation_demo.py
+
+# deploy/schema.sql and deploy/roles.sql are generated from app/store/, the way
+# openapi.json is generated from the models. backend/tests/test_schema.py fails when either
+# committed file drifts, so this is how you make that test pass after a change.
 schema:
 	cd backend && uv run python devtools/schema.py ../deploy/schema.sql
+
+roles:
+	cd backend && uv run python devtools/roles.py ../deploy/roles.sql
 
 dev:
 	@sh devtools/dev.sh

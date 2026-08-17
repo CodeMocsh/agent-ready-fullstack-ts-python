@@ -181,7 +181,10 @@ make test-e2e       # opt-in: Playwright in mock mode (installs chromium)
 make test-e2e-live  # opt-in: the same against a running `make dev`
 make db-test        # opt-in: the store suites against a real Postgres it starts itself
 make db             # a Postgres to develop against; prints the DATABASE_URL to export
+make db-demo        # two tenants against one table, so the isolation is visible
+make migrate        # the release step: applies the schema. The app never does.
 make schema         # regenerate deploy/schema.sql after a migration entry
+make roles          # regenerate deploy/roles.sql after a role change
 make openapi        # regenerate the contract artifacts
 make openapi-check  # fail if the committed artifacts are stale
 make build          # production build of the frontend
@@ -209,7 +212,7 @@ started first. `make test-e2e` and `make test-e2e-live` need a Playwright binary
 live one needs `make dev` in another terminal. `make db-test` needs a Docker daemon. A gate
 that fetches any of those is a gate people learn to commit around, and `test_gate.py`
 asserts all three stay out of it. Opt-in is not the same as deleted — see *See what you
-built*, and run `make db-test` after touching `app/store/`.
+built*, and run `make db-test` after touching `app/store/` or `deploy/`.
 
 ## See what you built
 
@@ -350,6 +353,41 @@ to delete the spec.
 - **Lint/format**: [ruff](https://docs.astral.sh/ruff/) for both, `basedpyright` for types,
   `codespell` for prose. `uv run python devtools/lint.py` runs the lot, which is what
   `make lint` calls.
+
+## Tenancy and the database
+
+Five rules. The reasoning is in `docs/adr/0002`, `0003` and `0004`; these are the ones an
+agent breaks without noticing.
+
+- **Every index on a tenant table leads with `tenant_id`.** An index that does not cannot
+  satisfy the policy's predicate, so Postgres scans instead. It fails invisibly — right
+  answers, quietly slower — until the table is large enough that fixing it means rebuilding
+  indexes on live data. `backend/tests/test_schema.py` enforces it.
+
+- **A policy may only compare a column to a setting.** Anything needing a join or a
+  row-dependent function call is a bug in the schema, not a policy to write: those are the
+  ones the planner runs per row.
+
+- **Migrations are additive, and the application never applies them.** No `DROP COLUMN`, no
+  `ALTER COLUMN ... TYPE`, no `RENAME` — a test refuses the spelling, because that is what
+  makes an expand-and-contract change possible across two releases. `make migrate` applies;
+  `make schema` and `make roles` regenerate the committed artifacts in `deploy/`.
+
+- **The schema version must match the build exactly.** A database ahead of the running build
+  is refused as firmly as one behind, so a rolling deploy has a window in which a restarting
+  instance of the previous release will not start, and a rollback needs the schema rolled back
+  too. That is deliberate — `docs/adr/0004` — not something to soften when it bites.
+
+- **The application must never see `DATABASE_OWNER_URL`.** It refuses to start if it can. Only
+  `python -m app.migrate` reads it.
+
+- **Never widen the store's surface to take a tenant.** `Database.store(tenant_id)` is the only
+  way to get one, and the tenant is a parameter on no method — a store you can hold is a store
+  already scoped. Adding `tenant_id=` to a method would put the filter back in the hands of
+  whoever remembered it.
+
+`CONTEXT.md` is the glossary, and says why renaming `tenant_id` to your product's word is a
+day-one decision.
 
 ## Both halves
 

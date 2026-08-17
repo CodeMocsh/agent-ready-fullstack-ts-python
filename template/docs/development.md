@@ -208,10 +208,10 @@ Two rules there are load-bearing:
   early when the database is not behind, so a repair sorted under an existing entry would
   never run at all.
 
-`DB_MIGRATE=check` turns the apply into a verify, for a deployment whose schema is owned by
-something else: apply `deploy/schema.sql` with your own tooling, then run the app under
-`check`. The emitted script records a ledger row for every key it applies, which is what makes
-`check` pass against it afterwards.
+For a deployment whose schema is owned by something else, apply `deploy/schema.sql` with
+your own tooling instead of running `make migrate`. The emitted script records a ledger row
+for every key it applies, which is what makes the app's startup check pass against it
+afterwards. There is no mode to set: the application only ever verifies.
 
 ### One trap worth knowing
 
@@ -281,6 +281,65 @@ all three stay out of it.
 That is a deliberate trade with a cost worth naming: **this is the one tier nothing will tell
 you that you skipped.** Opt-in is not the same as deleted. If you changed UI, run
 `make test-e2e`; if you changed `backend/app/store/`, run `make db-test`.
+
+## The database
+
+Two substrates. With no `DATABASE_URL` the app runs in memory and needs no infrastructure;
+with one it runs on Postgres. `make db` brings up a persistent Postgres, applies the roles at
+init and the schema the way a release does, and prints the `DATABASE_URL` to export.
+
+```bash
+make db          # postgres + roles + schema, and the URL to export
+make db-demo     # two tenants against one table, so the isolation is visible
+make db-test     # the opt-in tier: contract, migration and isolation suites
+make migrate     # the release step
+make schema      # regenerate deploy/schema.sql after a migration entry
+make roles       # regenerate deploy/roles.sql after a role change
+```
+
+### The application does not migrate itself
+
+It verifies the schema at startup and refuses to serve if it is behind. Applying is
+`make migrate`, run by something that is not the web process — see
+[docs/adr/0003](adr/0003-the-application-never-applies-ddl.md) for why, and note that the app
+**refuses to start** if it can see `DATABASE_OWNER_URL`.
+
+Wire it into whatever your platform calls a release command:
+
+| Platform | Hook |
+|---|---|
+| Fly | `[deploy] release_command` |
+| Heroku, Railway, Render | release / pre-deploy command |
+| Kubernetes | a `Job` with `helm.sh/hook: pre-upgrade`, or an initContainer |
+| ECS | a one-off task in the pipeline |
+| docker compose | the `migrate` service in `deploy/compose.yaml` |
+
+It is idempotent, serialises on an advisory lock, and exits 0 when already current. Skip it and
+the deploy fails at startup naming both schema versions, which is the point.
+
+**The schema version must match the build exactly**, in both directions — a database *ahead*
+of the running build is refused just as firmly as one behind
+([docs/adr/0004](adr/0004-the-schema-and-the-binary-must-match.md)). That has a cost worth
+knowing before your first rolling deploy: between the release step and the last old instance
+being replaced, any instance of the *previous* version that restarts will not come back up.
+Already-running instances are fine — they checked at boot. If that window matters, make the
+migration and the rollout one step: scale down, migrate, scale up. And plan a rollback as a
+schema rollback, because redeploying the previous build against a migrated database will not
+start.
+
+A single container that migrates and then serves must drop the credential in between:
+`env -u DATABASE_OWNER_URL uvicorn ...`.
+
+### Tenant isolation
+
+Every row carries a `tenant_id` and a forced row-level security policy enforces it, so a query
+that forgot to filter still cannot cross a tenant. `app/identity.py` decides which tenant a
+request is, and ships as a stub that authenticates nothing and returns `"default"`.
+
+Two things to know before changing anything here: a **superuser bypasses every policy**, so
+the application must connect as `<schema>_app` and the suites do too; and **every index must
+lead with `tenant_id`**, which a test enforces. The rest is
+[docs/adr/0002](adr/0002-tenant-isolation-is-forced-and-always-on.md).
 
 ## Git hooks
 
@@ -355,7 +414,7 @@ Not configured, deliberately — deployment shape is yours. The pieces:
 - Never ship mock mode: production builds must leave `VITE_ENABLE_MSW` unset.
 - **Set `DATABASE_URL`, or you are deploying the in-memory substrate.** It resets on every
   restart, and nothing in the app will complain: it comes up, serves, and loses the data.
-  `GET /` is not a health check for this — read the startup log, or assert
-  `app.state.database.name` if you add one. Set `DB_MIGRATE=check` where the schema is owned
-  by your own migration tooling, apply `deploy/schema.sql` there first, and give the app a
-  role that holds no `CREATE`.
+  The app logs which substrate it came up on at startup (`serving on the … substrate`) —
+  grep your deploy logs for it, or assert `app.state.database.name` from a smoke test. Where
+  the schema is owned by your own migration tooling, apply `deploy/schema.sql` there first;
+  the app never applies anything either way, so give it a role that holds no `CREATE`.

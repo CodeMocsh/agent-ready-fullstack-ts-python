@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from app.identity import tenant_for
 from app.store import Database, TaskStore
 
 
@@ -27,7 +28,12 @@ def database_of(request: Request) -> Database:
 
 
 def get_store(request: Request) -> TaskStore:
-    return database_of(request).store()
+    """The store this request may use, already scoped to its tenant.
+
+    Resolving the tenant here rather than in each route is what makes it impossible for a
+    route to forget: there is no unscoped store to obtain.
+    """
+    return database_of(request).store(tenant_for(request))
 
 
 StoreDep = Annotated[TaskStore, Depends(get_store)]

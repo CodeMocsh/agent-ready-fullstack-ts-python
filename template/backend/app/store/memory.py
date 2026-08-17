@@ -10,7 +10,7 @@ real enough — the fast tier and the frontend's zero-backend mode both stand on
 """
 
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import TaskStore
+from app.store import TaskStore, TenantUnset
 from app.store.migrate import known_version
 
 SEED: tuple[tuple[str, str, bool], ...] = (
@@ -23,19 +23,22 @@ SEED: tuple[tuple[str, str, bool], ...] = (
 
 
 class MemoryTaskStore:
-    """`TaskStore` over a list. Ids are small integers as strings, unlike Postgres' uuids —
-    which is deliberate: a suite that passes against both cannot have assumed either."""
+    """`TaskStore` over a list, holding one tenant's rows.
 
-    def __init__(self) -> None:
-        self._tasks: list[Task] = [Task(id=id, title=title, done=done) for id, title, done in SEED]
-        self._next_id: int = len(SEED) + 1
+    Ids are small integers as strings, unlike Postgres' uuids — deliberate, so that a suite
+    passing against both cannot have assumed either.
+    """
+
+    def __init__(self, tasks: list[Task], counter: list[int]) -> None:
+        self._tasks: list[Task] = tasks
+        self._counter: list[int] = counter
 
     async def list(self) -> list[Task]:
         return list(self._tasks)
 
     async def create(self, body: CreateTaskBody) -> Task:
-        task = Task(id=str(self._next_id), title=body.title, done=False)
-        self._next_id += 1
+        self._counter[0] += 1
+        task = Task(id=str(self._counter[0]), title=body.title, done=False)
         self._tasks.append(task)
         return task
 
@@ -55,17 +58,30 @@ class MemoryTaskStore:
 
 
 class MemoryDatabase:
-    """One store, seeded, held for the life of the process."""
+    """One list per tenant, held for the life of the process.
+
+    Exactly one tenant is seeded — the one a deployment with no identity resolver serves. Any
+    other starts empty, which is what makes `two tenants do not see each other` a real
+    assertion here and not a coincidence of both being handed the same rows.
+    """
 
     name: str = "memory"
 
-    def __init__(self) -> None:
-        self._store: MemoryTaskStore = MemoryTaskStore()
+    def __init__(self, seed_tenant: str) -> None:
+        self._tenants: dict[str, list[Task]] = {
+            seed_tenant: [Task(id=id, title=title, done=done) for id, title, done in SEED]
+        }
+        self._counter: list[int] = [len(SEED)]
 
-    def store(self) -> TaskStore:
-        return self._store
+    def store(self, tenant_id: str) -> TaskStore:
+        if tenant_id.strip() == "":
+            raise TenantUnset(
+                "the in-memory substrate has no policy to fail closed for it, so an unset "
+                "tenant is refused here rather than answered with an empty list"
+            )
+        return MemoryTaskStore(self._tenants.setdefault(tenant_id, []), self._counter)
 
-    async def migrate(self) -> str:
+    async def check(self) -> str:
         """A no-op that reports the current version: this substrate has no schema to be
         behind. Reporting the version rather than `None` keeps `Database` uniform, so a
         caller never branches on which substrate it holds."""
