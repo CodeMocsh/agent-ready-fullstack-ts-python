@@ -70,7 +70,8 @@ On top of that stack it adds the **agent-ready layer**:
 - **A contract suite that runs twice** — `frontend/tests/contract.test.ts` exercises the
   real API client against the mock handlers under `pnpm test`, and against the running
   backend through the dev proxy under `make test-contract`. Identical assertions, two
-  implementations: the standard way to keep a test double honest.
+  implementations: the standard way to keep a test double honest. Both runs are enforced in
+  the generated project's CI, the second by the one job that installs both toolchains.
 - **[Entire](https://entire.io) session-tracking hooks** in `.claude/settings.json` that
   checkpoint agent coding sessions alongside git history. The hooks no-op until the `entire`
   CLI is installed, so they cost nothing until you opt in — and you can delete `.claude/`
@@ -88,7 +89,9 @@ On top of that stack it adds the **agent-ready layer**:
   cool-off on both sides (`minimumReleaseAge` for pnpm, `exclude-newer` for uv), pnpm's
   `trustPolicy: no-downgrade`, and SHA-pinned GitHub Actions. These are strict enough to
   have real consequences: dependency floors have to be chosen from outside the cool-off
-  window.
+  window, and when a security patch is itself inside that window it takes an exception
+  pinned to the exact patched version. Backend runtime dependencies are bounded above as
+  well as below, because no lockfile ships and the OpenAPI artifact is committed.
 
 ## Usage
 
@@ -165,9 +168,11 @@ make fast         # render and assert only, skipping install/lint/test/build
 make hooks        # enable the pre-commit hook (once per clone)
 ```
 
-A full run installs both toolchains, lints and tests both halves, regenerates the contract
-and diffs it, and runs the contract suite with the backend actually serving the frontend.
-Editing `template/` and trusting the diff proves nothing: render it and exercise the output.
+A full run installs both toolchains, audits the frontend's production dependencies, lints
+and tests both halves, regenerates the contract and diffs it, runs the contract suite with
+the backend actually serving the frontend, and finally boots `make dev` and stops it to
+prove both ports are released. Editing `template/` and trusting the diff proves nothing:
+render it and exercise the output.
 
 * * *
 

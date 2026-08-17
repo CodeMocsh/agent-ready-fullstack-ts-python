@@ -135,8 +135,20 @@ the system **Python 3.14.7**. The pin file is what makes CI and laptops agree.
   test, live mode does not. Assertions cover shapes and status codes, never seed contents —
   which is also the design's stated position: seeds are convenience, the spec is the contract.
 - **Backgrounded servers hold stdout open**, so a naive `sh dev.sh | tail` never sees EOF
-  even after the script exits. `devtools/dev.sh` must redirect child output rather than
-  inherit it, and any CI step that boots the halves must do the same.
+  even after the script exits. Resolved by supervision rather than redirection: `dev.sh`
+  outlives its children and kills them on the way out, so the last writer closes the pipe.
+  A CI step that boots the halves and returns must still redirect, and
+  `devtools/contract-test.sh` does.
+- **`exec` discards traps.** The first `dev.sh` handed the terminal to vite with
+  `exec pnpm dev:live`, which replaced the shell and with it the cleanup trap, so Ctrl-C
+  stopped the frontend and left uvicorn holding :8000. The frontend still runs in the
+  foreground — that is what keeps vite's shortcuts — but without `exec`, so the shell is
+  there to clean up.
+- **Signalling that script is not the same as pressing the key.** While vite holds the
+  foreground, a `kill` to `dev.sh` cannot be handled until vite returns, so a test built on
+  one would deadlock and prove nothing. `check_template.sh` forks a pty and writes `0x03`,
+  which is what the terminal's line discipline turns into a SIGINT for the foreground
+  group. Nothing about this failure is visible in a diff, and it had already shipped once.
 
 ---
 
@@ -317,10 +329,20 @@ suite), `test-fast` (per-half only), `dev`, `dev-frontend`, `dev-backend`, `open
 `openapi-check`, `build`, `upgrade`, `clean`. Exports `UV_EXCLUDE_NEWER ?= 14 days`.
 
 `make dev` means **live mode, both halves** — at monorepo altitude "dev" means the system,
-and mock-only stays one command away as `make dev-frontend`. `devtools/dev.sh` is ~20 lines
-of POSIX sh: uvicorn backgrounded on :8000, vite on :5173, `trap` cleanup, child output
-redirected (see the spike's pipe finding), backend death surfaced rather than silent. No
-`concurrently`, no honcho — two terminals remain the documented fallback.
+and mock-only stays one command away as `make dev-frontend`. `devtools/dev.sh` is ~40 lines
+of POSIX sh: uvicorn backgrounded on :8000 in a process group of its own, vite on :5173 in
+the foreground so it keeps the terminal, and one `trap` that outlives them both. Not
+`exec`ed — see the finding above. A backend that never answers is surfaced rather than left
+to look like a frontend bug.
+
+Cleanup escalates — SIGTERM, one second, SIGKILL — because uvicorn's `--reload` supervisor
+does not reliably exit once its worker is gone and `uv run` waits for it. A lone TERM leaves
+the script blocked in `wait` forever, so Ctrl-C never returns the prompt: the original bug
+wearing a different hat, and observed once across four full runs before the escalation went
+in. Keeping vite in the foreground is what preserves its keyboard shortcuts, and the price
+is that a signal sent to the script alone waits for vite to return — which is why
+`check_template.sh` drives a pty and writes `0x03` rather than calling `kill`. No
+`concurrently`, no honcho; two terminals remain the documented fallback.
 
 `make upgrade` **must end with `make openapi`**: `app.openapi()` is deterministic for pinned
 versions but not across FastAPI/pydantic minor bumps, and `openapi-typescript` output changes
@@ -328,10 +350,17 @@ with its own version.
 
 ### 7. CI for the generated project
 
-One workflow, two jobs, deliberately narrow. **frontend**: pnpm frozen install → `lint:check`
-→ `test` → types-sync assertion → `build`. **backend**: `uv sync --frozen` →
-`devtools/lint.py --check` → `pytest` → spec-sync assertion. SHA-pinned actions,
-`persist-credentials: false`, `UV_EXCLUDE_NEWER: "14 days"` at workflow env.
+One workflow, three jobs. **frontend**: pnpm frozen install → `lint:check` → `test` →
+types-sync assertion → `build`. **backend**: `uv sync --frozen` → `devtools/lint.py --check`
+→ `pytest` → spec-sync assertion. **contract**: both toolchains → `make test-contract`.
+SHA-pinned actions, `persist-credentials: false`, `UV_EXCLUDE_NEWER: "14 days"` at workflow
+env.
+
+The third job breaks the single-toolchain rule on purpose, and it is the only one that can
+fail on the halves not interoperating — the other two pass on a project whose frontend cannot
+reach its backend at all. It was originally left to the pre-commit hook, which was wrong: the
+hook skips itself when a clone has installed only one half, so the check had a caller but no
+gate.
 
 **No version matrix** — Node 24, Python 3.12, the runtimes this app deploys on. Both siblings
 matrix because they generate broadly-consumed artifacts; an application tests what it runs.
@@ -494,19 +523,41 @@ staged through a file because CI's dash has no `pipefail`), then:
    `.copier-answers.yml` has `_src_path` and `_commit`, `test -x` on the hooks and scripts.
 4. Copier-specific safety net: no surviving `{{ … }}` (excluding `${{ }}`), no surviving `{%`,
    and `find . -name '*.jinja'` empty — the forgotten-suffix failure mode.
-5. Guard deny/allow tables — the union of both siblings', plus `rm -rf frontend/node_modules`
+5. **Adversarial render** (default variant only): a second render whose free-form answers
+   carry quotes, backslashes, ampersands and angle brackets, with both manifests parsed back
+   and every answer compared against what went in. Interpolating an answer raw into
+   hand-written JSON or TOML is the failure that lands in someone else's project, on
+   `pnpm install`, with nothing in the diff to suggest why.
+6. Guard deny/allow tables — the union of both siblings', plus `rm -rf frontend/node_modules`
    and `rm -rf backend/.venv` in MUST_ALLOW. Mind that Python's `json.dumps` emits
    `"permissionDecision": "deny"` **with** a space.
-6. App shape, both halves; contract artifacts exist; supply-chain greps (`minimumReleaseAge`,
-   `trustPolicy`, `exclude-newer` ×3, actions SHA-pinned); complexity-ratchet assertions ×2
-   halves; the conformance block (frontend only); the per-file line limit; and the
-   three-list exclusion assertion extended to `src/api/schema.ts`.
-7. Hook-activation suite, verbatim.
-8. License variants, now including `backend/pyproject.toml`.
-9. **`FAST=1` exits here.**
-10. Full exercise: `git init` + commit, `uv sync` / lint / pytest, `pnpm install` /
-    `lint:check` / `test` / `build`, `make openapi-check`, **`make test` including the
-    dual-run contract suite**, `dist/` assertions and the msw-leak bundle grep.
+7. App shape, both halves; contract artifacts exist; the generated workflow's contract job
+   and its two easy-to-omit setup inputs; supply-chain greps (`minimumReleaseAge`,
+   `trustPolicy`, `exclude-newer` ×3, actions SHA-pinned), every policy exclusion pinned to
+   an exact version, and every runtime dependency bounded above; complexity-ratchet
+   assertions ×2 halves; the conformance block (frontend only); the per-file line limit; and
+   the three-list exclusion assertion extended to `src/api/schema.ts`.
+8. Hook-activation suite, verbatim.
+9. License variants, now including `backend/pyproject.toml`.
+10. **`FAST=1` exits here.**
+11. Full exercise: `git init` + commit, `uv sync` / lint / pytest, `pnpm install` /
+    **`pnpm audit --prod`** / `lint:check` / `test` / `build`, `make openapi-check`,
+    **`make test` including the dual-run contract suite**, `dist/` assertions, the msw-leak
+    bundle grep, and **`dev.sh` booted under a pty and stopped with `0x03`**, both ports free
+    afterwards.
+
+The audit is here because no lockfile ships: what a generated project resolves is decided by
+the registry on the day someone runs `copier copy`, so this template can rot without a single
+file in it changing. The two rot classes are handled differently. A FastAPI or pydantic
+release rewriting `openapi.json` is *prevented*, by the upper bounds in
+`pyproject.toml.jinja` — that failure is not worth detecting, it is worth not having. A new
+advisory, or a floor that stops resolving, is *detected*, by this run.
+
+**A scheduled trigger was considered and rejected.** It would close the remaining gap —
+neither mechanism fires while nobody touches the repo — but a red main with no diff to
+bisect and no PR to attach to is a poor signal, and running the three-variant matrix weekly
+is a lot of compute for it. The gap is real and accepted: rot is found on the next `make
+check`, which the pre-commit hook makes hard to skip.
 
 ### 14. CONTEXT.md glossary
 

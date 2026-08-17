@@ -2,10 +2,9 @@
 # Lint both halves, then check them against each other.
 #
 # Each step is skipped when its toolchain is absent rather than failing the commit,
-# so a clone that has installed only one half still commits. CI runs the two halves
-# unconditionally; the contract suite needs both toolchains in one place, which is
-# what a development machine is and what a single-toolchain CI job is not. That is
-# why it runs here.
+# so a clone that has installed only one half still commits. That makes this a fast
+# signal and not a gate: CI runs all three checks unconditionally, including the
+# contract suite, and is what actually enforces them.
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"

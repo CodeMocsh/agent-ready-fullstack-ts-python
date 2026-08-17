@@ -23,9 +23,16 @@ make dev-frontend   # frontend only, mock mode -- no backend, no Python
 make dev-backend    # backend only, with reload
 ```
 
-`make dev` starts uvicorn, waits for it to answer, then starts Vite in live mode and
-hands your terminal to it. Stopping it stops both. If you would rather have two
-terminals, run `make dev-backend` in one and `pnpm -C frontend dev:live` in the other.
+`make dev` starts uvicorn, waits for it to answer, then hands your terminal to Vite in
+live mode. Ctrl-C stops both: the terminal delivers it to Vite, and the script — which
+is still there, because it does not `exec` — takes the backend down on its way out.
+
+Two details make that reliable. The backend gets a process group of its own, since
+`uv run` spawns uvicorn as a child and signalling only the process we started would
+leave it holding :8000. And cleanup escalates to `SIGKILL` after a second, because
+uvicorn's `--reload` supervisor does not always exit once its worker is gone. If you
+would rather have two separate logs, run `make dev-backend` in one terminal and
+`pnpm -C frontend dev:live` in another.
 
 ### Mock mode and live mode
 
@@ -40,8 +47,11 @@ and how every component test gets its fixtures.
 | who answers `/api/*` | `frontend/src/mocks/handlers.ts` | the backend half |
 
 A running backend does not override the mock handlers: if MSW is enabled, the service
-worker answers and your backend changes appear to do nothing. If edits to `backend/` seem
-to have no effect, check which mode you are in.
+worker answers and your backend changes appear to do nothing. The page says which mode it
+is in under the heading, which is the first thing to read when edits to `backend/` seem to
+have no effect. That line is the only place outside `src/main.tsx` that reads
+`VITE_ENABLE_MSW` — keep it that way, since a feature that behaves differently between the
+modes makes mock mode a lie rather than a stand-in.
 
 ### Ports and the proxy
 
@@ -114,24 +124,14 @@ different rows on purpose, because seeds are convenience and the spec is the con
 
 `make test` runs everything, including that second pass. `make test-fast` skips it.
 
-The contract suite is not in CI, which keeps both jobs single-toolchain. It runs from the
-pre-commit hook instead, where both toolchains are already present. To enforce it in CI,
-add a third job:
+Both runs are enforced. The mock-mode pass rides along in the frontend job's `pnpm
+test`; the live pass has its own `contract` job in `.github/workflows/ci.yml`, the only
+one that installs both toolchains. The pre-commit hook runs the live pass too, but it
+skips itself on a clone that has installed only one half, so the hook is a fast signal
+and the job is the gate.
 
-```yaml
-  contract:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with: { persist-credentials: false }
-      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with: { node-version: "24", cache: pnpm, cache-dependency-path: frontend/pnpm-lock.yaml }
-      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
-        with: { version: "0.9.7", enable-cache: true }
-      - run: make install
-      - run: make test-contract
-```
+That job is the one place the single-toolchain rule is broken on purpose. Everything
+else in CI passes on a project whose frontend cannot reach its backend at all.
 
 ### Things the spec contains on purpose
 
@@ -213,6 +213,22 @@ and the changelog before adding one, because nothing else will.
 A consequence of the cool-off: a dependency floor equal to the newest release cannot
 resolve, since the only version satisfying it is younger than the window. When bumping,
 pick a version published more than a fortnight ago.
+
+The sharper consequence is that a security patch waits the same fortnight as everything
+else, so for two weeks the resolvable version is the vulnerable one. `frontend/pnpm-workspace.yaml`
+carries a `minimumReleaseAgeExclude` for exactly that case, pinned to the one exact
+version being let through — never a bare package name, which would exempt all its future
+releases too. Check for these before adding a dependency, and delete each one once the
+version it names has aged past the window on its own:
+
+```bash
+pnpm -C frontend audit --prod    # what a fresh install of this project actually ships
+```
+
+Backend dependencies are bounded above as well as below, in `backend/pyproject.toml`.
+FastAPI and pydantic both write part of `openapi.json`, which is committed and diffed in
+CI, so an unbounded floor means a release published next month can fail a project that
+nobody touched. Raising a cap is a deliberate edit followed by `make openapi`.
 
 Both lockfiles are committed and CI installs with `--frozen-lockfile` and `--frozen`.
 

@@ -134,7 +134,8 @@ are about to commit.
 A full run installs both toolchains, lints and tests both halves, regenerates the contract
 artifacts and diffs them, and runs the contract suite with the backend actually serving the
 frontend — which is the only step that proves the two halves interoperate. Levels below it
-all pass green on a project whose frontend cannot reach its backend at all.
+all pass green on a project whose frontend cannot reach its backend at all. It also audits
+the frontend's production dependencies and boots `make dev` to check both ports are freed.
 
 No step downloads a browser. The generated project ships Playwright specs, in mock mode and
 in live mode, and neither runs in CI — a deliberate trade recorded in

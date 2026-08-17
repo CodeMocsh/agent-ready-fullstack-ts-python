@@ -8,6 +8,7 @@ test("adds a task against the backend half", async ({ page }) => {
   await page.goto("./");
 
   await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+  await expect(page.getByText(/Live mode/)).toBeVisible();
   await expect(page.getByText("Read AGENTS.md")).toBeVisible();
 
   const title = `Live task ${Date.now()}`;
