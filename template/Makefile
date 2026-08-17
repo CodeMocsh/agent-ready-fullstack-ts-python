@@ -19,7 +19,8 @@ CONTRACT_BASE_URL ?= http://localhost:5173/api
 .DEFAULT_GOAL := default
 
 .PHONY: default install hooks pre-commit lint lint-check test test-fast test-contract \
-        test-e2e test-e2e-live db-test db db-demo migrate roles schema dev dev-frontend \
+        test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
+        dev dev-frontend \
         dev-backend openapi \
         openapi-check build upgrade clean
 
@@ -107,6 +108,41 @@ else
 	cd backend && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$$port/postgres \
 		uv run --no-sync pytest -rs $(DB_TEST_FILES)
 endif
+
+# The contract suite against a backend that is actually on Postgres. `make test-contract`
+# runs the same file against the in-memory substrate, which is right for the gate and is
+# *not* the deployment: it proves the two halves agree, and proves nothing about the SQL
+# underneath. This is the one command that exercises the whole chain a user meets --
+# browser client, dev proxy, FastAPI, pool, real SQL, and the row-level security policy
+# deciding what comes back.
+#
+# **It serves as app_app, not as the superuser**, and that is the whole reason the target
+# is worth having. A superuser bypasses row-level security whatever FORCE says, so a run
+# wired to the admin connection would pass against a database with no policy in force and
+# tell you nothing. Roles first, schema second, and the application gets the least-privilege
+# login a deployment gives it -- which is also what makes this exercise `check` rather than
+# an apply it has no rights to.
+#
+# psql comes from inside the container, so this needs no client on the host.
+#
+# Opt-in, like every other member of this tier, and for the same reason: `make pre-commit`
+# runs on every commit and must not need a daemon. Its own container, ephemeral port,
+# PID-named, torn down on the way out however the run ends.
+test-contract-db:
+	@name=contract-db-$$$$; \
+	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
+	docker run -d --rm -P -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
+	port=$$(docker port $$name 5432/tcp | head -1 | sed 's/.*://'); \
+	printf 'postgres on %s' "$$port"; \
+	until docker exec $$name pg_isready -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
+	echo ' ready'; \
+	docker exec -i $$name psql -q -v ON_ERROR_STOP=1 -U postgres < deploy/roles.sql; \
+	docker exec $$name psql -q -v ON_ERROR_STOP=1 -U postgres \
+		-c "ALTER ROLE app_app PASSWORD 'test'" >/dev/null; \
+	(cd backend && DATABASE_OWNER_URL=postgres://postgres:test@127.0.0.1:$$port/postgres \
+		uv run --no-sync python -m app.migrate); \
+	DATABASE_URL=postgres://app_app:test@127.0.0.1:$$port/postgres \
+		sh devtools/contract-test.sh
 
 # The release step, and the only thing that reads DATABASE_OWNER_URL. The application
 # refuses to start if it can see that variable, so this is the one path that can apply

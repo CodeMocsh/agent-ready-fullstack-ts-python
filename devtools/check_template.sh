@@ -270,6 +270,11 @@ done
 need_grep '^pre-commit: lint-check openapi-check test$' Makefile
 need_no_grep '^pre-commit:.*test-e2e' Makefile
 need_no_grep '^pre-commit:.*db-test' Makefile
+need_no_grep '^pre-commit:.*test-contract-db' Makefile
+# The contract suite on Postgres serves as the application role, never as the superuser: a
+# superuser bypasses every policy, so the admin connection would pass against a database
+# carrying no isolation at all.
+need_grep 'DATABASE_URL=postgres://app_app' Makefile
 need backend/tests/test_gate.py
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and
 # `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
