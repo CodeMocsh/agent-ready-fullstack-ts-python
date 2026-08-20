@@ -149,7 +149,7 @@ in live mode, and neither runs in CI — a deliberate trade recorded in
 Nothing is published. The template is run straight from the repository:
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.16.0 copy \
+uvx --exclude-newer "14 days" copier@9.17.1 copy \
   gh:CodeMocsh/agent-ready-fullstack-ts-python my-app
 ```
 

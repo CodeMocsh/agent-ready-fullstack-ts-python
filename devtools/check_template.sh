@@ -16,7 +16,7 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
 
 VARIANT="${1:-default}"
 FAST="${FAST:-0}"
-COPIER_SPEC="copier@9.16.0"
+COPIER_SPEC="copier@9.17.1"
 export UV_EXCLUDE_NEWER="14 days"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,6 +30,22 @@ need_absent() { [ ! -e "$1" ] || fail "expected no such file: $1"; }
 need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2"; }
 need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
 
+
+# One pin, eleven copies. The version above is also written into README.md, both
+# AGENTS.md files, updating.md, installation.md, pyproject.toml.jinja, the ADR and the
+# design doc, because every one of them is a command someone runs rather than a
+# reference to one. Nothing kept them in step, and the stale copy is the one a user
+# pastes: they would generate with a release this script never exercised, and after this
+# bump, with one missing two published security fixes. A grep is cheap, so grep.
+STALE="$(grep -rEoh 'copier@[0-9]+\.[0-9]+\.[0-9]+' "$REPO" \
+    --include='*.md' --include='*.jinja' --include='*.sh' --include='*.yml' \
+    2>/dev/null | sort -u | grep -v "^$COPIER_SPEC\$" || true)"
+if [ -n "$STALE" ]; then
+    echo "check: this repo pins $COPIER_SPEC, but also names:" >&2
+    echo "$STALE" | sed 's/^/check:   /' >&2
+    echo "check: every copier@ in the repo is a command someone runs. Bump them together." >&2
+    exit 1
+fi
 
 for tool in uvx uv tar python3 git node pnpm curl; do
     if ! command -v "$tool" >/dev/null 2>&1; then

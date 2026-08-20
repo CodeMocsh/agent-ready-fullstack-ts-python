@@ -6,7 +6,7 @@ Copier records your answers in `.copier-answers.yml`. Pull later improvements to
 template with:
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.16.0 update
+uvx --exclude-newer "14 days" copier@9.17.1 update
 ```
 
 Review the diff and resolve any `.rej` conflict files before committing. Two things about
