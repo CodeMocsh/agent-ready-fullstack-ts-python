@@ -114,6 +114,12 @@ absolute (`3.0`). **Do not reconcile them, in either direction, in any repo.**
 not the ones in either sibling's `updating.md`, which predate a metric redefinition — that
 are current.
 
+What *is* shared is the shape of the check, and the newest part of that shape is
+two-sidedness: a baseline that only ever rises carries slack equal to however far the tree
+has improved since, and that slack is spendable by the next commit. Both halves refuse a
+rise and record a fall for you, from the fixing half of their lint only. The argument
+carries whole across the two units even though none of the numbers do.
+
 **The variant lists.** agent-ready-python varies on license *and* `publish_to_pypi`; this
 repo generates an application, so it has no publish variant and its CI matrix is three
 license variants. A new question in a sibling is not automatically a question here.
@@ -157,6 +163,15 @@ a diff knows they are decisions rather than oversights.
   gate and no baseline has been recorded. A check that silently never turns on is not a
   check, so the frontend's posture is the better one — porting it into agent-ready-python's
   `complexity.py` is a change that belongs upstream, not here.
+
+- **Tightening preserves `origin` on the frontend only.** Both halves lower a stale baseline
+  from the fixing variant of their lint. The frontend's baseline carries two numbers, because
+  its backstop is a multiple of where the project started, and tightening moves the drift
+  reference while leaving `origin` alone — otherwise a codebase that improves and then
+  regresses walks past the ceiling one recorded improvement at a time. The backend's ceiling
+  is an absolute constant, so its baseline has nothing to preserve and this half of the rule
+  has no counterpart there. Same divergence agent-ready-ts records against
+  agent-ready-python, for the same reason.
 
 - **No `.if-license` suffix and no `licenses/` directory.** Copier's Jinja does conditional
   filenames and an if/elif license body directly. Both of agent-ready-ts's mechanisms exist

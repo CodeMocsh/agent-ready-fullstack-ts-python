@@ -31,6 +31,7 @@ const USAGE = `usage: node devtools/complexity.mjs <paths...> [options]
 
   --baseline <file>     baseline to compare against
   --update-baseline     record the current level instead of checking
+  --tighten-baseline    lower a baseline left above the tree, instead of failing on it
   --cap <n>             per-function contribution ceiling for the metric
   --tolerance <n>       allowed relative rise, as a fraction
   --ceiling-factor <n>  multiple of the origin baseline that is never exceeded
@@ -196,13 +197,14 @@ function applyValueFlag(arg, value, out) {
 }
 
 function parseArgs(argv) {
-  const out = { paths: [], flags: {}, exclude: [], baseline: null, update: false };
+  const out = { paths: [], flags: {}, exclude: [], baseline: null, update: false, tighten: false };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") {
       process.stdout.write(`${USAGE}\n`);
       process.exit(0);
     } else if (arg === "--update-baseline") out.update = true;
+    else if (arg === "--tighten-baseline") out.tighten = true;
     else if (VALUE_FLAGS.has(arg)) applyValueFlag(arg, argv[++index], out);
     else if (arg.startsWith("-")) fail(`unknown option ${arg}\n\n${USAGE}`);
     else out.paths.push(arg);
@@ -212,9 +214,14 @@ function parseArgs(argv) {
   return out;
 }
 
-function writeBaseline(path, now, previous) {
+function recordBaseline(path, now, previous) {
   const origin = previous?.origin ?? now.density;
   writeFileSync(path, `${JSON.stringify({ metric: METRIC, ...now, origin }, null, 2)}\n`);
+  return origin;
+}
+
+function writeBaseline(path, now, previous) {
+  const origin = recordBaseline(path, now, previous);
   process.stdout.write(`baseline written -> ${path} (origin ${origin})\n`);
 }
 
@@ -243,15 +250,7 @@ function checkCeiling(now, previous, ceilingFactor) {
   return 1;
 }
 
-function checkDrift(now, previous, tolerance) {
-  if (!(previous.density > 0)) return 0;
-  const drift = (now.density - previous.density) / previous.density;
-  if (drift <= tolerance) {
-    process.stdout.write(
-      `drift ok: density ${previous.density} -> ${now.density} (${percent(drift)})\n`,
-    );
-    return 0;
-  }
+function reportRise(now, previous, drift, tolerance) {
   process.stderr.write(
     `\nFAIL: density drifted ${previous.density} -> ${now.density} ` +
       `(${percent(drift)}, tolerance ${percent(tolerance)}).\n` +
@@ -263,8 +262,54 @@ function checkDrift(now, previous, tolerance) {
   return 1;
 }
 
+function reportSlack(now, previous, drift, tolerance) {
+  const admits = (previous.density * (1 + tolerance)) / now.density - 1;
+  process.stderr.write(
+    `\nFAIL: the baseline is ${magnitude(drift)} above the tree ` +
+      `(${previous.density} -> ${now.density}, tolerance ${percent(tolerance)}).\n` +
+      "A baseline left this far above the tree has stopped gating: the gap is\n" +
+      "slack, and slack is added to whatever the next commit may spend. From here\n" +
+      `a single change could raise density by ${percent(admits)} and still pass.\n` +
+      "Nobody has to approve the code getting better, but it does have to be\n" +
+      "recorded: run `pnpm lint`.\n",
+  );
+  return 1;
+}
+
+function tightenBaseline(baseline, now, previous, drift) {
+  recordBaseline(baseline, now, previous);
+  process.stdout.write(
+    `baseline tightened: density ${previous.density} -> ${now.density} ` +
+      `(${percent(drift)}); commit ${baseline}\n`,
+  );
+  return 0;
+}
+
+function driftFrom(now, previous) {
+  return (now.density - previous.density) / previous.density;
+}
+
+function checkDrift(now, previous, tolerance, baseline, tighten) {
+  if (!(previous.density > 0)) return 0;
+  const drift = driftFrom(now, previous);
+  if (drift > tolerance) return reportRise(now, previous, drift, tolerance);
+  if (drift >= -tolerance) {
+    process.stdout.write(
+      `drift ok: density ${previous.density} -> ${now.density} (${percent(drift)})\n`,
+    );
+    return 0;
+  }
+  return tighten
+    ? tightenBaseline(baseline, now, previous, drift)
+    : reportSlack(now, previous, drift, tolerance);
+}
+
 function percent(fraction) {
   return `${fraction >= 0 ? "+" : ""}${(fraction * 100).toFixed(2)}%`;
+}
+
+function magnitude(fraction) {
+  return `${(Math.abs(fraction) * 100).toFixed(2)}%`;
 }
 
 function report(now) {
@@ -281,6 +326,15 @@ function tooSmallToGate(now, config) {
   return singleFunctionSwing(now, config.cap) > config.tolerance * now.density;
 }
 
+function zeroDensity(baseline, now, previous, tighten) {
+  process.stdout.write(
+    "nothing to ratchet: no function branches beyond a single condition, so this\n" +
+      "metric is zero by definition. The per-function gates carry this alone.\n",
+  );
+  const stale = tighten && baseline && previous && previous.density > 0;
+  return stale ? tightenBaseline(baseline, now, previous, driftFrom(now, previous)) : 0;
+}
+
 function assertUsableBaseline(baseline, previous) {
   if (previous.density > 0) return;
   process.stderr.write(
@@ -293,7 +347,7 @@ function assertUsableBaseline(baseline, previous) {
 }
 
 function main(argv) {
-  const { paths, flags, baseline, update } = parseArgs(argv);
+  const { paths, flags, baseline, update, tighten } = parseArgs(argv);
   const config = settings(flags);
   const now = measure(paths, config);
   report(now);
@@ -309,13 +363,7 @@ function main(argv) {
 
   if (previous) assertSameMetric(baseline, previous);
 
-  if (!(now.density > 0)) {
-    process.stdout.write(
-      "nothing to ratchet: no function branches beyond a single condition, so this\n" +
-        "metric is zero by definition. The per-function gates carry this alone.\n",
-    );
-    return 0;
-  }
+  if (!(now.density > 0)) return zeroDensity(baseline, now, previous, tighten);
 
   if (tooSmallToGate(now, config)) {
     const swing = singleFunctionSwing(now, config.cap).toFixed(2);
@@ -339,7 +387,8 @@ function main(argv) {
   assertUsableBaseline(baseline, previous);
 
   return (
-    checkDrift(now, previous, config.tolerance) | checkCeiling(now, previous, config.ceilingFactor)
+    checkDrift(now, previous, config.tolerance, baseline, tighten) |
+    checkCeiling(now, previous, config.ceilingFactor)
   );
 }
 

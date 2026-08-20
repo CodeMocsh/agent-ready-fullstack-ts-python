@@ -83,16 +83,20 @@ def check_ceiling(mean: float, ceiling: float) -> int:
     return 1
 
 
-def check_drift(now: dict[str, float], baseline: Path, tolerance: float) -> int:
+def write_baseline(baseline: Path, now: dict[str, float]) -> None:
+    baseline.write_text(json.dumps(now, indent=2) + "\n")
+
+
+def check_drift(now: dict[str, float], baseline: Path, tolerance: float, tighten: bool) -> int:
     if not baseline.exists():
         print(f"no baseline yet; create one with --update-baseline ({baseline})")
         return 0
 
-    was = json.loads(baseline.read_text())
-    drift = now["mean"] - float(was["mean"])
+    was = float(json.loads(baseline.read_text())["mean"])
+    drift = now["mean"] - was
     if drift > tolerance:
         print(
-            f"\nFAIL: mean CC drifted {float(was['mean']):.3f} -> {now['mean']:.3f} "
+            f"\nFAIL: mean CC drifted {was:.3f} -> {now['mean']:.3f} "
             f"(+{drift:.3f}, tolerance {tolerance:.3f}).\n"
             "Functions are fattening below the per-function gate; split the ones\n"
             "that grew. If the rise is genuinely warranted, record it with\n"
@@ -102,7 +106,27 @@ def check_drift(now: dict[str, float], baseline: Path, tolerance: float) -> int:
         )
         return 1
 
-    print(f"drift ok: mean CC {float(was['mean']):.3f} -> {now['mean']:.3f} ({drift:+.3f})")
+    if drift < -tolerance:
+        if not tighten:
+            print(
+                f"\nFAIL: baseline is {-drift:.3f} above the tree "
+                f"({was:.3f} -> {now['mean']:.3f}, tolerance {tolerance:.3f}).\n"
+                "A baseline left this far above the tree stops gating: its slack is\n"
+                "added to whatever the next commit may spend, so a single change\n"
+                f"could raise the mean by {tolerance - drift:.3f} and still pass.\n"
+                "Nobody needs to approve the code getting better, but it does have\n"
+                "to be recorded: run `make lint`.",
+                file=sys.stderr,
+            )
+            return 1
+        write_baseline(baseline, now)
+        print(
+            f"baseline tightened: mean CC {was:.3f} -> {now['mean']:.3f} ({drift:+.3f}); "
+            f"commit {baseline}"
+        )
+        return 0
+
+    print(f"drift ok: mean CC {was:.3f} -> {now['mean']:.3f} ({drift:+.3f})")
     return 0
 
 
@@ -112,6 +136,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--ruff", default="ruff", help="ruff executable")
     parser.add_argument("--baseline", type=Path, default=None, help="baseline file to compare")
     parser.add_argument("--update-baseline", action="store_true", help="record the current level")
+    parser.add_argument(
+        "--tighten-baseline",
+        action="store_true",
+        help="lower a baseline left above the tree, instead of failing on it",
+    )
     parser.add_argument("--tolerance", type=float, default=None, help="allowed rise in mean CC")
     parser.add_argument("--ceiling", type=float, default=None, help="mean CC may never exceed this")
     parser.add_argument("--min-callables", type=int, default=None, help="skip below this many")
@@ -133,7 +162,7 @@ def main() -> int:
     print(f"callables {now['callables']:.0f}   mean CC {now['mean']:.3f}   p90 {now['p90']:.0f}")
 
     if args.baseline and args.update_baseline:
-        args.baseline.write_text(json.dumps(now, indent=2) + "\n")
+        write_baseline(args.baseline, now)
         print(f"baseline written -> {args.baseline}")
         return 0
 
@@ -146,7 +175,7 @@ def main() -> int:
 
     status = check_ceiling(now["mean"], ceiling)
     if args.baseline:
-        status |= check_drift(now, args.baseline, tolerance)
+        status |= check_drift(now, args.baseline, tolerance, args.tighten_baseline)
     return status
 
 

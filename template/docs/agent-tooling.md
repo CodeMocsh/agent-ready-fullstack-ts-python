@@ -136,6 +136,27 @@ baseline records which metric produced it — `complexity-beyond-first-branch-pe
 comparing against a baseline recorded under a different definition fails loudly rather than
 being silently absorbed.
 
+**The rule is two-sided, because a baseline that only ever rises is not a gate.** Whatever
+the tree has improved since the baseline was recorded is slack, and slack is added to what
+the next commit may spend: a baseline sitting 2% above the tree admits a single change
+raising density by 4.08%, roughly five times the largest move hono ever made in one commit.
+So a density more than `tolerance` *below* the baseline means the baseline is stale.
+`make lint` lowers it; `make lint-check` — and so CI and the pre-commit hook — refuses and
+says to. Same shape as the formatter: the fixing variant fixes, the checking variant
+refuses.
+
+The two directions are deliberately asymmetric about who decides. A rise means someone is
+consenting to more complexity, so it stays a manual `pnpm complexity:baseline` that lands in
+a diff for review. A fall needs no approval — nobody has to sign off on code getting better
+— but it must not be forgettable, so it is recorded for you. Tightening at one `tolerance`
+rather than on every improvement is what keeps the baseline out of the churn: density moves
+by hundredths constantly, and a file rewritten on each of those is a merge-conflict
+generator. The price is that worst-case slack is two tolerances, 4.08%, instead of one.
+Bounded and stated beats tight and churning.
+
+Tightening lowers `density` and leaves `origin` alone, so improving the code never lowers
+the ceiling with it.
+
 **Ceiling: `ceilingFactor = 1.25`** — density may never exceed 1.25× the `origin` recorded
 in the baseline the first time one is written. The ratchet only ever compares against
 yesterday, so many individually-approved increases drift a long way with every step
@@ -155,6 +176,13 @@ while that swing is larger than the tolerance allows, a single perfectly legal f
 could fail the build on its own. The check computes this against the project's own density
 every run, because React applications are less dense than libraries and a hard-coded line
 count would switch the check on too early in exactly the better-structured projects.
+
+Density falling to zero — no function branching beyond a single condition — is the one
+improvement the two-sided rule would otherwise miss, and the slack left behind there is not
+a fraction of the baseline but all of it, so `make lint` records that too. Putting the
+complexity back is then a rise from zero rather than a free ride: there is no level to
+measure a relative rise against, so the check refuses and asks for
+`pnpm complexity:baseline`, which lands in the diff for review.
 
 ### The backend half
 
@@ -177,6 +205,14 @@ helpers, which is its own kind of mess.
 (`backend/.complexity-baseline.json`), checked by `backend/devtools/complexity.py`. Catches
 everything fattening below the per-function gate. Measured, not guessed: across 60 commits
 of flask's history the largest single-commit move in mean complexity was 0.0437.
+
+Two-sided here for the same reason it is on the frontend, and the argument above carries
+whole: a baseline that only ever rises carries slack equal to however far the tree has
+improved since, and that slack is spendable by the next commit. A mean more than `tolerance`
+*below* the baseline means the baseline is stale, so `make lint` lowers it and
+`make lint-check` refuses. A rise stays a manual `--update-baseline`. Worst-case slack is
+two tolerances, 0.10, rather than unbounded. This half has no `origin` to preserve when it
+tightens — its ceiling is an absolute constant, not a multiple of where the project started.
 
 **Ceiling: `ceiling = 3.0`** on mean complexity, absolute rather than relative, because mean
 cyclomatic complexity does sit in a tight band across good Python: httpx 2.2, flask 2.3.

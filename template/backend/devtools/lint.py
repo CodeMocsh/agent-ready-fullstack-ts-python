@@ -40,6 +40,7 @@ def main() -> int:
             *COMPLEXITY_PATHS,
             "--baseline",
             COMPLEXITY_BASELINE,
+            *([] if args.check else ["--tighten-baseline"]),
         ]
     )
 
