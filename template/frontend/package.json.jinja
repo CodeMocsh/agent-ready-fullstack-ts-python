@@ -65,7 +65,7 @@
     "build:mock": "vite build --mode mock",
     "preview": "vite preview",
     "openapi:types": "pnpm dlx openapi-typescript@7.13.0 ../openapi.json -o src/api/schema.ts",
-    "lint": "biome check --write src tests e2e devtools && tsc --noEmit && pnpm run comments && pnpm run conformance && pnpm run complexity",
+    "lint": "biome check --write src tests e2e devtools && tsc --noEmit && pnpm run comments && pnpm run conformance && pnpm run complexity --tighten-baseline",
     "lint:check": "biome ci src tests e2e devtools && tsc --noEmit && pnpm run comments && pnpm run conformance && pnpm run complexity",
     "comments": "node devtools/comments.mjs src tests e2e devtools",
     "conformance": "node devtools/conformance.mjs src",

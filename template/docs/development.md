@@ -241,6 +241,11 @@ suites, the contract artifacts, and the contract suite with the backend actually
 the frontend. It needs no browser binary, no network, and no second terminal. It is what
 the git hook runs and what CI runs.
 
+Its lint half is check-only, so it never writes: `make lint` is the variant that fixes, and
+it is also the one that lowers a stale `.complexity-baseline.json` on either half. If the
+gate refuses because a baseline now stands above the tree, run `make lint` and commit the
+file it rewrites.
+
 The "no network" part is bought rather than free: regenerating the contract runs
 `openapi-typescript` through `pnpm dlx`, `make install` fetches it once, and
 `dlxCacheMaxAge` in `frontend/pnpm-workspace.yaml` keeps it usable for a month. Without

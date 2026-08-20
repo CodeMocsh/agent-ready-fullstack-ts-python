@@ -397,7 +397,10 @@ day-one decision.
   length, then checks codebase-wide density against `frontend/.complexity-baseline.json`.
   The backend gates cyclomatic complexity and statements per function, then checks its own
   density baseline. When any of them fails, split the function; raising a threshold or
-  re-recording a baseline is a deliberate, reviewable decision, not the quick way to green.
+  re-recording a baseline upward is a deliberate, reviewable decision, not the quick way to
+  green. Drift is two-sided on both halves: when a codebase improves past its tolerance,
+  `make lint` lowers that half's `.complexity-baseline.json` for you, and the change belongs
+  in your commit.
 
 - **Dependencies**: `pnpm add` in `frontend/`, `uv add` in `backend/`. Commit both
   lockfiles. A 14-day supply-chain cool-off applies on both sides, so a package published

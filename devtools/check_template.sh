@@ -39,6 +39,79 @@ for tool in uvx uv tar python3 git node pnpm curl; do
     fi
 done
 
+# This script starts servers twice -- the contract suite's pair, and the dev loop's --
+# and both take their ports from the environment exactly as a generated project does.
+# Set them here, once, for the whole run: setting them any later leaves every step above
+# that line on :8000 and :5173, which is the pair a `make dev` in some other checkout is
+# most likely to be holding, and a run that dies there fails on somebody else's process
+# rather than on anything it is testing.
+#
+# The defaults are used when they are free, so the ordinary run exercises the ports a
+# user actually gets; when they are not, a free pair is allocated rather than the run
+# refusing to start. Either way it is printed, because a check that quietly moves is a
+# check whose logs cannot be read six months later.
+#
+# A named port is obeyed rather than treated as a preference: someone who sets one has
+# something pointed at it, and answering "I used a different one" three hundred lines
+# later is worse than refusing here with the reason. The two are decided independently,
+# so naming one does not stop the other from moving out of the way.
+PORTS="$(python3 - "${BACKEND_PORT:+named}" "${BACKEND_PORT:-8000}" \
+                   "${FRONTEND_PORT:+named}" "${FRONTEND_PORT:-5173}" <<'PY'
+import socket
+import sys
+
+LOOPBACKS = ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1"))
+
+
+def free(port):
+    # Both families, because uvicorn and vite are told to serve "localhost" and that is
+    # two addresses. A probe on one of them alone calls a port free that the other half
+    # cannot have -- which is exactly how the vite of another checkout, holding [::1]
+    # only, goes unnoticed until --strictPort refuses in the middle of the run.
+    for family, host in LOOPBACKS:
+        try:
+            probe = socket.socket(family)
+        except OSError:
+            continue
+        with probe:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                probe.bind((host, port))
+            except OSError:
+                return False
+    return True
+
+
+NAMES = ("BACKEND_PORT", "FRONTEND_PORT")
+requested = [(bool(sys.argv[1]), int(sys.argv[2])), (bool(sys.argv[3]), int(sys.argv[4]))]
+if requested[0][1] == requested[1][1]:
+    raise SystemExit(f"check: {NAMES[0]} and {NAMES[1]} are both :{requested[0][1]}.")
+
+# Each allocation stays bound until this process exits, so no two of them can come back
+# as the same number.
+held = []
+chosen = []
+for name, (named, port) in zip(NAMES, requested):
+    if free(port):
+        chosen.append(port)
+        continue
+    if named:
+        raise SystemExit(
+            f"check: :{port} is in use, and {name} asked for it.\n"
+            "check: something else is serving it (a `make dev` in another checkout?).\n"
+            f"check: stop it, name a free port, or unset {name} and let this script pick."
+        )
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    held.append(sock)
+    chosen.append(sock.getsockname()[1])
+print(" ".join(str(port) for port in chosen))
+PY
+)"
+BACKEND_PORT="${PORTS%% *}"
+FRONTEND_PORT="${PORTS##* }"
+export BACKEND_PORT FRONTEND_PORT
+
 case "$VARIANT" in
     default)      EXTRA="" ;;
     proprietary)  EXTRA="--data package_license=Proprietary" ;;
@@ -53,6 +126,7 @@ OUT="$WORK/out"
 mkdir -p "$SRC"
 
 echo "==> render ($VARIANT)"
+echo "    ports: backend :$BACKEND_PORT, frontend :$FRONTEND_PORT"
 # Staged through a file rather than a pipe on purpose: in a pipeline only the last
 # command's status reaches "set -e", so a failed archive step would still extract
 # whatever it managed to write and the run would go on against a partial tree --
@@ -801,8 +875,14 @@ import subprocess
 import sys
 import time
 
-BACKEND = "http://localhost:8000/tasks"
-PROXY = "http://localhost:5173/api/tasks"
+# The same two variables dev.sh, contract-test.sh and vite.config.ts read, and the
+# script exports them for the whole run, so there is no default to repeat here. Writing
+# :8000 into this block again is what made it abort on another checkout's process no
+# matter which ports the run was told to use.
+BACKEND_PORT = os.environ["BACKEND_PORT"]
+FRONTEND_PORT = os.environ["FRONTEND_PORT"]
+BACKEND = f"http://localhost:{BACKEND_PORT}/tasks"
+PROXY = f"http://localhost:{FRONTEND_PORT}/api/tasks"
 
 
 def serving(url):
@@ -816,7 +896,8 @@ def serving(url):
 # dev.sh would fail to bind, the readiness probe would be answered by whatever is
 # already there, and the check would report that dev.sh stranded a server -- naming
 # the one bug it is here to catch, on a run where it did nothing wrong.
-already = " and ".join(n for n, u in ((":8000", BACKEND), (":5173", PROXY)) if serving(u))
+PORTS = ((f":{BACKEND_PORT}", BACKEND), (f":{FRONTEND_PORT}", PROXY))
+already = " and ".join(n for n, u in PORTS if serving(u))
 if already:
     print(f"check: {already} already in use before dev.sh started -- something else is\n"
           f"       serving it (another `make dev`?). Stop it and run this again.",
@@ -870,7 +951,7 @@ def die(message):
 # Through :5173/api, so this waits on both halves and the proxy between them rather
 # than on the backend alone.
 if not until(lambda: serving(PROXY), 120):
-    die("dev.sh did not serve :5173/api within 120s")
+    die(f"dev.sh did not serve :{FRONTEND_PORT}/api within 120s")
 
 os.write(master, b"\x03")
 
@@ -878,8 +959,293 @@ if not until(lambda: os.waitpid(pid, os.WNOHANG)[0] == pid, 30):
     die("dev.sh was still running 30s after Ctrl-C")
 
 if not until(lambda: not serving(BACKEND) and not serving(PROXY), 15):
-    held = " and ".join(n for n, u in ((":8000", BACKEND), (":5173", PROXY)) if serving(u))
+    held = " and ".join(n for n, u in PORTS if serving(u))
     die(f"dev.sh exited but {held} still answering")
 PY
+
+echo "==> assert the drift gate is two-sided, on both halves"
+# A ratchet that only ever rises is not a ratchet. Whatever a tree improved since its
+# baseline was recorded is slack, and slack is added to what the next commit may spend,
+# so the second side is what bounds the first. The two directions have opposite
+# handling -- a rise is refused, a fall is recorded for you -- and only one of them may
+# rewrite the file, so no single case can show the rule. Hence a table per half.
+#
+# Both run against scratch trees rather than the rendered project: the frontend needs
+# real density and enough of it to clear the size guard, and the backend needs an exact
+# mean rather than whatever the smoke project happens to score.
+(
+    cd "$WORK"
+    mkdir -p drift/src && cd drift
+    export PATH="$OUT/frontend/node_modules/.bin:$PATH"
+    node -e '
+    let out = "";
+    for (let i = 0; i < 600; i++) {
+        out += `export function f${i}(a: number, b: number) {\n  if (a > 0) {\n    if (b > 0) {\n      return 1;\n    }\n  }\n  return 0;\n}\n`;
+    }
+    require("node:fs").writeFileSync("src/many.ts", out);'
+
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline measured.json \
+        --update-baseline >/dev/null
+
+    # State the cases as multiples of the measured level rather than as numbers, so the
+    # table keeps meaning what it says if biome's scoring ever moves. Below 1 is a tree
+    # that got worse; above 1, one that improved since.
+    seed='const fs = require("node:fs");
+    const measured = JSON.parse(fs.readFileSync("measured.json", "utf8"));
+    const density = Number((measured.density * Number(process.argv[1])).toFixed(3));
+    fs.writeFileSync("baseline.json", JSON.stringify({ ...measured, density, origin: density }, null, 2));'
+
+    settled='const fs = require("node:fs");
+    const measured = JSON.parse(fs.readFileSync("measured.json", "utf8")).density;
+    const want = process.argv[2] === "tree"
+        ? measured
+        : Number((measured * Number(process.argv[1])).toFixed(3));
+    const got = JSON.parse(fs.readFileSync("baseline.json", "utf8")).density;
+    if (got !== want) { console.error(`baseline holds ${got}, wanted ${want}`); process.exit(1); }'
+
+    # baseline, as a multiple of the tree | flags | expected exit | baseline afterwards
+    # The frontend tolerance is 2%: 0.99 and 1.01 sit inside it, 0.90 and 1.05 outside.
+    # The last case is the one worth having -- the flag lowers a stale baseline, and
+    # must never be a way to accept a rise.
+    while IFS='|' read -r factor flags expect after; do
+        [ -n "$factor" ] || continue
+        node -e "$seed" "$factor"
+        rc=0
+        # shellcheck disable=SC2086
+        node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json $flags \
+            >/dev/null 2>&1 || rc=1
+        if [ "$rc" != "$expect" ]; then
+            echo "frontend drift: baseline at ${factor}x with '$flags' exited $rc, wanted $expect" >&2
+            exit 1
+        fi
+        if ! node -e "$settled" "$factor" "$after"; then
+            echo "frontend drift: baseline at ${factor}x with '$flags' should have left '$after'" >&2
+            exit 1
+        fi
+    done <<'DRIFT_CASES'
+0.99|--tighten-baseline|0|same
+1.01|--tighten-baseline|0|same
+1.05|--tighten-baseline|0|tree
+1.05||1|same
+0.90||1|same
+0.90|--tighten-baseline|1|same
+DRIFT_CASES
+
+    # An exit code cannot tell the two failures apart, and they ask for opposite things:
+    # one for a refactor, the other for a one-line commit of the file.
+    node -e "$seed" 1.05
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json 2>&1 \
+        | grep -q 'baseline is .* above the tree'
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        --tighten-baseline | grep -q 'baseline tightened'
+
+    # Tightening lowers the drift reference and must leave the ceiling's anchor alone.
+    # Moving origin down too would let a codebase that improves and then regresses walk
+    # past the ceiling one recorded improvement at a time. This half of the rule exists
+    # on the frontend only: the backend's ceiling is an absolute constant, so its
+    # baseline carries nothing to preserve.
+    node -e '
+    const fs = require("node:fs");
+    const measured = JSON.parse(fs.readFileSync("measured.json", "utf8")).density;
+    const after = JSON.parse(fs.readFileSync("baseline.json", "utf8"));
+    if (after.density !== measured) throw new Error("tightening did not lower the density");
+    if (after.origin === measured) throw new Error("tightening moved the ceiling anchor");
+    '
+)
+
+# Density falling to zero returns before the drift check, so it is the one improvement
+# the two-sided rule could not see -- and the slack it leaves is not a fraction of the
+# baseline but the whole of it. Reintroducing the complexity later would then measure
+# against a number describing a codebase that no longer existed, and pass. The flat
+# fixture is the branching one with the branches taken out, so the only thing that
+# differs between them is the density.
+(
+    cd "$WORK"
+    mkdir -p drift-zero/src && cd drift-zero
+    export PATH="$OUT/frontend/node_modules/.bin:$PATH"
+
+    branching='let out = "";
+    for (let i = 0; i < 600; i++) {
+        out += `export function f${i}(a: number, b: number) {\n  if (a > 0) {\n    if (b > 0) {\n      return 1;\n    }\n  }\n  return 0;\n}\n`;
+    }
+    require("node:fs").writeFileSync("src/many.ts", out);'
+
+    flat='let out = "";
+    for (let i = 0; i < 600; i++) {
+        out += `export function f${i}(a: number, b: number) {\n  return a + b;\n}\n`;
+    }
+    require("node:fs").writeFileSync("src/many.ts", out);'
+
+    node -e "$branching"
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        --update-baseline >/dev/null
+    node -e "$flat"
+
+    # Without the flag this is a notice, not a failure: there is nothing to gate while
+    # the metric is zero, and the checking half must never rewrite a file.
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json >/dev/null
+    node -e '
+    const density = JSON.parse(require("node:fs").readFileSync("baseline.json", "utf8")).density;
+    if (density === 0) throw new Error("the checking half rewrote the baseline");
+    '
+
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        --tighten-baseline | grep -q 'baseline tightened'
+    node -e '
+    const after = JSON.parse(require("node:fs").readFileSync("baseline.json", "utf8"));
+    if (after.density !== 0) throw new Error("an improvement to zero was not recorded");
+    if (!(after.origin > 0)) throw new Error("tightening to zero moved the ceiling anchor");
+    '
+
+    # The point of recording it: putting the complexity back is now a rise from zero,
+    # refused and sent to `pnpm complexity:baseline`, rather than a free ride against a
+    # baseline describing code nobody kept.
+    node -e "$branching"
+    if node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        >/dev/null 2>&1; then
+        echo "complexity reintroduced after a fall to zero passed against a stale baseline" >&2
+        exit 1
+    fi
+)
+
+# The backend table, in its own unit. Run against the rendered project's interpreter:
+# complexity.py needs tomllib, so unlike the agent guard it is not a stdlib-only script
+# that any python3 on PATH can host.
+CX="$WORK/complexity"
+mkdir -p "$CX"
+
+# Stand in for ruff, so the measured mean is an exact known number rather than whatever
+# the smoke-test project happens to score.
+cat >"$CX/fake-ruff" <<'FAKE_RUFF'
+#!/bin/sh
+echo '[{"message":"a is too complex (2 > 0)"},{"message":"b is too complex (2 > 0)"}]'
+FAKE_RUFF
+chmod +x "$CX/fake-ruff"
+
+# Compare a recorded baseline mean against a number: <file> <number> eq|lt.
+compare='import json,operator,sys
+recorded = json.load(open(sys.argv[1]))["mean"]
+sys.exit(not getattr(operator, sys.argv[3])(recorded, float(sys.argv[2])))'
+
+# baseline mean | flags | expected exit | expected baseline afterwards
+# The tree measures 2.000 and the backend tolerance is 0.050.
+while IFS='|' read -r before flags expect after; do
+    [ -n "$before" ] || continue
+    printf '{"callables": 2.0, "mean": %s, "p90": 2.0}\n' "$before" >"$CX/baseline.json"
+    rc=0
+    # shellcheck disable=SC2086
+    (cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
+        --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1 $flags) \
+        >/dev/null 2>&1 || rc=1
+    if [ "$rc" != "$expect" ]; then
+        echo "backend drift: baseline $before with '$flags' exited $rc, wanted $expect" >&2
+        exit 1
+    fi
+    if ! python3 -c "$compare" "$CX/baseline.json" "$after" eq; then
+        echo "backend drift: baseline $before with '$flags' should have left $after" >&2
+        exit 1
+    fi
+done <<'DRIFT_CASES'
+1.970|--tighten-baseline|0|1.970
+2.030|--tighten-baseline|0|2.030
+1.900|--tighten-baseline|1|1.900
+1.900||1|1.900
+2.400||1|2.400
+2.400|--tighten-baseline|0|2.000
+DRIFT_CASES
+
+echo "==> assert each half's fixing variant tightens and its checking variant refuses"
+# Tightening only means anything if exactly one of each half's two lint entry points
+# asks for it, and grepping for the flag cannot tell those apart -- a flag wired into
+# both would leave `make lint-check`, so CI and the pre-commit hook, silently accepting
+# stale baselines, which is the state this whole check exists to end. So drive both.
+#
+# Last, and not a line earlier. The fixing variants run `biome check --write`,
+# `ruff --fix`, `ruff format` and `codespell --write-changes` across the rendered tree:
+# anywhere above this they would repair whatever an earlier step exists to catch, move
+# backend source out from under `make openapi-check`, and hand back a green run on a
+# template that ships unformatted source. Nothing may follow this section.
+node -e '
+const pkg = JSON.parse(require("node:fs").readFileSync("frontend/package.json", "utf8"));
+if (!pkg.scripts.lint.includes("--tighten-baseline")) throw new Error("pnpm lint cannot tighten");
+if (pkg.scripts["lint:check"].includes("--tighten-baseline")) throw new Error("lint:check tightens");
+'
+
+# The rendered halves are both far below their size guards, so drift stands down on
+# them. Pad the frontend's src/ until it does not, in files under the 500-line gate --
+# biome runs first, and one long file would stop the lint before complexity ever ran.
+node -e '
+let body = "";
+for (let index = 0; index < 60; index++) {
+    body += `export function f${index}(a: number, b: number) {\n  if (a > 0) {\n    if (b > 0) {\n      return 1;\n    }\n  }\n  return 0;\n}\n`;
+}
+const fs = require("node:fs");
+fs.mkdirSync("frontend/src/pad", { recursive: true });
+for (let file = 0; file < 10; file++) fs.writeFileSync(`frontend/src/pad/pad${file}.ts`, body);
+'
+run "frontend baseline" pnpm -C frontend run complexity:baseline
+pnpm -C frontend run complexity | grep -q 'drift ok'   # the padded half really is gating
+
+INFLATED="$(node -e '
+const fs = require("node:fs");
+const path = "frontend/.complexity-baseline.json";
+const baseline = JSON.parse(fs.readFileSync(path, "utf8"));
+const density = baseline.density * 1.05;
+fs.writeFileSync(path, JSON.stringify({ ...baseline, density }, null, 2));
+process.stdout.write(String(density));
+')"
+
+# Assert on the gate's own message rather than on the exit status alone: each half's
+# lint runs five or six tools, so a bare nonzero would let tsc or basedpyright stand in
+# for a refusal that never happened.
+if out="$(pnpm -C frontend lint:check 2>&1)"; then
+    fail "pnpm lint:check accepted a baseline standing above the tree"
+fi
+printf '%s\n' "$out" | grep -q 'baseline is .* above the tree' || {
+    echo "pnpm lint:check failed, but not on the stale baseline:" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+}
+
+if ! out="$(pnpm -C frontend lint 2>&1)"; then
+    echo "pnpm lint failed instead of tightening the stale baseline:" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+fi
+printf '%s\n' "$out" | grep -q 'baseline tightened'
+node -e '
+const fs = require("node:fs");
+const density = JSON.parse(fs.readFileSync("frontend/.complexity-baseline.json", "utf8")).density;
+if (!(density < Number(process.argv[1]))) {
+    throw new Error("lint reported tightening but left the baseline on disk");
+}
+' "$INFLATED"
+
+# The backend half of the same drive. Its floor is the one that has to move: the smoke
+# project has fewer callables than a mean is worth gating on.
+sed 's/^min-callables = 50$/min-callables = 1/' backend/pyproject.toml >"$WORK/pyproject.floored"
+cp "$WORK/pyproject.floored" backend/pyproject.toml
+need_grep '^min-callables = 1$' backend/pyproject.toml
+printf '{"callables": 1.0, "mean": 2.9, "p90": 1.0}\n' >backend/.complexity-baseline.json
+
+# --no-sync throughout this block: pyproject.toml was just edited, and a re-resolve
+# against the registry is neither wanted here nor relevant to what is being asserted.
+if out="$(cd backend && uv run --no-sync python devtools/lint.py --check 2>&1)"; then
+    fail "backend lint --check accepted a baseline recorded far above the tree"
+fi
+printf '%s\n' "$out" | grep -q 'FAIL: baseline is .* above the tree' || {
+    echo "backend lint --check failed, but not on the stale baseline:" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+}
+
+if ! out="$(cd backend && uv run --no-sync python devtools/lint.py 2>&1)"; then
+    echo "backend lint failed instead of tightening the stale baseline:" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+fi
+printf '%s\n' "$out" | grep -q 'baseline tightened'
+python3 -c "$compare" backend/.complexity-baseline.json 2.9 lt \
+    || fail "backend lint reported tightening but left the baseline on disk"
 
 echo "==> OK ($VARIANT)"

@@ -142,6 +142,9 @@ max-statements = 25
 # devtools/complexity.py. Measured against Python codebases; the frontend half
 # gates its own density separately with its own numbers, in its own unit. The two
 # are not comparable and must not be merged.
+# The tolerance is an allowed move in both directions. A rise past it fails; a
+# fall past it means the baseline is stale and carrying slack, so `make lint`
+# lowers it and `make lint-check` refuses.
 tolerance = 0.05
 ceiling = 3.0
 min-callables = 50
