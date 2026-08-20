@@ -169,7 +169,7 @@ mechanics, not the TS sibling's bespoke CLI. Three reasons, in order of weight:
 3. **The toolchain objection dissolves.** Requiring `uvx` to generate a project whose backend
    requires uv is not a cost.
 
-Distribution: `uvx --exclude-newer "14 days" copier@9.16.0 copy gh:CodeMocsh/agent-ready-fullstack-ts-python my-app`.
+Distribution: `uvx --exclude-newer "14 days" copier@9.17.1 copy gh:CodeMocsh/agent-ready-fullstack-ts-python my-app`.
 Works against a private repo (git supplies credentials). Tag `v0.x.y` from day one —
 `copier update` resolves against tags.
 
@@ -516,7 +516,7 @@ make in the open, not silently.
 Base it on agent-ready-python's `origin/main` version (tool preflight, `GIT_*` unsetting, tar
 staged through a file because CI's dash has no `pipefail`), then:
 
-1. Preflight `uvx uv tar python3 git node pnpm`; `UV_EXCLUDE_NEWER="14 days"`; `COPIER_SPEC="copier@9.16.0"`.
+1. Preflight `uvx uv tar python3 git node pnpm`; `UV_EXCLUDE_NEWER="14 days"`; `COPIER_SPEC="copier@9.17.1"`.
 2. Variant case; working-tree tar copy; `copier copy --defaults --data …`.
 3. Agent-ready layer: `AGENTS.md`, `CLAUDE.md` contains `@AGENTS.md`, `.claude/settings.json`
    parses, guard `py_compile`s, `.entire/settings.json`, `docs/agent-tooling.md`,

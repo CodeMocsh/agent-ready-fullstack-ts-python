@@ -99,7 +99,7 @@ Generate a new project with Copier (installed on demand via
 [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.16.0 copy \
+uvx --exclude-newer "14 days" copier@9.17.1 copy \
   gh:CodeMocsh/agent-ready-fullstack-ts-python my-app
 ```
 
@@ -132,7 +132,7 @@ Projects generated from this template record their answers in `.copier-answers.y
 can pull future template improvements with:
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.16.0 update
+uvx --exclude-newer "14 days" copier@9.17.1 update
 ```
 
 Review the diff, resolve any `.rej` files, and run `make openapi` if the contract artifacts

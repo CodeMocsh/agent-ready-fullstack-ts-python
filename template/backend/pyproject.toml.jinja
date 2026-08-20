@@ -18,7 +18,7 @@ authors = [
 {%- if package_license == 'None' %}
 # No license chosen yet. When you pick one, set an SPDX expression here and add a
 # LICENSE file at the repository root, or re-answer the template question:
-# uvx --exclude-newer "14 days" copier@9.16.0 update --data package_license=MIT
+# uvx --exclude-newer "14 days" copier@9.17.1 update --data package_license=MIT
 {%- else %}
 license = "{{ 'LicenseRef-Proprietary' if package_license == 'Proprietary' else package_license }}"
 {%- endif %}

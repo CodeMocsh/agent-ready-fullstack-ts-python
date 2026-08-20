@@ -62,7 +62,7 @@ This project keeps `.copier-answers.yml`, which records the template it came fro
 exact commit. That is what lets a later template change reach a project generated months ago:
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.16.0 update
+uvx --exclude-newer "14 days" copier@9.17.1 update
 make install
 make openapi
 make pre-commit
