@@ -12,9 +12,11 @@ SHELL := /bin/bash
 UV_EXCLUDE_NEWER ?= 14 days
 export UV_EXCLUDE_NEWER
 
-# Where the contract suite points when it runs against the backend half: through the
-# dev server, so the run exercises the proxy and the prefix rewrite as well.
-CONTRACT_BASE_URL ?= http://localhost:5173/api
+# CONTRACT_BASE_URL is deliberately not set here. devtools/contract-test.sh derives it
+# from FRONTEND_PORT, and make passes the ambient environment through to a recipe, so
+# `CONTRACT_BASE_URL=... make test-contract` already reaches the script. A default in
+# this file was never exported and so never reached it at all -- it only claimed a port
+# the script would not have used.
 
 .DEFAULT_GOAL := default
 
