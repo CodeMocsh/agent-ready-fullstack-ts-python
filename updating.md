@@ -254,6 +254,29 @@ agent-ready-ts#7 and agent-ready-python#15 — so the flow described above is no
 both ends rather than only at this one. Neither sibling does anything differently; they just
 know the layer has a third reader.
 
+### Awaited from upstream
+
+The mirror of the section above: a fix *discovered* here, reported to the repo that owns the
+file, and not yet pulled back. The direction rule makes this list inevitable — a shared-layer
+bug found here can only be fixed somewhere else — so it needs somewhere to sit, or the gap
+between reporting and pulling is held in nobody's head. An entry leaves when `diff` against
+the owner's copy is clean again, which is later than when the issue closes.
+
+- **[agent-ready-ts#15](https://github.com/CodeMocsh/agent-ready-ts/issues/15) — the stroke
+  guidance is unconditional and should not be.** `.lucide { stroke-width: var(--icon-stroke) }`
+  is a class selector, so it reaches lucide icons and nothing else. On hand-drawn SVG nothing
+  outranks a `strokeWidth` prop and the prop is the only thing setting the width. Four places
+  say the opposite without qualifying it, and this repo mirrors all four:
+  `template/AGENTS.md.jinja:326`, `template/docs/agent-tooling.md:399-401`,
+  `template/frontend/devtools/conformance.mjs:161` and `devtools/check_template.sh:707`.
+
+  No gate changes. The rule was always right about hand-drawn geometry —
+  `AGENTS.md.jinja:332` allows a weight that is a named constant, and `check_template.sh:779`
+  asserts a passing `<path strokeWidth={ICON_STROKE} />`. The wording is the whole of the
+  harm, and it is worst at `AGENTS.md.jinja:326`, which is the one an agent reads in a
+  generated project: read on its own it is a licence to delete a load-bearing prop, and the
+  carve-out that would stop it is six lines further down.
+
 ### A fourth reader, and it has drifted both ways
 
 [fab](https://github.com/CodeMocsh/fab) is built from agent-ready-python and is a
