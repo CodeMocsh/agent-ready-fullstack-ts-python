@@ -87,6 +87,12 @@ They were hard-coded in each file and had to be kept in agreement by hand, and t
 was not theoretical: a second worktree running `make dev` took down the first one's port, and
 the template's own check refuses to run at all while anything else is holding either.
 
+**`contract-test.sh` goes further and binds a free pair by default.** Its two servers are
+throwaway, nobody opens them in a browser, and the numbers matter to nothing outside the
+script — so defaulting to 8000 and 5173 bought no stable URL and only made the gate fail
+whenever another checkout was already running one. The gate is the one thing that must never
+be circumstantially red. Setting `BACKEND_PORT` or `FRONTEND_PORT` still pins either.
+
 `PREVIEW_PORT` is the same idea one tier out, for the preview server the default Playwright
 run starts itself. `playwright.live.config.ts` reads `FRONTEND_PORT` rather than a port of
 its own, because the server it points at is the one `make dev` started.
@@ -447,10 +453,28 @@ Not configured, deliberately — deployment shape is yours. The pieces:
 - `make build` produces `frontend/dist/`, a static bundle. Serve it from any static host
   with an SPA fallback (every unknown path returns `index.html`).
 - The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
-- Point the two at each other one of two ways. Either put a reverse proxy in front of both,
+- Point the two at each other one of three ways. Either put a reverse proxy in front of both,
   serving the bundle and forwarding `/api/*` to the backend **with the prefix stripped**,
   which mirrors the dev setup exactly; or host them on separate origins, set
-  `VITE_API_BASE_URL` at build time, and add `CORSMiddleware` to the backend.
+  `VITE_API_BASE_URL` at build time, and add `CORSMiddleware` to the backend; or run
+  `app.serve`, which is one process carrying both.
+
+  ```bash
+  cd backend
+  FRONTEND_BUNDLE=../frontend/dist uvicorn --factory app.serve:build_server --port 8000
+  ```
+
+  `cd backend` for the reason the bullet above it runs there: this half installs nothing, so
+  `app` is importable from that directory and nowhere else. `FRONTEND_BUNDLE` is then relative
+  to it too — pass an absolute path if the two are not siblings where you deploy.
+
+  It mounts `app.main` under `/api` and answers everything else from the bundle, falling back
+  to `index.html` so a reload on a deep link reaches the client router. A request under
+  `assets/` is exempt from that fallback and 404s instead: those names carry the build's hash,
+  so a request for one the bundle does not hold is a stale document, and handing a script tag
+  a page of HTML fails as a syntax error a long way from the deploy that caused it. There is
+  no `FRONTEND_BUNDLE` default, because a process that came up on the wrong directory would
+  answer every path with a file it never found.
 - If the bundle is served from a subpath, pass `--base=/that/path/` to `vite build`.
 - Never ship mock mode: production builds must leave `VITE_ENABLE_MSW` unset.
 - **Set `DATABASE_URL`, or you are deploying the in-memory substrate.** It resets on every

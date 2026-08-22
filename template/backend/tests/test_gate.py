@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = ROOT / "Makefile"
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 HOOK = ROOT / ".githooks" / "pre-commit"
+E2E = ROOT / "frontend" / "e2e"
 
 THE_GATE = ["lint-check", "openapi-check", "test"]
 
@@ -85,6 +86,16 @@ def test_the_opt_in_tier_stays_out_of_the_gate():
         )
     for target in OPT_IN_TIER:
         assert recipe_of(target), f"`{target}` is documented as the opt-in tier and does nothing"
+
+
+def test_the_live_tier_has_a_spec_to_run():
+    """`make test-e2e-live` selects on a filename suffix rather than naming a file, so the
+    last `*.live.spec.ts` can be renamed or deleted without anything failing: the target still
+    exists, and neither the gate nor CI ever ran it. This assertion is what notices."""
+    assert list(E2E.glob("*.live.spec.ts")), (
+        f"no *.live.spec.ts under {E2E.relative_to(ROOT)}, so `make test-e2e-live` selects "
+        f"nothing and the tier that looks at the real system has silently stopped existing"
+    )
 
 
 def test_the_hook_runs_the_gate():

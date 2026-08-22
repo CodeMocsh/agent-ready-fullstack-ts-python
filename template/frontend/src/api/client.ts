@@ -1,6 +1,15 @@
 import { API_BASE_URL } from "@/api/base";
 import type { CreateTaskBody, Task, UpdateTaskBody } from "@/api/types";
 
+async function detailOf(response: Response): Promise<string | null> {
+  const body: unknown = await response.json().catch(() => null);
+  if (typeof body === "object" && body !== null && "detail" in body) {
+    const detail = (body as { detail: unknown }).detail;
+    return typeof detail === "string" && detail !== "" ? detail : null;
+  }
+  return null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? "GET";
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -8,7 +17,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "content-type": "application/json" },
   });
   if (!response.ok) {
-    throw new Error(`${method} ${path} failed with ${response.status}`);
+    const detail = await detailOf(response);
+    throw new Error(detail ?? `${method} ${path} failed with ${response.status}`);
   }
   if (response.status === 204) {
     return undefined as T;

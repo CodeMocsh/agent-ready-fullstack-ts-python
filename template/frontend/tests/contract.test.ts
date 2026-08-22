@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { API_BASE_URL } from "@/api/base";
 import { tasksApi } from "@/api/client";
 
 const againstLiveBackend = process.env.CONTRACT_TARGET === "live";
@@ -42,8 +43,16 @@ describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers
     expect((await tasksApi.list()).some((task) => task.id === created.id)).toBe(false);
   });
 
-  it("reports a missing task as an error on update and remove", async () => {
-    await expect(tasksApi.update("does-not-exist", { done: true })).rejects.toThrow("404");
-    await expect(tasksApi.remove("does-not-exist")).rejects.toThrow("404");
+  it("refuses a missing task with a 404 and an ErrorBody", async () => {
+    const answered = await fetch(`${API_BASE_URL}/tasks/does-not-exist`, { method: "DELETE" });
+    expect(answered.status).toBe(404);
+    expect(await answered.json()).toEqual({ detail: "Task not found" });
+  });
+
+  it("reports a missing task with the detail both implementations write", async () => {
+    await expect(tasksApi.update("does-not-exist", { done: true })).rejects.toThrow(
+      "Task not found",
+    );
+    await expect(tasksApi.remove("does-not-exist")).rejects.toThrow("Task not found");
   });
 });
