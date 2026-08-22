@@ -432,6 +432,11 @@ need backend/app/routes.py
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/tests/test_tasks.py
+# The one-origin entrypoint, for a deployment with no proxy to strip the /api prefix.
+# It mounts app.main and delegates that app's lifespan, because Starlette does not run a
+# mounted application's lifespan and the process would come up with no database on it.
+need backend/app/serve.py
+need backend/tests/test_serve.py
 # Two substrates behind one contract, and one suite over both. A store package with only
 # one implementation in it is a shape nothing checks -- see docs/adr/0001.
 need backend/app/store/__init__.py
@@ -1096,7 +1101,11 @@ echo "==> the contract suite, against both implementations"
 # other, not only against themselves. Every check above passes on a project whose
 # frontend cannot reach its backend at all.
 run "contract suite (mocks)" pnpm -C frontend test:contract
-run "contract suite (live backend)" make test-contract
+# With the two port variables unset, so the branch that ships to users is the branch this
+# exercises. This script exports a pair of its own at the top, and inheriting them meant
+# contract-test.sh's own allocator -- the thing that keeps the gate green when another
+# checkout is already serving :8000 -- never ran here at all.
+run "contract suite (live backend)" env -u BACKEND_PORT -u FRONTEND_PORT make test-contract
 
 echo "==> the store, against a real Postgres"
 # The opt-in tier, exercised here when a daemon is available. Gated rather than required,

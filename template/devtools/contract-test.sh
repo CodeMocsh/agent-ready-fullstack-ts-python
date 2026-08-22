@@ -14,8 +14,32 @@ set -eu
 set -m
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
-BACKEND_PORT="${BACKEND_PORT:-8000}"
-FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+
+# A free pair, found rather than fixed. This throwaway pair is nobody's dev server and
+# the numbers matter to nothing outside this script, so defaulting to 8000 and 5173 only
+# made the gate fail whenever another checkout of this project was already running one --
+# and the gate is the one thing that must never be circumstantially red. Still overridable,
+# because a caller that has to know the ports in advance is the case CONTRACT_BASE_URL serves.
+#
+# Both sockets stay bound until the interpreter exits, so the two cannot come back as the
+# same number. Asking twice in two processes is the obvious spelling and it is wrong: each
+# closes its socket before the next one binds, which leaves the kernel free to hand the same
+# port to both -- rare, load-dependent, and indistinguishable from a flaky gate.
+PORTS="$(python3 - <<'PY'
+import socket
+
+held = []
+for _ in range(2):
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    held.append(sock)
+print(" ".join(str(sock.getsockname()[1]) for sock in held))
+for sock in held:
+    sock.close()
+PY
+)"
+BACKEND_PORT="${BACKEND_PORT:-${PORTS%% *}}"
+FRONTEND_PORT="${FRONTEND_PORT:-${PORTS##* }}"
 export BACKEND_PORT FRONTEND_PORT
 base_url="${CONTRACT_BASE_URL:-http://localhost:$FRONTEND_PORT/api}"
 backend_pid=""

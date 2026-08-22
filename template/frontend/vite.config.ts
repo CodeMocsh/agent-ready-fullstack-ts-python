@@ -17,10 +17,29 @@ import { defineConfig } from "vite";
 const FRONTEND_PORT = Number(process.env.FRONTEND_PORT ?? 5173);
 const BACKEND_PORT = Number(process.env.BACKEND_PORT ?? 8000);
 
+// Most of this bundle is dependency code every route needs, so with one chunk a
+// one-line change to a component re-downloads react-dom for everybody who already
+// had it. These groups are split by how often they change rather than by size:
+// react moves on its own release cycle, the data and UI libraries on theirs, and
+// app code on every deploy. A returning visitor then pays only for what moved.
+const VENDOR_GROUPS = [
+  { name: "react", test: /node_modules\/(react|react-dom|scheduler)\// },
+  { name: "tanstack", test: /node_modules\/@tanstack\// },
+  { name: "ui", test: /node_modules\/(@base-ui|@floating-ui|lucide-react)\// },
+  { name: "style", test: /node_modules\/(tailwind-merge|clsx|class-variance-authority)\// },
+];
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+  },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: { groups: VENDOR_GROUPS },
+      },
+    },
   },
   server: {
     port: FRONTEND_PORT,
