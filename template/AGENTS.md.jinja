@@ -162,6 +162,17 @@ Both kinds are excluded from lint, from the complexity ratchet, and from the con
 checks. Do not reformat them, strip their comments, or "simplify" them to match house
 style.
 
+**Not everything `shadcn add` writes lands in those paths.** Only registry items typed
+`registry:ui` go to `frontend/src/components/ui`. A block or a chart lands in
+`frontend/src/components`, a hook in `frontend/src/hooks`, a library file in
+`frontend/src/lib` beside the one exempt `utils.ts` — all of them ordinary scanned source,
+arriving in shadcn's own idiom rather than this project's, so `make lint` will have opinions
+about a block the moment you add one. Prefer fixing the values to tokens: it is a component
+you will edit anyway, and it is yours now. If you would rather keep it verbatim, add that
+path to `conformance.exclude` in `frontend/package.json`, which is a reviewable line naming
+one file. Do not reach for `conformance.allow` — it matches on text rather than on path, so
+allowing a vendored block's `bg-primary/80` allows that fade everywhere.
+
 ## Build and Test
 
 `make` at the root is the interface across both halves:
@@ -278,13 +289,32 @@ to delete the spec.
   (`bg-background`, `text-muted-foreground`) over raw colours, and for the type and
   spacing scales (`text-sm`, `p-4`, `gap-6`) over arbitrary values. This is enforced:
   `pnpm conformance` fails on a hex literal, a colour keyword, a fixed palette step like
-  `bg-blue-500`, a `text-[13px]`, and a `p-[7px]`. The reason is dark mode and drift — a
-  literal renders perfectly in the theme you are looking at and keeps its value in the one
-  you are not. Add a token to `src/index.css` instead.
+  `bg-blue-500` or `border-t-red-500`, a `text-[13px]`, and a `p-[7px]`. The reason is dark
+  mode and drift — a literal renders perfectly in the theme you are looking at and keeps its
+  value in the one you are not. Add a token to `src/index.css` instead.
 
-  Two arbitrary values stay legal, because neither is an escape from the theme: sizing
-  (`w-[240px]`, `max-w-[65ch]` — there is no token for how wide a sidebar is) and any
-  value that reads a theme variable (`gap-[--spacing(var(--gap))]`).
+  An opacity modifier — `bg-primary/80`, `bg-primary/[0.31]` — fails for the same reason,
+  and the fix is not a fade per colour but a name for the role. A scrim, a hover tint and a
+  subtle wash are three tokens; `/80`, `/75` and `/70` scattered across three files are
+  three guesses. Two things that look similar stay legal: Tailwind's scale shorthand, where
+  the slash is not opacity at all (`text-sm/6` sets line height), and a fade that reads a
+  custom property (`bg-card/(--wash)`), which was declared somewhere reviewable.
+
+  **Icon stroke comes from `--icon-stroke`,** not from the call site. `src/index.css` sets
+  it once and `.lucide { stroke-width: var(--icon-stroke) }` applies it to every
+  lucide-react icon, so `strokeWidth={1.5}` and `className="stroke-2"` both fail
+  conformance. Change the token to change every icon in the app.
+
+  The two fail differently, which is worth knowing when you meet one. A `stroke-2` class
+  overrides the token, because Tailwind's utilities sort after `@layer base`. A
+  `strokeWidth` prop does not: a CSS declaration outranks an SVG presentation attribute, so
+  the prop is already doing nothing, and deleting it changes no pixels.
+
+  Three values stay legal, because none is an escape from the theme: sizing (`w-[240px]`,
+  `max-w-[65ch]` — there is no token for how wide a sidebar is), any value that reads a
+  theme variable (`gap-[--spacing(var(--gap))]`, `stroke-(length:--icon-stroke)`, and note
+  that the bare `stroke-[var(--icon-stroke)]` sets the paint rather than the width), and a
+  one-off piece of SVG geometry whose weight is a named constant rather than a literal.
 
 - **Data**: server state comes from TanStack Query hooks against `src/api/client.ts`.
   Never fetch in a `useEffect`: it skips the cache, the deduplication, and the loading and

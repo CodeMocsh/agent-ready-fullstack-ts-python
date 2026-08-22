@@ -252,7 +252,7 @@ around the per-function gates either — which is the point.
 ## Conformance checks
 
 `frontend/devtools/conformance.mjs` runs in `pnpm lint`, in `pnpm lint:check`, and through
-`make lint`. It gates eight patterns biome has no rule for. They have one thing in common:
+`make lint`. It gates eleven patterns biome has no rule for. They have one thing in common:
 each renders correctly on the screen the agent is looking at, and is wrong somewhere the
 agent never looks.
 
@@ -270,8 +270,98 @@ before calling a change done, so the check stands in for looking. The literal fo
 covers a colour set in an inline style without needing a separate rule about inline styles.
 The keywords are matched only where a colour can actually go, so a variable named `tan` or
 the string `"orange"` in data is not a violation. Across bulletproof-react, documenso,
-shadcn-ui and excalidraw the rule finds three instances in total, all three in documenso's
-signature-pad colour picker — which is exactly what `conformance.allow` is for.
+shadcn-ui and excalidraw the rule found three instances in total, all three in documenso's
+signature-pad colour picker — which is exactly what `conformance.allow` is for. Widening the
+utility shape below did not move that: re-run across the same four, `named-colour` returns
+the same count it did before, and the whole widening costs twelve additional
+`palette-utility` hits in total — ten in documenso, two in shadcn-ui, every one of them a
+real `border-t-*` or `divide-y-*` palette step. A hole that stayed open since the rule
+shipped turns out to be cheap to close, which is the argument for closing it rather than
+noting it.
+
+**A colour utility is not always `prefix-value`, and the rules that assumed it were
+porous.** Two ordinary Tailwind shapes defeated the first versions of `palette-utility` and
+`named-colour`, and neither is exotic. A *side segment* can sit between the prefix and the
+value — `border-t-red-500`, `border-x-blue-200`, `divide-y-gray-300`, `ring-offset-blue-200`
+— and a rule anchored straight to `border-` walks past every one of them. A *compound
+prefix* puts the familiar word second — `inset-shadow-red-500`, `inset-ring-primary/50`,
+`drop-shadow-xl/25` — where the word-boundary anchor that stops `converted-to-black` from
+firing also stops `shadow` from matching inside `inset-shadow`. The same anchor that makes
+the rule safe on prose made it blind here.
+
+So the three colour rules now share one builder rather than three hand-kept lists: the
+utility set, one optional side segment, then whatever value the rule is looking for. The
+side segment is spelled as Tailwind's actual vocabulary — `t r b l x y s e`, `offset`,
+`shadow` — rather than "any word", because "any word" would fire on `text-on-black` in a
+sentence. Sharing the builder is what keeps the three from drifting apart again, which is
+how the gap opened: `palette-utility` carried its own copy of the utility list, and the copy
+is what went stale.
+
+**An opacity modifier is a colour the theme never declared** — `token-alpha`, on
+`bg-primary/80`, `text-subtle/60`, `ring-destructive/40`. The token survives the theme
+switch; the `/80` does not, because nothing declared it. It is the same argument as
+`raw-colour` made one level in: the value is decided at a keystroke rather than once, and
+the second call site that wants the same fade picks `/75`.
+
+The remedy is deliberately *not* a fade per colour. `--color-primary-80` alongside
+`--color-destructive-50` and `--color-muted-30` is a combinatorial theme, and alpha is the
+axis that fits a ramp worst, because the fade is almost always contextual — a scrim, a
+hover wash, a focus ring. Name the role instead: `--color-scrim` is one decision that
+holds, and it reads at the call site.
+
+Tailwind spells two unrelated things with a slash, and only one of them is alpha, so the
+exemption is anchored to the one prefix that carries the other: `text-sm/6` and
+`text-2xl/8` are the font-size and line-height shorthand and go free. Nothing else does.
+`shadow-lg/50` really is shadow opacity and really is caught, which is the point — an
+exemption written by shape rather than by prefix would have taken `bg-base/50` and
+`ring-lg/40` with it, and `base` is a plausible surface-token name.
+
+This is the most expensive rule in the file, and the number is worth knowing before you adopt
+it. It is a range rather than a figure, and which end you land on is decided by your
+directory layout rather than by your code.
+
+With each tree's vendored UI excluded, `token-alpha` fires in 1.2% of source files in
+bulletproof-react, 4.4% in shadcn-ui, 6.1% in documenso and 0% in excalidraw. Over every file
+instead, the same rule reads 4.8% to 8.9%. The spacing rule finds 0% to 0.6% either way, so
+this is somewhere between two and fifteen times that, and the gap between the two readings is
+almost entirely vendored code: 175 of documenso's hits are its `packages/ui` primitives, and
+2,522 of shadcn-ui's are the v4 registry and docs site.
+
+**The low end assumes a clean split, and the exclusion is path-based, so it is only ever as
+clean as your paths.** This template earns the assumption by construction —
+`frontend/components.json` pins the `ui` alias to `@/components/ui` and
+`conformance.exclude` names that same path — but plenty of projects drop generated components
+straight into `src/components` beside code they wrote, and no exclusion separates the two
+afterwards. Such a tree gets the upper figure. That is a fact about the layout, not about the
+rule, and it is the first thing to check before reading a violation count as a verdict on the
+code.
+
+The split is partial even here, which is worth knowing before the first `shadcn add`. Only
+`registry:ui` items go to the `ui` alias. A `registry:component` or `registry:block` — the
+blocks and the charts — lands in `frontend/src/components`, a `registry:hook` in
+`frontend/src/hooks`, a `registry:lib` in `frontend/src/lib` beside the one excluded
+`utils.ts`. All of those are scanned, and
+all of them arrive written in exactly the idiom these rules gate. Fixing the values is the
+better answer, because a block you added is a block you will edit; adding the file to
+`conformance.exclude` is the honest alternative. Reaching for `conformance.allow` is the wrong
+one — it is keyed on matched text, so a `/80` allowed for a vendored block is a `/80` allowed
+everywhere.
+
+The rate is not the deciding number anyway. In bulletproof-react, the tidiest of the four, the
+rule condemns **no file that was not already failing** — every hit lands in a file some other
+rule had already caught, so the gate's verdict on that codebase is unchanged. A tree adopting
+the rule mid-life should still expect a grandfathering commit rather than a clean run.
+
+The bracketed spelling is the same offence and is caught too: `bg-primary/[0.31]` and
+`ring-ring/[.08]` are exactly `/80` with more punctuation. What is *not* the offence is a
+fade that reads a custom property — `bg-card/(--wash)`, `bg-primary/[var(--my-alpha)]` —
+because that value was declared somewhere and is reviewable there. That is the same
+carve-out `arbitrary-spacing` grants, spelled the same way in the pattern, and it is the
+line worth holding: the rule is against the literal, not against the brackets.
+
+`inset-shadow-sm/30` and `drop-shadow-xl/25` are caught too, through the compound prefixes
+described above — this rule shares the same utility set, so a family added for one colour
+rule is a family the other two gain at the same time.
 
 **One type scale** — `arbitrary-type`, `raw-type-declaration`, `inline-type-declaration`.
 The objection to `text-[13px]` is not that 13px is wrong; it is that a scale with one value
@@ -294,6 +384,64 @@ Tailwind, and a rule that fires on correct code gets deleted. An arbitrary value
 a theme variable — `gap-[--spacing(var(--gap))]`, `pt-[calc(var(--gap)*0.25)]`, both taken
 from shadcn-ui — is also exempt, because reaching for the theme is the point rather than the
 offence.
+
+**Stroke weight has one home** — `raw-stroke`, `magic-presentation-prop`. `--icon-stroke`
+is declared in `frontend/src/index.css` and `.lucide { stroke-width: var(--icon-stroke) }`
+in `@layer base` carries it to every icon, because lucide-react tags all of them:
+`Icon.mjs` builds `className: mergeClasses("lucide", contextClass, className)`. A CSS
+declaration outranks an SVG presentation attribute, so the token wins over the
+`stroke-width="2"` lucide renders by default, and one line themes every icon in the app.
+
+Both rules exist because a stroke weight has two doors that set the same property:
+`strokeWidth={1.5}` in JSX, and `stroke-2` or `stroke-[3px]` as a utility class. They fail
+in opposite directions, so neither stands in for the other. The utility *beats* the token —
+`@layer utilities` sorts after `@layer base` — so an ungated `stroke-2` silently wins. The
+prop *loses* to it, so an ungated `strokeWidth={3}` does not render wrong, it renders at
+1.5 with no error at all. One is a value that escapes the theme; the other is a line of
+code that already does nothing. Both are worth a failure.
+
+The digit is the whole test. `strokeWidth={MARK_TRUNK_WIDTH}` passes and
+`strokeWidth={1.5}` fails, because a named constant is already decided once — the same
+carve-out sizing gets from the spacing scale, for the same reason. Hand-drawn geometry
+stays possible; deciding its weight twice does not.
+
+Which `stroke-*` spellings are widths at all is the fiddly part, and the rule follows what
+Tailwind actually compiles rather than what the prefix looks like. `stroke-2`, `stroke-[2px]`,
+`stroke-[0.5]`, `stroke-[.5]` and `stroke-[-1]` are all stroke-*width* and all caught — the
+leading `.` and `-` matter, because a check that only understood a leading digit would let
+`stroke-[.5]` through while catching `stroke-[0.5]`, which is the same number. Both
+`stroke-(length:--icon-stroke)` and `stroke-[length:var(--icon-stroke)]` are widths that read
+the theme, and both go free. `stroke-muted-foreground`, `stroke-[#fff]`, `stroke-[red]` and
+`stroke-[currentColor]` are *paints*, not widths, and belong to the colour rules instead.
+
+`stroke-[var(--icon-stroke)]` is the trap in that list, and it is the reason the doc names
+the working forms explicitly. Tailwind cannot infer a type from a bare variable, so it
+resolves to the `stroke` paint and sets the icon's colour to `1.5`. The `length:` hint is
+what makes it a width.
+
+Measured across the same four, the two stroke rules cost far less than the alpha one.
+`raw-stroke` finds three instances in total — one in documenso, two in shadcn-ui — because a
+stroke width set through a class is rare. `magic-presentation-prop` fires in 0.2% to 1.2% of
+source files as configured, inside the band the spacing rule already occupies, and like
+`token-alpha` condemns no file in bulletproof-react or excalidraw that was not already
+failing.
+
+Excalidraw is the shape of adoption worth expecting, and it is not the shape the percentage
+suggests: 165 of its 168 hits sit in a single file, `packages/excalidraw/components/icons.tsx`,
+a hand-rolled icon sprite. That is the honest failure mode for this rule — not a rate spread
+across a codebase but one wall in one file. A project that hand-rolls its icons excludes that
+file and moves on; a project using lucide and `--icon-stroke`, which is what this template
+ships, never writes the prop at all.
+
+Three known limits, stated rather than hidden. An identifier carrying a digit — `SIZE_2` —
+false-positives, and `conformance.allow` is the answer. Like every other entry in the table
+these match line by line, so a prop split across lines is missed; making it exact would cost
+a bespoke scan of the whole JSX attribute rather than a table row, which is not worth it for
+a prop that fits on one line in every real case. And the prop rule reads the `=` form only,
+so a weight set through a `style` object is not caught — inline `style` is already the
+narrowest of the doors, and widening the pattern to the `:` form cost more than it bought:
+it fired on `strokeWidth: 1 | 2` in a type and on any object literal that happened to carry
+the key.
 
 **Data does not come from an effect** — `effect-data`, a `useEffect` whose body contains
 `await`, `.then(` or `fetch(`. TanStack Query is already in the project. An effect that
@@ -346,7 +494,7 @@ has a Python counterpart, and inventing one to make the halves symmetrical would
 check nobody measured. What ports across the two halves is the *selection rule*, not the
 rules: gate what renders correctly on the screen the agent is looking at and is wrong on one
 it never opens, and leave anything an agent can verify from its own diff to `AGENTS.md`.
-Whatever the backend's version of that turns out to be, it is not these eight patterns.
+Whatever the backend's version of that turns out to be, it is not these eleven patterns.
 
 ## The comment gate
 

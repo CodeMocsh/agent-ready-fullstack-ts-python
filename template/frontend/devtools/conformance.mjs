@@ -42,8 +42,21 @@ const NAMED_COLOURS = [
   "steelblue|tan|teal|thistle|tomato|turquoise|violet|wheat|whitesmoke|white|yellowgreen|yellow",
 ].join("|");
 
-const COLOUR_UTILITIES =
-  "bg|text|border|ring|fill|stroke|shadow|from|via|to|outline|decoration|divide|accent|caret|placeholder";
+const COLOUR_UTILITIES = [
+  "bg|text|border|ring|fill|stroke|shadow|inset-shadow|inset-ring|drop-shadow",
+  "from|via|to|outline|decoration|divide|accent|caret|placeholder",
+].join("|");
+
+const PALETTE = [
+  "slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal",
+  "cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black",
+].join("|");
+
+const UTILITY_EDGE = "(?:-(?:[trblxyse]|offset|shadow))?";
+
+function colourUtility(value) {
+  return `(?<![\\w-])(?:${COLOUR_UTILITIES})${UTILITY_EDGE}-${value}`;
+}
 
 const COLOUR_PROPERTIES = [
   "color|background|background-color|border-color|outline-color|caret-color|accent-color",
@@ -51,14 +64,45 @@ const COLOUR_PROPERTIES = [
   "accentColor|textDecorationColor",
 ].join("|");
 
+function declarationOf(properties) {
+  return `(?<=^|[;{\\s])(?:${properties})\\s*:`;
+}
+
 const NAMED_COLOUR = new RegExp(
-  `(?<![\\w-])(?:${COLOUR_UTILITIES})-\\[(?:${NAMED_COLOURS})\\]` +
+  `${colourUtility(`\\[(?:${NAMED_COLOURS})\\]`)}` +
     `|(?<=^|[;{\\s"'(])(?:${COLOUR_PROPERTIES})\\s*:\\s*["']?(?:${NAMED_COLOURS})\\b`,
   "g",
 );
 
+const PALETTE_UTILITY = new RegExp(colourUtility(`(?:${PALETTE})\\b(?:-\\d{2,3})?`), "g");
+
 const ARBITRARY_SPACING =
   /(?<![\w-])-?(?:p[xytrbles]?|m[xytrbles]?|gap(?:-[xy])?|space-[xy])-\[(?![^\]]*--)[^\]]+\]/g;
+
+const TYPE_SCALE_STEP = "base|xs|sm|lg|\\d*xl";
+
+const ALPHA_UTILITIES = COLOUR_UTILITIES.split("|")
+  .filter((name) => name !== "text")
+  .join("|");
+
+const LITERAL_ALPHA = "\\/(?:\\d{1,3}|\\[(?![^\\]]*--)[^\\]]+\\])";
+
+const LITERAL_LENGTH = "\\[(?![^\\]]*--)-?(?:\\d|\\.\\d)[^\\]]*\\]";
+
+const TOKEN_ALPHA = new RegExp(
+  `(?<![\\w-])(?:${ALPHA_UTILITIES}|text(?!-(?:${TYPE_SCALE_STEP})\\/))` +
+    `-[a-z][a-z0-9]*(?:-[a-z0-9]+)*${LITERAL_ALPHA}(?![\\w-])`,
+  "g",
+);
+
+const RAW_STROKE = new RegExp(
+  `(?<![\\w-])stroke-(?:\\d+(?:\\.\\d+)?|${LITERAL_LENGTH})(?![\\w-])` +
+    `|${declarationOf("stroke-width|stroke-opacity|fill-opacity")}`,
+  "g",
+);
+
+const MAGIC_PRESENTATION_PROP =
+  /(?<![\w-])(?:strokeWidth|strokeOpacity|fillOpacity)\s*=\s*(?:"[^"]*\d[^"]*"|\{[^}]*\d[^}]*\})/g;
 
 const RULES = [
   {
@@ -71,8 +115,7 @@ const RULES = [
   {
     name: "palette-utility",
     files: SOURCE,
-    pattern:
-      /(?<![\w-])(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|divide|shadow|accent|caret|placeholder)-(?:slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|white|black)\b(?:-\d{2,3})?/g,
+    pattern: PALETTE_UTILITY,
     hint: "a fixed palette step is not a token; use bg-background, text-muted-foreground, border-border and their siblings",
   },
   {
@@ -80,6 +123,12 @@ const RULES = [
     files: SOURCE,
     pattern: NAMED_COLOUR,
     hint: "a colour keyword is a literal like any other and survives the theme switch; use a token",
+  },
+  {
+    name: "token-alpha",
+    files: SOURCE,
+    pattern: TOKEN_ALPHA,
+    hint: "an alpha suffix invents a shade the theme never declared; name the role instead, so a scrim or a hover tint is one token rather than three guesses",
   },
   {
     name: "arbitrary-spacing",
@@ -96,8 +145,20 @@ const RULES = [
   {
     name: "raw-type-declaration",
     files: STYLESHEET,
-    pattern: /(?:^|[;{\s])(?:font-family|font-size|line-height|letter-spacing)\s*:/g,
+    pattern: new RegExp(declarationOf("font-family|font-size|line-height|letter-spacing"), "g"),
     hint: "declare type in the @theme block and reach for it through a utility, so one scale governs the app",
+  },
+  {
+    name: "raw-stroke",
+    files: SOURCE,
+    pattern: RAW_STROKE,
+    hint: "a stroke weight is a theme value like a colour or a size; set --icon-stroke in src/index.css and let the .lucide rule carry it to every icon",
+  },
+  {
+    name: "magic-presentation-prop",
+    files: MARKUP,
+    pattern: MAGIC_PRESENTATION_PROP,
+    hint: "the .lucide rule outranks this prop, so it is already doing nothing; take the weight from --icon-stroke, or name the constant for one-off geometry",
   },
 ];
 

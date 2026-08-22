@@ -407,7 +407,7 @@ records it — and it maps cleanly onto two halves:
 | file length | biome `noExcessiveLinesPerFile` 500, `overrides` → `src/**` | none |
 | verbosity | `useSimplifiedLogicExpression`, `noUselessElse`, `useCollapsedElseIf`, `noNegationElse` | ruff SIM/RET/PIE/C4/PERF/ERA |
 | density ratchet | `devtools/complexity.mjs` + `.complexity-baseline.json` | `devtools/complexity.py` + baseline |
-| design-system conformance | `devtools/conformance.mjs` (8 checks) | none — no analogue exists |
+| design-system conformance | `devtools/conformance.mjs` (11 checks) | none — no analogue exists |
 
 Never blend the two halves into one number: React applications and Python services sit in
 different density bands, the units differ (lines vs statements), and every threshold was
@@ -418,11 +418,17 @@ carries across… Do not reconcile them."*
 React hook and a query cache; there is no Python analogue, and the sibling says so. What
 ports is the *selection rule*, not the rules: gate what renders correctly on the screen the
 agent is looking at and is wrong on one it never opens; leave anything an agent can verify
-from its own diff to `AGENTS.md`. Its eight checks are the six line-by-line patterns
-`raw-colour`, `palette-utility`, `named-colour`, `arbitrary-spacing`, `arbitrary-type` and
-`raw-type-declaration`, plus the two structural ones `effect-data` and
-`inline-type-declaration`, configured by a `conformance` block (`themeFiles`, `allow`,
-`exclude`) and chained into `lint`/`lint:check`.
+from its own diff to `AGENTS.md`. Its eleven checks are the nine line-by-line patterns
+`raw-colour`, `palette-utility`, `named-colour`, `token-alpha`, `arbitrary-spacing`,
+`arbitrary-type`, `raw-type-declaration`, `raw-stroke` and `magic-presentation-prop`, plus
+the two structural ones `effect-data` and `inline-type-declaration`, configured by a
+`conformance` block (`themeFiles`, `allow`, `exclude`) and chained into `lint`/`lint:check`.
+The last three arrived from the sibling after the first eight: an opacity modifier is a
+shade the theme never declared, and a stroke weight has two doors — a utility class that
+beats the token and a JSX prop that loses to it — so both are gated. They are the reason
+`frontend/src/index.css` declares `--icon-stroke` and carries it with
+`.lucide { stroke-width: var(--icon-stroke) }`; a rule that forbids a value needs somewhere
+to point.
 Note it **fails closed**, unlike the agent guard, with `conformance.allow` as the reviewable
 escape hatch — the asymmetry follows the cost of a false positive.
 

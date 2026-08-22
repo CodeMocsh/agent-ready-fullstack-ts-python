@@ -598,6 +598,235 @@ for family in SIM RET PIE C4 PERF ERA C90 PLR0915; do
     grep -q "\"$family\"" backend/pyproject.toml || { echo "ruff family $family missing" >&2; exit 1; }
 done
 
+# The conformance rules gate what renders correctly on the screen the agent is
+# looking at and is wrong on one it never opens -- a colour outside the theme, a
+# size outside the scale, a stroke weight decided per call site, data fetched in
+# an effect. A rule that quietly stopped matching therefore looks exactly like a
+# clean codebase, so each is asserted in both directions against a fixture: it
+# must fire on code that violates it, and stay silent on code that only looks
+# similar. The script is dependency-free, so this runs before either install and
+# `make fast` catches a rule that stopped matching.
+echo "==> assert the conformance checks"
+CONF="$WORK/conformance"
+CONFORMANCE="$OUT/frontend/devtools/conformance.mjs"
+mkdir -p "$CONF/bad" "$CONF/good"
+
+# The comments in these fixtures are the point of them, not an oversight: the
+# scanner has to see through a comment in both directions. A stray ")" in one
+# would end an effect body early and hide the fetch below it; the word "fetch("
+# in another would condemn an effect that only subscribes. Source in a generated
+# project carries no comments, but nothing stops a fixture, a vendored file, or
+# a project that drops the rule from carrying one.
+cat >"$CONF/bad/bad.tsx" <<'BAD'
+import { useEffect, useState } from "react";
+
+export function Bad() {
+  const [items, setItems] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/items").then(async (response) => setItems(await response.json()));
+  }, []);
+  return (
+    <div className="bg-blue-500 text-white" style={{ fontSize: 13, color: "#ff0000" }}>
+      <p className="text-[13px] leading-[1.7]">{items.length}</p>
+    </div>
+  );
+}
+BAD
+
+cat >"$CONF/bad/commented.tsx" <<'BAD'
+import { useEffect } from "react";
+
+export function Commented({ load }: { load: (rows: string[]) => void }) {
+  useEffect(() => {
+    // an unbalanced ) in a note, which must not end this body early
+    fetch("/api/rows").then(async (response) => load(await response.json()));
+  }, [load]);
+  return null;
+}
+BAD
+
+# Tailwind's arbitrary-value syntax is the obvious way around a theme, so it is
+# asserted on its own file rather than folded into the table above. The
+# underscore before rgba() is the interesting part: Tailwind spells spaces that
+# way inside brackets, and a word-boundary anchor treats "_rgba(" as an ordinary
+# identifier and walks straight past a hard-coded colour.
+#
+# The last three lines are the shapes a colour utility can take besides the
+# plain one, and each defeated an earlier version of these rules. A side segment
+# sits between the prefix and the value (border-t-red-500, divide-y-gray-300,
+# ring-offset-blue-200); a compound prefix puts the familiar word second, where
+# a word-boundary anchor cannot reach it (inset-shadow-, inset-ring-,
+# drop-shadow-). Both are ordinary Tailwind rather than anything exotic, which is
+# what made missing them expensive.
+cat >"$CONF/bad/arbitrary.tsx" <<'BAD'
+export function Arbitrary() {
+  return (
+    <>
+      <div className="bg-[#1a1a1a] border-[rgb(10,10,10)]" />
+      <div className="shadow-[0_2px_4px_rgba(0,0,0,0.1)]" />
+      <div className="text-[13px] leading-[1.7] font-[Inter]" />
+      <div className="bg-[rebeccapurple]" style={{ color: "red" }} />
+      <div className="p-[7px] gap-[3px] -mt-[0.35rem]" />
+      <div className="bg-primary/80 text-subtle/60 border-destructive/50" />
+      <div className="bg-primary/[0.31] ring-ring/[.08]" />
+      <div className="border-t-red-500 divide-y-gray-300 ring-offset-blue-200" />
+      <div className="inset-shadow-red-500 drop-shadow-xl/25 inset-ring-primary/50" />
+      <div className="border-t-[rebeccapurple] text-shadow-red-500" />
+    </>
+  );
+}
+BAD
+
+# A stroke weight can leave the theme by two doors that set the same property,
+# so both are asserted: the JSX presentation prop and the utility class. Closing
+# one alone leaves a check that teaches a habit it only half enforces -- and the
+# two doors fail differently, which is why neither stands in for the other. A
+# utility wins over the .lucide rule, because @layer utilities sorts after
+# @layer base; a prop loses to it, so a prop the check misses does not render
+# wrong, it silently does nothing.
+cat >"$CONF/bad/stroke.tsx" <<'BAD'
+import { Trash2 } from "lucide-react";
+
+export function Stroke({ lit }: { lit: boolean }) {
+  return (
+    <>
+      <Trash2 strokeWidth={1.5} />
+      <svg className="stroke-2" />
+      <circle strokeOpacity="0.5" fillOpacity={lit ? 0.4 : 0.25} />
+      <path className="stroke-[.5] stroke-[-1]" />
+    </>
+  );
+}
+BAD
+
+cat >"$CONF/bad/bad.css" <<'BAD'
+.thing {
+  color: #fff;
+  font-family: Inter, sans-serif;
+  background: rgb(10 10 10);
+  stroke-width: 2;
+}
+BAD
+
+# Everything here is legitimate and must pass: tokens and scale steps rather
+# than literals, an effect that subscribes rather than fetches, a prop named
+# after a CSS property but carrying no style, and prose a looser pattern would
+# read as a palette utility.
+#
+# The arbitrary values here are the ones that must survive. Sizing has no scale
+# to be outside of -- there is no token for "the sidebar is 240px", and across
+# shadcn-ui and documenso sizing arbitraries outnumber spacing ones roughly
+# thirty to one -- and an arbitrary value that reads a theme variable is the
+# theme, not an escape from it.
+#
+# text-sm/6 is the trap in the alpha rule: a slash after a colour utility is an
+# alpha modifier, but a slash after a step on the type scale is the font-size
+# and line-height shorthand, and reading the second as the first would fire the
+# theme check on idiomatic Tailwind. Only text- carries that shorthand, so only
+# text- is exempt: shadow-lg/50 really is shadow opacity and really is caught.
+#
+# The other two traps are prefixes that mean something else. stroke- carries a
+# colour as readily as a weight, and both stroke-(length:--icon-stroke) and
+# stroke-[length:var(--icon-stroke)] read the token -- stroke-[var(--icon-stroke)]
+# would set the paint instead, so the check must not teach it by example. And a
+# presentation prop in type position is a type, not a style.
+#
+# The last two are the theme-reading forms of the arbitrary syntax, and they are
+# what separates this rule from a ban on brackets. An alpha or a weight spelled
+# through a custom property was declared somewhere and is reviewable there; the
+# offence is the literal, not the punctuation around it.
+cat >"$CONF/good/good.tsx" <<'GOOD'
+import { useEffect } from "react";
+
+const ICON_STROKE = 1.5;
+
+type Props = { onResize: () => void; fontSize: "compact" | "comfortable" };
+type Geometry = { strokeWidth: 1 | 2; strokeOpacity: 0.5 };
+
+export function Good({ onResize, fontSize }: Props) {
+  useEffect(() => {
+    // no fetch( here, whatever this note says
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [onResize]);
+  return (
+    <div className="w-[240px] max-w-[65ch] min-h-[200px] gap-[--spacing(var(--gap))] p-4">
+      <p className="text-muted-foreground bg-card/(--wash) border-t-border text-sm/6 leading-tight">
+        converted-to-black, then back-to-white, text-on-black, at {fontSize}
+      </p>
+      <svg className="stroke-muted-foreground stroke-[length:var(--icon-stroke)]">
+        <path className="stroke-(length:--icon-stroke)" strokeWidth={ICON_STROKE} />
+      </svg>
+    </div>
+  );
+}
+GOOD
+
+conformance_output="$(node "$CONFORMANCE" "$CONF/bad" 2>&1 || true)"
+for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
+            arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
+            magic-presentation-prop effect-data; do
+    if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
+        echo "conformance check $rule did not fire" >&2
+        printf '%s\n' "$conformance_output" >&2
+        exit 1
+    fi
+done
+
+# Named separately, because the file above already trips effect-data on an
+# effect with no comment in it: without this, a scanner that stopped seeing
+# through comments would still show a green table.
+if ! printf '%s\n' "$conformance_output" | grep -q 'commented.tsx:.*effect-data'; then
+    echo "conformance lost an effect body to a comment" >&2
+    printf '%s\n' "$conformance_output" >&2
+    exit 1
+fi
+
+# Named per file for the same reason: an arbitrary value is the shortest route
+# out of the theme, and the table above would stay green while every one of
+# them passed.
+for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
+                'arbitrary.tsx:6.*arbitrary-type' 'arbitrary.tsx:7.*named-colour' \
+                'arbitrary.tsx:8.*arbitrary-spacing' 'arbitrary.tsx:9.*token-alpha' \
+                'arbitrary.tsx:10.*token-alpha' 'arbitrary.tsx:11.*palette-utility' \
+                'arbitrary.tsx:12.*palette-utility' 'arbitrary.tsx:12.*token-alpha' \
+                'arbitrary.tsx:13.*named-colour' 'arbitrary.tsx:13.*palette-utility' \
+                'stroke.tsx:6.*magic-presentation-prop' 'stroke.tsx:7.*raw-stroke' \
+                'stroke.tsx:8.*magic-presentation-prop' 'stroke.tsx:9.*raw-stroke' \
+                'bad.css:5.*raw-stroke'; do
+    if ! printf '%s\n' "$conformance_output" | grep -q "$expected"; then
+        echo "conformance let an arbitrary value through: $expected" >&2
+        printf '%s\n' "$conformance_output" >&2
+        exit 1
+    fi
+done
+
+if ! node "$CONFORMANCE" "$CONF/good" >/dev/null 2>&1; then
+    echo "conformance wrongly flagged legitimate code:" >&2
+    node "$CONFORMANCE" "$CONF/good" >&2 || true
+    exit 1
+fi
+
+# The allowlist is what the failure message tells you to reach for, so a value
+# that genuinely belongs outside the theme has a reviewable home. If it stops
+# working the only remaining way past a false positive is deleting the check.
+printf 'export const brand = "#5865f2";\n' >"$CONF/good/brand.ts"
+if node "$CONFORMANCE" "$CONF/good" >/dev/null 2>&1; then
+    echo "conformance missed a raw colour outside the theme" >&2
+    exit 1
+fi
+if ! node "$CONFORMANCE" "$CONF/good" --allow '#5865f2' >/dev/null 2>&1; then
+    echo "conformance ignored an allowlisted value" >&2
+    exit 1
+fi
+
+# The stroke rule needs somewhere to point, and the hint names both halves of
+# it. A token with no rule carrying it to the icons themes nothing, and a rule
+# reading a token nobody declared resolves to an empty value.
+need_grep 'icon-stroke: 1.5' frontend/src/index.css
+need_grep '\.lucide' frontend/src/index.css
+need_grep 'stroke-width: var(--icon-stroke)' frontend/src/index.css
+
 echo "==> assert the supply-chain policy"
 need_grep 'minimumReleaseAge: 20160' frontend/pnpm-workspace.yaml
 # The dlx cache is held for a month so `make pre-commit` does not reach the registry

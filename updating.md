@@ -85,6 +85,14 @@ a divergence looks exactly like a clean run.
 - `template/frontend/devtools/complexity.mjs` and `conformance.mjs` — byte-identical to
   agent-ready-ts's, including the metric name recorded in baselines. A change to the metric
   that lands in only one repo silently invalidates the other's baselines.
+- **`conformance.mjs` does not travel alone.** Two of its rules point at things outside the
+  script, and a pull that takes the file by itself leaves a gate naming something that does
+  not exist: `raw-stroke` and `magic-presentation-prop` tell you to set `--icon-stroke`, so
+  `frontend/src/index.css` must declare it and carry it with
+  `.lucide { stroke-width: var(--icon-stroke) }` in `@layer base`. The alpha rule's cost
+  likewise depends on `frontend/components.json` pinning the `ui` alias to the same path
+  `conformance.exclude` names. The fixture suite that asserts every rule in both directions
+  is in `check_template.sh`, and a new rule upstream arrives with new rows in it.
 - `template/docs/agent-tooling.md` — the *arguments* are shared: why a scanner is the wrong
   tool, why the guard fails open, why one threshold cannot catch structural erosion, why
   conformance fails closed. The measured numbers are not.
