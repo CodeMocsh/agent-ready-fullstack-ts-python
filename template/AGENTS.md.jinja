@@ -190,7 +190,9 @@ make test           # both halves, then the contract suite against the real back
 make test-fast      # both halves only
 make test-contract  # the contract suite against the backend half
 make test-e2e       # opt-in: Playwright in mock mode (installs chromium)
+                    #   PREVIEW_PORT overrides its own server; it reuses no other
 make test-e2e-live  # opt-in: the same against a running `make dev`
+                    #   follows FRONTEND_PORT, so it meets the dev server you started
 make db-test        # opt-in: the store suites against a real Postgres it starts itself
 make db             # a Postgres to develop against; prints the DATABASE_URL to export
 make db-demo        # two tenants against one table, so the isolation is visible

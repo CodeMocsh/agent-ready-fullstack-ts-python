@@ -390,6 +390,22 @@ need_grep 'BACKEND_PORT' devtools/dev.sh
 need_grep 'FRONTEND_PORT' devtools/dev.sh
 need_grep 'BACKEND_PORT' devtools/contract-test.sh
 need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
+# The same rule one tier out, for the two Playwright configs. Neither is in the gate --
+# they need a browser binary this script has no business downloading -- so a hard-coded
+# port here fails nowhere and is caught by nothing. The live config is the sharper of
+# the two: it starts no server, so a wrong port does not refuse, it silently points at
+# whatever else is listening, which in a second checkout is the other checkout's app.
+need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts
+need_grep 'process.env.FRONTEND_PORT' frontend/playwright.live.config.ts
+need_no_grep 'localhost:5173' frontend/playwright.live.config.ts
+# Reuse is the other half of the same bug and it is worse, because it produces a green
+# run rather than a failure: Playwright checks that something answers on the URL, never
+# that the something is this build. A stranger's server on the port absorbs the suite.
+need_grep 'reuseExistingServer: false' frontend/playwright.config.ts
+# The Makefile must not name the contract URL. It never exported the variable, so the
+# default reached nothing, and re-adding one that did would override the port the script
+# actually started the dev server on.
+need_no_grep 'CONTRACT_BASE_URL ?=' Makefile
 
 need frontend/index.html
 need frontend/vite.config.ts

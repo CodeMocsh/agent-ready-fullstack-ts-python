@@ -73,10 +73,12 @@ Two consequences worth knowing:
   `/api`. To look at a real build against a real backend, put a reverse proxy in front of
   both, or use `make dev`.
 
-**Both ports come from the environment**, so two checkouts of this project can run at once:
+**Every port comes from the environment**, so two checkouts of this project can run at once:
 
 ```bash
 BACKEND_PORT=8001 FRONTEND_PORT=5174 make dev
+PREVIEW_PORT=4174 make test-e2e
+FRONTEND_PORT=5174 make test-e2e-live
 ```
 
 `vite.config.ts`, `devtools/dev.sh` and `devtools/contract-test.sh` read the same two
@@ -84,6 +86,10 @@ variables, which is what keeps the proxy pointed at the backend the script actua
 They were hard-coded in each file and had to be kept in agreement by hand, and the failure
 was not theoretical: a second worktree running `make dev` took down the first one's port, and
 the template's own check refuses to run at all while anything else is holding either.
+
+`PREVIEW_PORT` is the same idea one tier out, for the preview server the default Playwright
+run starts itself. `playwright.live.config.ts` reads `FRONTEND_PORT` rather than a port of
+its own, because the server it points at is the one `make dev` started.
 
 ## The contract
 
@@ -286,6 +292,13 @@ client or the worker setup.
 `e2e/tasks.live.spec.ts` is the other one. It needs both halves up — `make dev` in
 another terminal — and it is how you look at the real thing in a browser rather than
 inferring it from the JSX.
+
+**The default run never reuses a server it did not start.** Playwright can check that
+something answers on the port; it cannot check that the something is this build. So a
+preview server left running by another checkout would absorb the whole suite, and the
+result — pass or fail — would be about that app rather than this one. The suite now
+refuses the port instead, which costs a rebuild of a few seconds and turns a wrong answer
+into a named conflict. `PREVIEW_PORT` is how two run at once.
 
 None of these is in the gate and none runs in CI: the two Playwright targets need a browser
 binary, the live one needs a second terminal, and `db-test` needs a Docker daemon. A gate that
