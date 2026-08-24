@@ -34,9 +34,9 @@ versioned git hooks.
 
 It also writes `frontend/pnpm-lock.yaml` and `backend/uv.lock`, which do not ship with
 the template: a project generated today should resolve against today's registry rather
-than against whichever day the template was last touched. **Commit both.** CI installs
-from them with `--frozen-lockfile` and `--frozen`, so a push without them fails before
-it runs anything.
+than against whichever day the template was last touched. **Commit both.** Without them
+the next clone resolves its own, and two checkouts of the same commit then build different
+trees -- which is the kind of difference that surfaces as a bug nobody can reproduce.
 
 If you only work on one half, install just that one:
 

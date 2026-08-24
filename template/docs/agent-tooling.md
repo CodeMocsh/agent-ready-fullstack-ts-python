@@ -141,7 +141,7 @@ the tree has improved since the baseline was recorded is slack, and slack is add
 the next commit may spend: a baseline sitting 2% above the tree admits a single change
 raising density by 4.08%, roughly five times the largest move hono ever made in one commit.
 So a density more than `tolerance` *below* the baseline means the baseline is stale.
-`make lint` lowers it; `make lint-check` — and so CI and the pre-commit hook — refuses and
+`make lint` lowers it; `make lint-check` — and so the pre-commit hook — refuses and
 says to. Same shape as the formatter: the fixing variant fixes, the checking variant
 refuses.
 
@@ -186,8 +186,8 @@ measure a relative rise against, so the check refuses and asks for
 
 ### The backend half
 
-Measured across httpx and flask with ruff's *cyclomatic* counter, again so that the editor,
-`make lint` and CI all report one number.
+Measured across httpx and flask with ruff's *cyclomatic* counter, again so that the editor
+and `make lint` report one number.
 
 **Per-function: `max-complexity = 8`** (ruff `C901`, in `[tool.ruff.lint.mccabe]`). p95
 cyclomatic complexity across httpx and flask is 6 and p99 is 9–11, so 8 flags roughly the

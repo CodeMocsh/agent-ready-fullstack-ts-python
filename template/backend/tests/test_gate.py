@@ -1,9 +1,15 @@
 """The repository's own agreements, which no other test covers because they are not code.
 
-Everything here reads a file rather than an import: the `Makefile`, the git hook, the CI
-workflow, `pyproject.toml`, the runners' configs. They have to agree about what gets checked
-and when, and nothing but this file notices when they stop -- a gate that lost a member, a
-tier nothing runs, a test that switched itself off.
+Everything here reads a file rather than an import: the `Makefile`, the git hook,
+`pyproject.toml`, the runners' configs. They have to agree about what gets checked and when,
+and nothing but this file notices when they stop -- a gate that lost a member, a tier nothing
+runs, a test that switched itself off.
+
+**This project ships no CI workflow, so the git hook is the whole of the enforcement.** That
+puts more weight on the tests below than they carried before: the hook must run the gate,
+must say so when it could only run half of it, and must offer no way past itself. Add a
+workflow when you want a second pair of eyes -- and point it at `make pre-commit`, which is
+what `test_a_workflow_runs_the_gate_rather_than_a_copy_of_it` is here to insist on.
 
 Two of its helpers are imported by `devtools/check_template.sh` in the generator repository,
 which is why this module imports no third-party package and does its one version-dependent
@@ -17,7 +23,7 @@ from tests.tiers import TIERS, python_tiers
 
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = ROOT / "Makefile"
-WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+WORKFLOWS = ROOT / ".github" / "workflows"
 HOOK = ROOT / ".githooks" / "pre-commit"
 PYPROJECT = ROOT / "backend" / "pyproject.toml"
 E2E = ROOT / "frontend" / "e2e"
@@ -26,16 +32,6 @@ FRONTEND_TESTS = ROOT / "frontend" / "tests"
 FRONTEND_SRC = ROOT / "frontend" / "src"
 
 THE_GATE = ["lint-check", "openapi-check", "test"]
-
-CI_MUST_ALSO_RUN = {
-    "the frontend's lint": "pnpm lint:check",
-    "the frontend's tests": "pnpm test",
-    "the frontend's half of the contract artifacts": "pnpm openapi:types",
-    "the backend's lint": "devtools/lint.py --check",
-    "the backend's tests": "uv run pytest",
-    "the backend's half of the contract artifacts": "devtools/export_openapi.py",
-    "the contract suite against the real backend": "make test-contract",
-}
 
 OPT_IN_TIER = [tier.target for tier in TIERS]
 """Read from `tiers.py` rather than listed again here. Every one needs something fetched or
@@ -84,12 +80,28 @@ def test_every_member_of_the_gate_actually_runs_a_command():
         assert runs_something(target), f"`{target}` reaches no recipe, so the gate is a no-op"
 
 
-def test_ci_runs_everything_the_gate_runs():
-    workflow = WORKFLOW.read_text()
-    for description, command in CI_MUST_ALSO_RUN.items():
-        assert command in workflow, (
-            f"`make pre-commit` covers {description} and the CI workflow does not run "
-            f"{command!r}. Add it to .github/workflows/ci.yml, or take it out of the gate."
+def without_comments(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if not line.strip().startswith("#"))
+
+
+def workflows() -> list[tuple[Path, str]]:
+    """Every workflow this project ships, with its comment lines stripped. A workflow that
+    named the gate in a comment and ran `true` would satisfy a plain substring check."""
+    found = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
+    return [(path, without_comments(path.read_text())) for path in found]
+
+
+def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
+    """No workflow ships today, so this asserts nothing until one is added -- which is the
+    moment it matters. A workflow that runs its own list of steps drifts from `make
+    pre-commit` silently, in the direction of checking less, and the drift shows up as a
+    green push that a commit would have refused. Run the target instead. If it needs to run
+    only part of the gate, make that part a target too."""
+    for path, body in workflows():
+        assert "make pre-commit" in body or "check_template.sh" in body, (
+            f"{path.relative_to(ROOT)} does not run `make pre-commit`. A workflow that "
+            f"re-lists the gate's steps is a second copy of the gate, and the copy is what "
+            f"goes stale -- point it at the target, or add a target for the part it runs."
         )
 
 
@@ -115,7 +127,7 @@ def test_every_tier_still_holds_tests():
     for tier in TIERS:
         assert tier.declaring_files(ROOT), (
             f"no {tier.holds} under {tier.path} declares a test, so `{tier.runs}` selects "
-            f"nothing -- and neither the gate nor CI would notice, because neither runs it"
+            f"nothing -- and the gate would not notice, because the gate does not run it"
         )
 
 

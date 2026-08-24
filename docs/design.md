@@ -350,6 +350,12 @@ with its own version.
 
 ### 7. CI for the generated project
 
+> **Superseded, 2026-08-24.** No workflow ships, in this repository or in generated
+> projects: the account ran out of Actions credit and CI here was a duplicate of the
+> gate rather than an addition to it. What that costs is in
+> [docs/adr/0004](adr/0004-no-workflow-runs-the-gate.md). The design below is what was
+> built and is what a restore should start from.
+
 One workflow, three jobs. **frontend**: pnpm frozen install → `lint:check` → `test` →
 types-sync assertion → `build`. **backend**: `uv sync --frozen` → `devtools/lint.py --check`
 → `pytest` → spec-sync assertion. **contract**: both toolchains → `make test-contract`.
