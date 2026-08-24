@@ -21,8 +21,8 @@ not in this run: tests/integration, which needs a Postgres daemon -- `make db-te
 ```
 
 **Each tier is named for what it needs, not for who starts it.** Who types the command is the
-least stable fact about a tier: `make db-test` is fully automated, a CI job can run it the
-day someone writes one, and the template's own gate already runs it unattended wherever
+least stable fact about a tier: `make db-test` is fully automated, a workflow can run it
+the day someone writes one, and the template's own gate already runs it unattended wherever
 Docker answers. A folder called `manual/` would be false by the time anyone read it — and in
 testing vocabulary a manual test is one a person performs by hand, which none of these are.
 `integration/` and `e2e/` are the names the surrounding ecosystem already uses, and Google's

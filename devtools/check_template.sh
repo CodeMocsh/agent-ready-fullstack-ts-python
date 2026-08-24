@@ -1,5 +1,5 @@
 #!/bin/sh
-# Render the template and exercise the result. One script, three callers: CI, the
+# Render the template and exercise the result. One script, two callers: the
 # pre-commit hook, and your laptop. When these steps lived only in the workflow file
 # they could only run on GitHub, and a check that cannot run locally is a check
 # people learn to discover late.
@@ -147,7 +147,7 @@ echo "    ports: backend :$BACKEND_PORT, frontend :$FRONTEND_PORT"
 # command's status reaches "set -e", so a failed archive step would still extract
 # whatever it managed to write and the run would go on against a partial tree --
 # passing checks on a template that is not the one on disk. "set -o pipefail" is the
-# usual fix but is not in POSIX sh, and this script runs under dash on Linux CI,
+# usual fix but is not in POSIX sh, and this script runs under dash wherever /bin/sh is,
 # where that line is itself an error.
 tar --exclude=.git --exclude=node_modules --exclude=.venv \
     -cf "$WORK/tree.tar" -C "$REPO" .
@@ -353,7 +353,7 @@ for target in install hooks pre-commit lint lint-check test test-fast test-contr
               openapi openapi-check build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
-# The gate is one named list so the hook, CI and a laptop cannot drift apart, and the
+# The gate is one named list so the hook and a laptop cannot drift apart, and the
 # generated project's own test_gate.py is what keeps them together from then on. Here
 # we only assert it exists and that the browser tier stayed out of it: a gate that
 # downloads a browser is a gate people learn to commit around.
@@ -412,8 +412,10 @@ done
 # `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
 # foreground command returns, which on Ctrl-C it never does.
 need_grep '^SHELL := /bin/bash' Makefile
-# CI builds and tests; it does not deploy, and it does not publish.
-test "$(ls .github/workflows)" = "ci.yml"
+# No workflow ships. The gate is `make pre-commit`, run by the git hook, and a project
+# that grows a workflow later has to point it at that same target rather than at a
+# hand-copied subset -- backend/tests/test_gate.py is what refuses the subset.
+need_absent .github/workflows
 
 # `make dev` has to stop what it started. Job control puts the backend in a process
 # group of its own, so a Ctrl-C in the terminal reaches only the script -- and the
@@ -598,20 +600,6 @@ need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
 # interoperating, and it reaches the hook through the gate rather than by name.
 need_grep 'make -s pre-commit' .githooks/pre-commit
 need_grep 'test-contract' Makefile
-need_grep 'make test-contract' .github/workflows/ci.yml
-# That job is the one place the single-toolchain rule is broken on purpose, and it
-# needs both setups to be right: pnpm cannot find a version without being pointed at
-# the half's package.json, and uv below the floor rejects the relative cool-off.
-python3 - <<'PY'
-import re
-
-workflow = open(".github/workflows/ci.yml", encoding="utf-8").read()
-job = re.search(r"^  contract:\n(  .*\n|\n)*", workflow, re.M)
-assert job is not None, "the generated workflow has no contract job"
-body = job.group(0)
-assert "package_json_file: frontend/package.json" in body, body
-assert 'version: "0.11.25"' in body, body
-PY
 
 echo "==> assert the quality gates"
 need_grep 'noExcessiveCognitiveComplexity' frontend/biome.json
@@ -928,7 +916,7 @@ for key in ("trustPolicyExclude", "minimumReleaseAgeExclude"):
 PY
 # A floor alone lets a release published next month decide what a project generated
 # next month resolves -- and fastapi and pydantic both write part of openapi.json,
-# which is committed and diffed in CI. Runtime dependencies are bounded both ways.
+# which is committed and diffed by the gate. Runtime dependencies are bounded both ways.
 python3 - <<'PY'
 import tomllib
 
@@ -937,24 +925,12 @@ unbounded = [dep for dep in deps if "<" not in dep]
 assert not unbounded, f"runtime dependencies with no upper bound: {unbounded}"
 PY
 # A relative duration needs a uv new enough to parse one. 0.9.7 rejects "14 days"
-# with a date-parsing error that names neither uv nor the version, so the floor and
-# the version CI installs have to agree, and both have to be at least this.
+# with a date-parsing error that names neither uv nor the version, so the floor has to
+# be at least this wherever the project is installed.
 need_grep 'required-version = ">=0.11.25"' backend/pyproject.toml
-need_grep 'version: "0.11.25"' .github/workflows/ci.yml
 need_grep 'UV_EXCLUDE_NEWER' Makefile
-need_grep 'UV_EXCLUDE_NEWER' .github/workflows/ci.yml
-# A tag moves; a commit does not.
-if grep -E 'uses: .*@v[0-9]' .github/workflows/ci.yml; then
-    echo "the workflow above pins an action by tag rather than by commit" >&2
-    exit 1
-fi
-# pnpm/action-setup reads its version from a package.json at the repository root, and
-# this project deliberately has none -- the frontend half owns it. Without pointing
-# the action at that file the workflow dies before installing anything, which local
-# checks cannot see because they never run the workflow.
-need_grep 'package_json_file: frontend/package.json' .github/workflows/ci.yml
-# No lockfile ships, and CI installs frozen, so the first push of a generated project
-# fails unless the setup instructions say to commit the ones `make install` writes.
+# No lockfile ships, so a clone resolves its own unless the setup instructions say to
+# commit the ones `make install` writes -- and two clones then build different trees.
 need_absent frontend/pnpm-lock.yaml
 need_absent backend/uv.lock
 need_grep 'pnpm-lock.yaml' docs/installation.md
@@ -1480,7 +1456,7 @@ DRIFT_CASES
 echo "==> assert each half's fixing variant tightens and its checking variant refuses"
 # Tightening only means anything if exactly one of each half's two lint entry points
 # asks for it, and grepping for the flag cannot tell those apart -- a flag wired into
-# both would leave `make lint-check`, so CI and the pre-commit hook, silently accepting
+# both would leave `make lint-check`, and so the pre-commit hook, silently accepting
 # stale baselines, which is the state this whole check exists to end. So drive both.
 #
 # Last, and not a line earlier. The fixing variants run `biome check --write`,

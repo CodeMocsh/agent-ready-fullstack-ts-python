@@ -24,12 +24,12 @@ license = "{{ 'LicenseRef-Proprietary' if package_license == 'Proprietary' else 
 {%- endif %}
 # One version, not a range: this half is an application deployed on a runtime it
 # chooses, not a library that must span its users' runtimes. .python-version pins
-# the same number so uv, CI and your laptop agree.
+# the same number so uv and every laptop agree.
 requires-python = ">=3.12"
 
 # Bounded on both sides, which a bare floor is not. No lockfile ships with a new
 # project, so these ranges alone decide what a generation next month resolves --
-# and `openapi.json` is a committed artifact that CI diffs. FastAPI and pydantic
+# and `openapi.json` is a committed artifact the gate diffs. FastAPI and pydantic
 # both emit part of that spec, so a minor bump of either can turn a green project
 # red with no change to any file in it. Each cap stops at the next breaking line --
 # a minor for the two 0.x packages, 2.14 for pydantic -- which makes an upgrade a
@@ -83,8 +83,8 @@ dev = [
 # rejects "14 days" outright, and the failure names a date-parsing error rather than
 # the version, which is a bad afternoon.
 required-version = ">=0.11.25"
-# Safe project-level default for every uv command. CI and the Makefile repeat it so
-# copied commands and tool execution outside project discovery retain the same policy.
+# Safe project-level default for every uv command. The Makefile repeats it so copied
+# commands and tool execution outside project discovery retain the same policy.
 exclude-newer = "14 days"
 # An application, not a package: nothing here is installed into the environment, so
 # `app` is importable from the project root rather than from site-packages. That is

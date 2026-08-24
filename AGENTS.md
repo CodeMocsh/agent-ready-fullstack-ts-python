@@ -25,9 +25,10 @@ words and no synonyms.
 - **`template/`** — the files rendered into a new project, in two halves plus a root layer.
 - **`template/.claude/` + `template/.entire/`** — the agent-ready layer that ships in
   generated projects.
-- **`devtools/check_template.sh`** — renders the template and exercises the result. CI, the
-  pre-commit hook, and `make check` all call this one script.
-- **`docs/adr/`** — the three decisions that are surprising enough to need writing down.
+- **`devtools/check_template.sh`** — renders the template and exercises the result. The
+  pre-commit hook and `make check` both call this one script, and it is the whole of the
+  enforcement: no workflow runs, so nothing checks a push you did not check yourself.
+- **`docs/adr/`** — the four decisions that are surprising enough to need writing down.
 
 There is no `src/`, no `package.json`, and no `licenses/` directory. Copier removes the need
 for generator code, and its Jinja handles the license variants directly.
@@ -50,9 +51,10 @@ of its own toolchain: the editor stops type-checking it, biome and ruff stop see
 every gate this template ships stops applying to it. Anything project-specific a source file
 needs comes from a value it reads at runtime, not from a token.
 
-**Workflow files are never `.jinja`.** GitHub Actions uses `${{ }}` and so does Jinja.
-Keeping `.github/workflows/*.yml` unrendered means the two syntaxes never meet, and no
-expression ever has to be escaped.
+**A workflow file, if one ever returns, is never `.jinja`.** GitHub Actions uses `${{ }}`
+and so does Jinja. Keeping `.github/workflows/*.yml` unrendered means the two syntaxes never
+meet, and no expression ever has to be escaped. None ships today —
+[docs/adr/0004](docs/adr/0004-no-workflow-runs-the-gate.md) says why.
 
 **The backend half is entirely token-free.** Its only `.jinja` is `pyproject.toml.jinja`.
 Nothing in `backend/app/` may carry a token, because everything in `app/` feeds
@@ -121,14 +123,17 @@ Edit files under `template/` to change what generated projects receive. After an
 
 ```bash
 make check        # default variant, end to end
-make check-all    # every license variant, as CI does
+make check-all    # every license variant
 make fast         # render and assert only, skipping install/lint/test/build
 ```
 
-All three call `devtools/check_template.sh`, which is also what CI runs and what the
-pre-commit hook runs. That is the point: a check cannot exist in CI and be missing locally.
-Activate the hooks once per clone with `make hooks`, which installs a shim per committed
-hook rather than setting `core.hooksPath`; the reasoning is in `devtools/install-hooks.sh`.
+All three call `devtools/check_template.sh`, which is also what the pre-commit hook runs.
+That was always the point — a check cannot exist in CI and be missing locally — and since
+the workflow was removed it is the only thing standing between a change and `main`, so
+**`make hooks` is not optional**. It installs a shim per committed hook rather than setting
+`core.hooksPath`; the reasoning is in `devtools/install-hooks.sh`. An unarmed clone commits
+unchecked and nothing anywhere notices, which is the cost recorded in
+[docs/adr/0004](docs/adr/0004-no-workflow-runs-the-gate.md).
 
 The script renders from the working tree rather than from a tag, so it validates what you
 are about to commit.
@@ -148,7 +153,7 @@ the source it covers. Tiers are named for what they need, never for who runs the
 `template/AGENTS.md.jinja`.
 
 No step downloads a browser. The generated project ships Playwright specs, in mock mode and
-in live mode, and neither runs in CI — a deliberate trade recorded in
+in live mode, and the gate runs neither — a deliberate trade recorded in
 `template/docs/development.md`. If you change UI in `template/frontend/`, run
 `pnpm test:e2e` inside a rendered project yourself.
 

@@ -55,7 +55,7 @@ signal_halves() {
 cleanup() {
     # Ask, wait a moment, then insist. A launcher that does not exit after its child
     # is gone would leave this blocked in `wait` forever, holding the frontend port -- and the
-    # next run dies on --strictPort, in CI, for a reason that is nowhere in the log.
+    # next run dies on --strictPort, for a reason that is nowhere in the log.
     signal_halves TERM
     sleep 1
     signal_halves KILL

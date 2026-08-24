@@ -39,7 +39,7 @@ backend/app/{models,routes}.py  ->  openapi.json  ->  frontend/src/api/schema.ts
 ```
 
 `make openapi` regenerates both artifacts; `make openapi-check` fails if the committed ones
-are stale, and so does CI. Committing them is what keeps each half independently operable:
+are stale, and it is in the gate. Committing them is what keeps each half independently operable:
 the frontend regenerates its types, runs its tests and builds with no Python present.
 
 ## The Stack
@@ -70,8 +70,9 @@ On top of that stack it adds the **agent-ready layer**:
 - **A contract suite that runs twice** — `frontend/tests/api/contract.test.ts` exercises the
   real API client against the mock handlers under `pnpm test`, and against the running
   backend through the dev proxy under `make test-contract`. Identical assertions, two
-  implementations: the standard way to keep a test double honest. Both runs are enforced in
-  the generated project's CI, the second by the one job that installs both toolchains.
+  implementations: the standard way to keep a test double honest. Both runs are in the
+  generated project's `make pre-commit`, the second being the one check that needs both
+  toolchains at once.
 - **[Entire](https://entire.io) session-tracking hooks** in `.claude/settings.json` that
   checkpoint agent coding sessions alongside git history. The hooks no-op until the `entire`
   CLI is installed, so they cost nothing until you opt in — and you can delete `.claude/`
@@ -148,11 +149,11 @@ were among them — see [updating.md](updating.md).
   `template/backend/` are the two halves; the root layer above them holds the `Makefile`,
   the contract, the docs, and the agent-ready layer.
 - **`devtools/check_template.sh`** — renders the template and exercises the result, both
-  halves and the contract between them. CI and the pre-commit hook both call it, so a check
-  cannot exist in one and be missing from the other.
-- **`docs/adr/`** — the three decisions worth writing down: Copier over a bespoke CLI, a
-  code-first contract with committed artifacts, and a backend that is an application rather
-  than a library.
+  halves and the contract between them. The pre-commit hook calls it, and nothing else
+  does: no workflow ships, so a check that is not in this script runs nowhere.
+- **`docs/adr/`** — the four decisions worth writing down: Copier over a bespoke CLI, a
+  code-first contract with committed artifacts, a backend that is an application rather than
+  a library, and no workflow behind the gate.
 
 See [CONTEXT.md](CONTEXT.md) for what "template", "half", "live mode" and "contract
 artifact" each mean here, [AGENTS.md](AGENTS.md) for the constraints that bite when editing
@@ -163,7 +164,7 @@ siblings.
 
 ```bash
 make check        # default variant, end to end
-make check-all    # every license variant, as CI does
+make check-all    # every license variant
 make fast         # render and assert only, skipping install/lint/test/build
 make hooks        # enable the pre-commit hook (once per clone)
 ```
