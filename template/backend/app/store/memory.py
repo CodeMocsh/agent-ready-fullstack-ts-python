@@ -19,7 +19,7 @@ SEED: tuple[tuple[str, str, bool], ...] = (
     ("3", "Replace this demo with a real feature", False),
 )
 """Only this substrate seeds. A real database starts empty, which is why
-`tests/test_store_contract.py` asserts shapes and never seed rows."""
+`tests/store_contract.py` asserts shapes and never seed rows."""
 
 
 class MemoryTaskStore:

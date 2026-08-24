@@ -1,7 +1,7 @@
 """The API over the in-memory substrate: the fast tier, and the seed data.
 
-Seed rows are asserted here and nowhere else. `tests/test_store_contract.py` runs against both
-substrates and so may not know about them, and `frontend/tests/contract.test.ts` runs against
+Seed rows are asserted here and nowhere else. `tests/store_contract.py` runs against both
+substrates and so may not know about them, and `frontend/tests/api/contract.test.ts` runs against
 this service and the mock handlers and may not either. This file is where "three tasks, and
 one of them is `2`" is allowed to be true.
 

@@ -228,7 +228,7 @@ expression language Copier already has.
 └── backend/              ← the Python half: everything uv touches
     ├── pyproject.toml  uv.lock  .python-version
     ├── app/{__init__,main,models,routes,store}.py
-    ├── tests/test_tasks.py
+    ├── tests/routes/test_tasks.py
     └── devtools/{lint.py, complexity.py, export_openapi.py}  .complexity-baseline.json
 ```
 
@@ -294,7 +294,7 @@ the backend ships **no CORS middleware at all**; `docs/development.md` carries t
 | 1 | vitest (MSW) + pytest (TestClient) | each half works alone |
 | 2 | `make openapi-check` | committed artifacts match backend code |
 | 3 | openapi-msw + `tsc --noEmit` | handlers conform to the spec at compile time |
-| **4** | **`frontend/tests/contract.test.ts`, run twice** | **the halves interoperate** |
+| **4** | **`frontend/tests/api/contract.test.ts`, run twice** | **the halves interoperate** |
 
 **Level 4 is the fullstack-specific addition and the reason this repo exists.** Levels 0–3
 all pass green on a project whose frontend cannot reach its backend at all. One vitest file

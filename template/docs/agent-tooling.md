@@ -533,11 +533,18 @@ division. The cost is a missed comment inside such a regex, never a false positi
 code, which is the direction to fail in. `comments.exclude` in `package.json` is the way
 out if a file ever hits it.
 
-All of that is a table in `frontend/tests/comments.test.ts`, in both directions: every
+All of that is a table in `frontend/tests/devtools/comments.test.ts`, in both directions: every
 comment shape is found, every slash-heavy expression is left alone, and a comment *after* a
 regex holding a comment marker is still found. This is subtle code, and one example proves
 neither direction — the regex handling was added because the first version shipped without
 it and the table is what would have caught that.
+
+The Python gate has the same table in `backend/tests/devtools/test_comments.py`, against its
+own traps: a `#` inside a string or an f-string is not a comment, a shebang counts only on
+the first line, a docstring never counts, and a file that will not tokenize is left to ruff
+rather than reported here. It reads tokens instead of text for exactly the reason the
+frontend's reads regexes — a gate that cannot spell a URL fragment is a gate people switch
+off.
 
 **Two carve-outs, and nothing else.** A `#!` shebang on line 1, and a TypeScript `///`
 directive at the start of a line — `frontend/src/vite-env.d.ts` is one, and it is an

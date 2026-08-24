@@ -93,4 +93,4 @@ done
 
 echo "==> both halves up; $base_url reachable"
 cd "$here/frontend"
-CONTRACT_TARGET=live VITE_API_BASE_URL="$base_url" pnpm exec vitest run tests/contract.test.ts
+CONTRACT_TARGET=live VITE_API_BASE_URL="$base_url" pnpm exec vitest run tests/api/contract.test.ts

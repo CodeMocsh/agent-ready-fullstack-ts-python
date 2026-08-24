@@ -67,7 +67,7 @@ On top of that stack it adds the **agent-ready layer**:
 - **A see-what-you-built loop** — Playwright ships wired up in both mock and live mode, and
   `AGENTS.md` tells the agent to run the app and read a screenshot rather than infer
   behaviour from JSX.
-- **A contract suite that runs twice** — `frontend/tests/contract.test.ts` exercises the
+- **A contract suite that runs twice** — `frontend/tests/api/contract.test.ts` exercises the
   real API client against the mock handlers under `pnpm test`, and against the running
   backend through the dev proxy under `make test-contract`. Identical assertions, two
   implementations: the standard way to keep a test double honest. Both runs are enforced in

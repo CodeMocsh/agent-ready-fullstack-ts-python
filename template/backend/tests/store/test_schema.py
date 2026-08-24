@@ -1,7 +1,7 @@
 """The schema, asserted without a Postgres to apply it to.
 
 `ddl.py` is data, so most of what can go wrong with it is checkable here, in milliseconds,
-in the fast tier. `tests/test_postgres.py` covers only what needs a real server.
+in the fast tier. `tests/integration/test_postgres.py` covers only what needs a real server.
 
 `migrate()` is drivable by a fake because `Conn` is deliberately two methods. That is the
 whole reason it is two methods.
@@ -32,8 +32,8 @@ from app.store.migrate import (
 )
 from app.store.roles import app_role, emit_roles_sql, owner_role
 
-SCHEMA_SQL = Path(__file__).resolve().parents[2] / "deploy" / "schema.sql"
-ROLES_SQL = Path(__file__).resolve().parents[2] / "deploy" / "roles.sql"
+SCHEMA_SQL = Path(__file__).resolve().parents[3] / "deploy" / "schema.sql"
+ROLES_SQL = Path(__file__).resolve().parents[3] / "deploy" / "roles.sql"
 
 ADD_COLUMN = "ADD COLUMN IF NOT EXISTS"
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS"

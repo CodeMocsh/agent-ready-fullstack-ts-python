@@ -2,7 +2,13 @@
 
 `app/store/` declares two protocols — `Database` and `TaskStore` — and ships two
 implementations of them: `MemoryDatabase` and `PostgresDatabase`.
-`tests/test_store_contract.py` runs one suite against both.
+`tests/store_contract.py` is one suite and both substrates run it.
+
+**Each substrate runs it from a suite of its own** — `tests/store/test_store_contract.py` for
+memory, `tests/integration/test_store_contract.py` for Postgres — rather than one suite
+parametrised over both. The parametrised shape needs a skip on the Postgres half whenever
+there is no server, and a skipped test exits 0 and looks like a test that passed. A tier that
+was not selected is reported as not run, which is the same information without the lie.
 
 The in-memory substrate is **not** a placeholder to delete once Postgres feels real. It is
 what `make test` runs against, what `make pre-commit` needs in order to stay free of a daemon,
@@ -17,8 +23,8 @@ accident. The suite that runs twice is what turns them into a contract.
 
 **The memory substrate seeds three tasks and Postgres starts empty, deliberately.** A suite
 that passes against both cannot have assumed either. Seed rows are asserted in
-`tests/test_tasks.py` and nowhere else, which is the same rule
-`frontend/tests/contract.test.ts` already follows one layer up.
+`tests/routes/test_tasks.py` and nowhere else, which is the same rule
+`frontend/tests/api/contract.test.ts` already follows one layer up.
 
 ## Considered options
 
@@ -56,10 +62,10 @@ module-level singleton, and it is what lets one test process hold two apps on tw
 `tenant_id` and row-level security are **not** here. Adding them is a schema change and a
 scoping parameter on `store()`, and the machinery that makes that additive rather than a
 rewrite is in place: the repair band in `ddl.py` exists so a column can be added to a table
-that already shipped, and `tests/test_postgres.py` proves a database missing a later column
-gets repaired. The remaining decision — whether a `tenant_id` column should exist from the
-start with isolation switched off — is deliberately still open, because it is the kind of
-choice that depends on the product rather than on the template.
+that already shipped, and `tests/integration/test_postgres.py` proves a database missing a
+later column gets repaired. The remaining decision — whether a `tenant_id` column should
+exist from the start with isolation switched off — is deliberately still open, because it is
+the kind of choice that depends on the product rather than on the template.
 
 Ordering is `tasks.seq`, a `bigserial`, and not `created_at`. `now()` is transaction start
 time, so two rows inserted in one transaction tie on it and the list order becomes arbitrary.

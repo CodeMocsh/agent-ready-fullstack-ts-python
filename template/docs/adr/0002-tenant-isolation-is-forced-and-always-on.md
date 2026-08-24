@@ -14,7 +14,8 @@ cross a tenant boundary.
 table's owner bypasses its own policies by default, and on a database where an ordinary role
 applied the schema that owner is also the role running the queries. Verified against
 PostgreSQL 17: with `ENABLE` alone and no tenant set, the owner reads every row; with `FORCE`,
-it reads none. `tests/test_isolation.py::test_the_owner_is_subject_to_its_own_policy` is that
+it reads none.
+`tests/integration/test_isolation.py::test_the_owner_is_subject_to_its_own_policy` is that
 verification, and it fails the moment `FORCE` is dropped.
 
 **Every policy is created before any table is forced.** The other order enforces a table
@@ -53,7 +54,7 @@ it require them to exist.
 ## Consequences
 
 **Every index on a tenant table must lead with `tenant_id`**, and
-`tests/test_schema.py::test_every_created_index_leads_with_the_tenant` enforces it. An index
+`tests/store/test_schema.py::test_every_created_index_leads_with_the_tenant` enforces it. An index
 that does not cannot satisfy the policy's predicate, and Postgres falls back to scanning far
 more rows than it should — correct answers, quietly slower, invisible until the table is large
 enough that fixing it means rebuilding indexes on live data. Constraint-backed indexes are

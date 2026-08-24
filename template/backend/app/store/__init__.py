@@ -10,10 +10,11 @@ rather than a habit — which matters because it is exactly the claim nobody can
 reading. Postgres enforces it underneath with a row-level security policy; the in-memory
 substrate has no policy to lean on, so its scoping is a promise and it fails closed loudly.
 
-Two implementations, one contract suite. `tests/test_store_contract.py` runs the same suite
-against both, which is what makes this a contract rather than a claim, and it is the same
-pattern the repository already runs one layer up: `frontend/tests/contract.test.ts` against
-the mock handlers and against this service.
+Two implementations, one contract suite. `tests/store_contract.py` holds the tests and each
+substrate runs all of them -- memory in `tests/store/test_store_contract.py`, Postgres in
+`tests/integration/test_store_contract.py` -- which is what makes this a contract rather than
+a claim, and it is the same pattern the repository already runs one layer up:
+`frontend/tests/api/contract.test.ts` against the mock handlers and against this service.
 
 `app.store.pg` is **not** re-exported here. Importing it is what pulls in the driver, and the
 in-memory substrate and every hermetic test run without one. Reach for it as
