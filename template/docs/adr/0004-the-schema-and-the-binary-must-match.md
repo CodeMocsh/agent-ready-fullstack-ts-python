@@ -8,7 +8,7 @@ step was skipped.
 
 Ahead is the half worth writing down, because it could reasonably go the other way. A newer
 schema means a newer release has already migrated this database. Every migration here is
-additive — `tests/test_schema.py::test_every_entry_is_additive` refuses `DROP TABLE`,
+additive — `tests/store/test_schema.py::test_every_entry_is_additive` refuses `DROP TABLE`,
 `DROP COLUMN`, `ALTER COLUMN ... TYPE` and `RENAME` — so an older build *can* still write
 everything it knows about, and serving it would usually work.
 

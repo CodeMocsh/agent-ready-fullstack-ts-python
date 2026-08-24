@@ -131,7 +131,7 @@ and two things stop them drifting.
 undeclared status code, a wrong response shape, or a path the backend does not serve is a
 type error.
 
-**At run time**, `frontend/tests/contract.test.ts` runs against both:
+**At run time**, `frontend/tests/api/contract.test.ts` runs against both:
 
 ```bash
 pnpm -C frontend test    # includes the contract suite against the mock handlers
@@ -202,19 +202,21 @@ And it is what makes `TaskStore` a contract rather than a shape nothing checks. 
 implementation plus a `Protocol` proves nothing: the interesting rules — a missing task is
 reported rather than raised, an id that cannot exist is a 404 and not a 500, `list()` is in
 creation order — are exactly the ones a single implementation satisfies by accident.
-`tests/test_store_contract.py` runs one suite against both, which is the same pattern this
-repository already runs one layer up for the API contract.
+`tests/store_contract.py` is one suite and both substrates run it, which is the same pattern
+this repository already runs one layer up for the API contract. Memory runs it in
+`tests/store/test_store_contract.py`, in the fast tier; Postgres runs it in
+`tests/integration/test_store_contract.py`, in the suite `make db-test` starts a server for.
 
 The two are deliberately *different* where they are allowed to be: memory seeds three tasks
 and hands out ids like `"1"`, Postgres starts empty and hands out uuids. A suite that passes
-against both cannot have assumed either. Seed rows are asserted in `tests/test_tasks.py` and
-nowhere else.
+against both cannot have assumed either. Seed rows are asserted in
+`tests/routes/test_tasks.py` and nowhere else.
 
 ### The schema is data
 
 `app/store/ddl.py` holds one statement per entry under a four-digit key, so most of what can
 go wrong with the schema is assertable without a Postgres to apply it to — that is what
-`tests/test_schema.py` does, in the fast tier. `deploy/schema.sql` is generated from it by
+`tests/store/test_schema.py` does, in the fast tier. `deploy/schema.sql` is generated from it by
 `make schema` and committed, the way `openapi.json` is generated from the models, and a test
 fails when the two drift.
 
@@ -240,8 +242,8 @@ asyncpg runs `RESET ALL` when a pooled connection is released, and `RESET ALL` *
 startup parameters while *clearing* session `SET`s. So the search path is passed as a startup
 parameter, not set from a connect hook: a `SET search_path` in a hook survives exactly one
 checkout and every checkout after it resolves against `public` — silently, because the first
-query on each connection works. `tests/test_postgres.py` holds a test on this specifically,
-and it fails with `public` if you change it.
+query on each connection works. `tests/integration/test_postgres.py` holds a test on this
+specifically, and it fails with `public` if you change it.
 
 ## Tests
 
@@ -269,25 +271,67 @@ make pre-commit                 # the whole gate
 make test                       # its test half: both halves, then the cross-half suite
 make test-fast                  # both halves, without the cross-half suite
 pnpm -C frontend test:watch     # component tests, watch mode
-cd backend && uv run pytest -q  # backend only
+cd backend && uv run pytest -q  # backend only, the hermetic suites
 ```
-
-The Postgres members of the store suites **skip** themselves when `TEST_DATABASE_URL` is
-unset, which is what keeps `make test` hermetic. A skip is the dangerous half of that: a run
-where every one of them skipped exits 0 and looks exactly like a run where every one passed.
-`make db-test` runs them under `-rs` so the skips are printed.
 
 Component tests run against the mock handlers, so they need no backend. Backend tests use
 FastAPI's `TestClient`, so they start no server. `backend/tests/test_gate.py` is the odd
 one out: it tests the repository rather than the app, and fails when the `pre-commit`
 target, the hook and the workflow stop agreeing about what gets checked.
 
+### Where a test goes
+
+The tier decides, then the source. One folder under `backend/tests/` is a tier and the rest
+mirror what they cover:
+
+```
+needs a Postgres daemon   backend/tests/integration/   make db-test
+needs a browser           frontend/e2e/                make test-e2e
+needs a browser + dev     frontend/e2e/*.live.spec.ts  make test-e2e-live
+──────────────────────────────────────────────────────────────────────
+backend/tests/routes/      app/routes.py
+backend/tests/serve/       app/serve.py
+backend/tests/store/       app/store/, with no server
+backend/tests/devtools/    backend/devtools/
+frontend/tests/api/        src/api/ and the contract
+frontend/tests/components/ src/components/
+frontend/tests/devtools/   frontend/devtools/
+backend/tests/test_gate.py the repository itself
+──────────────────────────────────────────────────────────────────────
+at the top of tests/, and collected by no runner: tiers.py, conftest.py,
+store_contract.py, render.tsx, setup.ts
+```
+
+Each tier is named for **what it needs**, never for who starts it: `check_template.sh` runs
+`make db-test` unattended wherever Docker answers, and any of these becomes a workflow the
+day someone writes one.
+
+**No test skips itself.** A test that needs a daemon goes in the tier. A skip does not,
+because a skipped test exits 0 and looks like a test that passed. `test_gate.py` fails on a
+skip, an `xfail`, a `.skipIf` or a `.only`, in either half.
+
+The reasoning, and the three options rejected on the way, are in
+[docs/adr/0005](adr/0005-a-test-never-decides-whether-to-run.md).
+
+A tier is a path, not a list of filenames. `make db-test` runs `tests/integration` whole, so
+a test added there runs without anyone updating the target, and the Playwright configs point
+at `e2e/` the same way. `norecursedirs` in `backend/pyproject.toml` keeps the Python tier out
+of the default run, and `backend/tests/conftest.py` prints one line naming what the run left
+out — a run that left out a whole tier does not look like a run that passed.
+
+All three are declared in **`backend/tests/tiers.py`**: what runs it, what it selects, what
+makes a file in it hold a test, which file points the command at the folder, and what it
+needs. `test_gate.py` reads that declaration and fails if a tier stops holding tests, creeps
+into the gate, loses the file that selects it, or drops out of `norecursedirs`. One thing to
+watch when moving a test file: **a path computed from `__file__` counts levels**, so check
+its `parents[n]`.
+
 ### The opt-in tier
 
 ```bash
 make test-e2e        # mock-mode specs; installs chromium the first time
 make test-e2e-live   # the same against a running `make dev`
-make db-test         # the store suites against a real Postgres it starts itself
+make db-test         # backend/tests/integration/, on a Postgres it starts itself
 ```
 
 The default Playwright run builds in mock mode and serves it from a **subpath**, because
@@ -312,7 +356,7 @@ fetches any of those is a gate people learn to commit around, and `tests/test_ga
 all three stay out of it.
 
 That is a deliberate trade with a cost worth naming: **this is the one tier nothing will tell
-you that you skipped.** Opt-in is not the same as deleted. If you changed UI, run
+you that you did not run.** Opt-in is not the same as deleted. If you changed UI, run
 `make test-e2e`; if you changed `backend/app/store/`, run `make db-test`.
 
 ## The database

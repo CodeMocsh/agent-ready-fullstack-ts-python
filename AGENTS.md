@@ -139,6 +139,14 @@ frontend — which is the only step that proves the two halves interoperate. Lev
 all pass green on a project whose frontend cannot reach its backend at all. It also audits
 the frontend's production dependencies and boots `make dev` to check both ports are freed.
 
+**No test the template ships may skip itself.** A test that needs a daemon or a browser goes
+in a tier — a folder declared in `template/backend/tests/tiers.py` and run by a target of its
+own. A skip does not: it exits 0 and looks like a test that passed, and `check_template.sh`
+and the generated project's `test_gate.py` both fail on one. Every other test file mirrors
+the source it covers. Tiers are named for what they need, never for who runs them —
+`check_template.sh` runs `make db-test` itself wherever Docker answers. Layout in
+`template/AGENTS.md.jinja`.
+
 No step downloads a browser. The generated project ships Playwright specs, in mock mode and
 in live mode, and neither runs in CI — a deliberate trade recorded in
 `template/docs/development.md`. If you change UI in `template/frontend/`, run

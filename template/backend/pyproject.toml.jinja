@@ -181,7 +181,13 @@ testpaths = ["tests"]
 # `package = false` installs nothing, so the project root has to be importable for
 # `from app.main import app` to resolve.
 pythonpath = ["."]
-norecursedirs = []
+# The tiers, by folder name, and the same list as `tests/tiers.py` -- tests/test_gate.py
+# fails when the two disagree. `tests/integration/` needs a running Postgres, so it is not in
+# the default run. That is what lets every test in this project be a test that runs: nothing
+# skips itself on a missing daemon, because a skipped test exits 0 and reads exactly like a
+# passing one. `make db-test` starts the server and names the folder, and a folder named on
+# the command line is collected whatever this setting says.
+norecursedirs = ["integration"]
 filterwarnings = []
 # `auto`, so an `async def test_` runs without a decorator on every one of them. The store
 # is async because Postgres is, and a marker repeated on every test is noise a setting

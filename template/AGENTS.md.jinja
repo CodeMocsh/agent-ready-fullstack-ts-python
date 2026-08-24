@@ -136,7 +136,7 @@ If the two artifacts conflict during a merge, do not hand-merge them. Take eithe
 run `make openapi`.
 
 **The mock handlers and the backend are two implementations of one contract.**
-`frontend/tests/contract.test.ts` is run against both — `pnpm test` uses the handlers,
+`frontend/tests/api/contract.test.ts` is run against both — `pnpm test` uses the handlers,
 `make test-contract` starts both halves and runs the same file against the real service
 through the dev proxy. Assertions there describe the contract only: shapes, status codes
 and the `detail` a refusal carries, never seed data, which the two are free to differ on.
@@ -200,7 +200,7 @@ make test-e2e       # opt-in: Playwright in mock mode (installs chromium)
                     #   PREVIEW_PORT overrides its own server; it reuses no other
 make test-e2e-live  # opt-in: the same against a running `make dev`
                     #   follows FRONTEND_PORT, so it meets the dev server you started
-make db-test        # opt-in: the store suites against a real Postgres it starts itself
+make db-test        # opt-in: backend/tests/integration/, on a Postgres it starts itself
 make db             # a Postgres to develop against; prints the DATABASE_URL to export
 make db-demo        # two tenants against one table, so the isolation is visible
 make migrate        # the release step: applies the schema. The app never does.
@@ -213,7 +213,7 @@ make upgrade        # update both halves' dependencies, then regenerate the cont
 ```
 
 Or work in one half with its own tools: `pnpm -C frontend test:watch`,
-`cd backend && uv run pytest -q tests/test_tasks.py`, `pnpm -C frontend add some-package`,
+`cd backend && uv run pytest -q tests/routes/test_tasks.py`, `pnpm -C frontend add some-package`,
 `cd backend && uv add some-package`.
 
 **The checks live before the commit, not in CI.** `make pre-commit` is the gate, the git
@@ -234,6 +234,10 @@ live one needs `make dev` in another terminal. `make db-test` needs a Docker dae
 that fetches any of those is a gate people learn to commit around, and `test_gate.py`
 asserts all three stay out of it. Opt-in is not the same as deleted — see *See what you
 built*, and run `make db-test` after touching `app/store/` or `deploy/`.
+
+**No test skips itself.** A test that needs a daemon or a browser goes in a tier — see
+*Where a test goes*. A skip does not: it exits 0 and looks like a test that passed, so
+`test_gate.py` fails on a skip, an `xfail`, a `.skipIf` or a `.only`, in either half.
 
 ## See what you built
 
@@ -256,22 +260,20 @@ the image. Delete the spec afterwards unless it earned its keep as a test. A scr
 evidence; reasoning about markup is a guess.
 
 These specs run in neither the gate nor CI, which makes them the one tier nothing will
-tell you that you skipped. `frontend/e2e/tasks.live.spec.ts` is the live one and it will
+tell you that you did not run. `frontend/e2e/tasks.live.spec.ts` is the live one and it will
 fail against a backend that is not up; that failure is the point, and it is not a reason
 to delete the spec.
 
-**A `*.live.spec.ts` must exist.** `make test-e2e-live` selects on that suffix rather than
-naming a file, so renaming the last one — or deleting it — takes the whole tier out of the
-project without failing anything: the target still exists, the gate never ran it, and CI
-never ran it either. `test_gate.py` asserts one is there, which is the only thing that
-notices.
+**A `*.live.spec.ts` must exist.** Rename or delete the last one and that tier leaves the
+project without failing anything — the target still exists, and neither the gate nor CI ever
+ran it. `test_gate.py` asserts one is there, which is the only thing that notices.
 
 ## Frontend conventions
 
 - **Layout**: `src/api/` is the contract with the backend (generated types plus a typed
   `fetch` wrapper), `src/mocks/` is the fake implementation of that contract,
-  `src/components/` is UI, `src/router.tsx` wires routes. Component tests live in `tests/`,
-  end-to-end specs in `e2e/`.
+  `src/components/` is UI, `src/router.tsx` wires routes. Tests mirror those directories
+  under `tests/`; end-to-end specs live in `e2e/`.
 
 - **The mock layer is permanent.** `src/mocks/handlers.ts` is both a zero-backend
   development mode and the fixture layer every component test runs against. It is typed
@@ -351,6 +353,15 @@ notices.
   `deps.py` is what a route is handed, `wiring.py` chooses the substrate, `serve.py` is the
   one-origin entrypoint, and `store/` is the data layer. Tests live in `tests/`.
 
+- **Where a test goes: the tier decides, then the source.** A folder that needs something a
+  laptop may not have is a **tier** — `backend/tests/integration/` needs a daemon,
+  `frontend/e2e/` needs a browser — declared in `backend/tests/tiers.py` and run by a target
+  of its own. Everything else mirrors what it covers: `tests/routes/` for `app/routes.py`,
+  `frontend/tests/components/` for `src/components/`. Adding a tier is an entry in
+  `tiers.py`, and for one pytest would collect, its folder in `norecursedirs` as well;
+  `test_gate.py` checks the rest. Moving a test file, check its `parents[n]`. The table and
+  the reasoning are in [docs/development.md](docs/development.md).
+
 - **`app.main` is the service; `app.serve` is the service plus the frontend.** The browser
   asks for `/api/...` and this service answers bare paths, because one host name carries two
   things that share path shapes — a `/tasks` page in the router and a `/tasks` route here are
@@ -360,7 +371,7 @@ notices.
   and the trap is that **Starlette does not run a mounted application's lifespan** — the
   process comes up with nothing on `app.state`, every route raises where it reaches for the
   database, and it reads as a broken handler rather than as a deployment that never started.
-  `create_server` delegates to the mounted app's lifespan context; `tests/test_serve.py`
+  `create_server` delegates to the mounted app's lifespan context; `tests/serve/test_serve.py`
   drives a real `TestClient` because nothing that calls a handler directly can see this.
 
 - **It is an application, not a library.** There is no build backend, no version, and
@@ -370,19 +381,19 @@ notices.
 
 - **The store is two implementations of one contract, and both are permanent.**
   `MemoryDatabase` is the default and `PostgresDatabase` takes over when `DATABASE_URL` is
-  set. `tests/test_store_contract.py` runs one suite against both, which is what makes
-  `TaskStore` a contract rather than a shape nothing checks — and it is the same pattern
-  this repository already runs one layer up, where `frontend/tests/contract.test.ts` runs
-  against the mock handlers and against this service. Do not delete the in-memory substrate
-  when Postgres feels real enough: it is what `make test` and `make pre-commit` stand on,
-  and the gate must not need a daemon. See
+  set. `tests/store_contract.py` is one suite and both substrates run it, memory in the gate
+  and Postgres in the tier — which is what makes `TaskStore` a contract rather than a shape
+  nothing checks, and it is the same pattern this repository already runs one layer up, where
+  `frontend/tests/api/contract.test.ts` runs against the mock handlers and against this
+  service. Do not delete the in-memory substrate when Postgres feels real enough: it is what
+  `make test` and `make pre-commit` stand on, and the gate must not need a daemon. See
   [docs/adr/0001-two-substrates-behind-one-contract.md](docs/adr/0001-two-substrates-behind-one-contract.md).
 
 - **Seed rows belong to one suite.** The in-memory substrate seeds three tasks and Postgres
   starts empty, deliberately: a suite that passes against both cannot have assumed either.
-  `tests/test_tasks.py` is the only file allowed to know about the seeds, and ids are the
-  same trap — memory hands out `"1"`, Postgres hands out uuids, and nothing may pattern-match
-  one.
+  `tests/routes/test_tasks.py` is the only file allowed to know about the seeds, and ids are
+  the same trap — memory hands out `"1"`, Postgres hands out uuids, and nothing may
+  pattern-match one.
 
 - **`wiring.py` is the only reader of the environment.** `build()` reads what the service
   needs and `build_bundle()` what `app.serve` needs; everything below them takes its DSN,
@@ -395,15 +406,16 @@ notices.
 - **The schema is data, and `deploy/schema.sql` is generated from it.** `app/store/ddl.py`
   holds one statement per entry under a four-digit key; run **`make schema`** and commit the
   result after adding one, the same way `openapi.json` follows the models.
-  `tests/test_schema.py` fails when they drift. Two rules there are load-bearing and are
-  explained in that file: never edit a shipped entry, and a column added later lands **twice**
+  `tests/store/test_schema.py` fails when they drift. Two rules there are load-bearing and
+  are explained in that file: never edit a shipped entry, and a column added later lands **twice**
   — in its table's `CREATE`, and as an `ALTER TABLE … ADD COLUMN IF NOT EXISTS` in the `0200_`
   repair band, which sorts above everything because `migrate()` compares `max(key)`.
 
 - **The Postgres tier is opt-in.** `make db-test` starts its own `postgres:17-alpine` on an
-  ephemeral port and tears it down; set `TEST_DATABASE_URL` to use your own instead. It is
-  not in `make pre-commit` and not in CI, for the same reason the Playwright specs are not.
-  `make db` gives you a database to develop against and prints the `DATABASE_URL` to export.
+  ephemeral port, runs `backend/tests/integration/` whole and tears the container down; set
+  `TEST_DATABASE_URL` to use your own server instead. It is not in `make pre-commit` and not
+  in CI, for the same reason the Playwright specs are not. `make db` gives you a database to
+  develop against and prints the `DATABASE_URL` to export.
 
 - **Declare responses fully.** Every status code a route can return belongs in the
   decorator, with a `model` for anything that has a body. The spec is generated from those
@@ -422,7 +434,7 @@ agent breaks without noticing.
 - **Every index on a tenant table leads with `tenant_id`.** An index that does not cannot
   satisfy the policy's predicate, so Postgres scans instead. It fails invisibly — right
   answers, quietly slower — until the table is large enough that fixing it means rebuilding
-  indexes on live data. `backend/tests/test_schema.py` enforces it.
+  indexes on live data. `backend/tests/store/test_schema.py` enforces it.
 
 - **A policy may only compare a column to a setting.** Anything needing a join or a
   row-dependent function call is a bug in the schema, not a policy to write: those are the

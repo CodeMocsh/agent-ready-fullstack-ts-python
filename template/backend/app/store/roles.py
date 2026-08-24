@@ -13,8 +13,8 @@ two, and the split is the whole reason the application never applies DDL:
 There is deliberately **no third role**, and no `SECURITY DEFINER` function anywhere. A role
 holding `BYPASSRLS` exists only to answer a question that cannot know a tenant — a queue claim
 taking the next row across tenants is the usual one — and this project has no such question.
-`tests/test_isolation.py` asserts the absence rather than trusting it, because "nothing here
-can see across tenants" is exactly the claim a security review asks you to prove.
+`tests/integration/test_isolation.py` asserts the absence rather than trusting it, because
+"nothing here can see across tenants" is exactly the claim a security review asks you to prove.
 
 Role names derive from the schema because roles are **cluster-wide**, not per-database. Two
 projects generated from this template that both hard-coded `app_owner` would collide the
@@ -24,7 +24,7 @@ one's grants.
 This module emits SQL and never runs it. Provisioning roles needs `CREATEROLE`, which this
 project does not ask for and a generated application has no business assuming: an operator
 applies `deploy/roles.sql` once, before the first migration. `make roles` regenerates it and
-`tests/test_schema.py` asserts the committed file is still what this module emits.
+`tests/store/test_schema.py` asserts the committed file is still what this module emits.
 """
 
 from app.store.conn import quote_ident, resolve_schema

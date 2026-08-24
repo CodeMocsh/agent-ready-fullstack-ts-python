@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { TaskList } from "@/components/task-list";
 import { server } from "@/mocks/node";
-import { renderWithQuery } from "./render.tsx";
+import { renderWithQuery } from "../render.tsx";
 
 describe("TaskList", () => {
   it("renders the tasks the API returns", async () => {

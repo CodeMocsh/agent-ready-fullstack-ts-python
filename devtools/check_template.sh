@@ -366,6 +366,48 @@ need_no_grep '^pre-commit:.*test-contract-db' Makefile
 # carrying no isolation at all.
 need_grep 'DATABASE_URL=postgres://app_app' Makefile
 need backend/tests/test_gate.py
+# No test decides for itself whether to run. Everything that needs a server is a *tier* --
+# backend/tests/integration/, held out of the default pytest run by norecursedirs and run
+# whole by `make db-test` -- because a test that skips itself exits 0 and reads exactly like
+# a test that passed, and a run where every one of them skipped looks green. The generated
+# project polices this from then on in test_gate.py; this is what makes it ship that way.
+need_grep '^norecursedirs = \["integration"\]' backend/pyproject.toml
+need_grep '^DB_TEST_SUITE = tests/integration$' Makefile
+need backend/tests/tiers.py
+# The tier is out of the default run, so the default run has to say so. Without this line a
+# green `make test` reads as "everything passed" on a project where a whole folder was never
+# looked at -- the same silence a skip produces, one level up.
+need backend/tests/conftest.py
+need_grep 'not in this run' backend/tests/conftest.py
+# The scan itself comes from the generated project's own test_gate.py rather than being
+# written out again here. A second copy in shell syntax is a copy that drifts, and the half
+# that drifts is the half nobody notices: this runs in `make fast`, where no test does.
+# test_gate.py imports no third-party package and defers its one version-dependent import,
+# so the host python3 can read it whatever the project's own interpreter is.
+python3 - <<'PY' || fail "the skip scan did not pass; see above"
+import sys
+
+sys.path.insert(0, "backend")
+try:
+    from tests.test_gate import ROOT, switched_off
+except ImportError as error:
+    print(f"check: the skip scan could not run, which is not the same as passing: {error}",
+          file=sys.stderr)
+    sys.exit(1)
+
+found = switched_off()
+for path, marker in found:
+    print(f"{path.relative_to(ROOT)} uses {marker!r}, and a skipped test exits 0 like a "
+          f"passing one -- move it into a tier instead", file=sys.stderr)
+sys.exit(1 if found else 0)
+PY
+# The suite is sorted tier first, then source. A folder per area is what keeps a growing
+# project from piling every file at the top of tests/, and it is what the tier targets
+# select on. test_gate.py stays at the top because it covers no source: it reads this
+# Makefile, the hook and the workflow.
+for folder in devtools integration routes serve store; do
+    need "backend/tests/$folder/__init__.py"
+done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and
 # `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
 # foreground command returns, which on Ctrl-C it never does.
@@ -431,12 +473,12 @@ need backend/app/models.py
 need backend/app/routes.py
 need backend/app/deps.py
 need backend/app/wiring.py
-need backend/tests/test_tasks.py
+need backend/tests/routes/test_tasks.py
 # The one-origin entrypoint, for a deployment with no proxy to strip the /api prefix.
 # It mounts app.main and delegates that app's lifespan, because Starlette does not run a
 # mounted application's lifespan and the process would come up with no database on it.
 need backend/app/serve.py
-need backend/tests/test_serve.py
+need backend/tests/serve/test_serve.py
 # Two substrates behind one contract, and one suite over both. A store package with only
 # one implementation in it is a shape nothing checks -- see docs/adr/0001.
 need backend/app/store/__init__.py
@@ -445,12 +487,18 @@ need backend/app/store/pg.py
 need backend/app/store/ddl.py
 need backend/app/store/migrate.py
 need backend/app/store/conn.py
-need backend/tests/test_store_contract.py
-need backend/tests/test_schema.py
-need backend/tests/test_postgres.py
+# One contract file, and a suite per substrate that runs all of it. Losing either runner
+# leaves a green project in which one implementation is checked and the other is claimed.
+need backend/tests/store_contract.py
+need backend/tests/store/test_store_contract.py
+need backend/tests/integration/test_store_contract.py
+need backend/tests/store/test_schema.py
+need backend/tests/integration/test_postgres.py
+need backend/tests/integration/test_isolation.py
+need backend/tests/integration/conftest.py
 need docs/adr/0001-two-substrates-behind-one-contract.md
 need_absent backend/app/store.py
-# The generated schema, committed the way openapi.json is. backend/tests/test_schema.py
+# The generated schema, committed the way openapi.json is. backend/tests/store/test_schema.py
 # fails when it drifts, and that test is in the fast tier, so the gate catches it.
 need deploy/schema.sql
 need deploy/roles.sql
@@ -459,15 +507,16 @@ need_exec deploy/credentials.sh
 need CONTEXT.md
 for adr in 0002-tenant-isolation-is-forced-and-always-on \
            0003-the-application-never-applies-ddl \
-           0004-the-schema-and-the-binary-must-match; do
+           0004-the-schema-and-the-binary-must-match \
+           0005-a-test-never-decides-whether-to-run; do
     need "docs/adr/$adr.md"
 done
 
 echo "==> assert tenant isolation is wired, not just described"
 # FORCE, not ENABLE. A table's owner bypasses its own policies by default, so with ENABLE
 # alone the role that applied the schema reads every row -- silently, with nothing anywhere
-# reporting a problem. backend/tests/test_isolation.py proves it against a real server; this
-# catches the edit before anyone has a database to run that against.
+# reporting a problem. backend/tests/integration/test_isolation.py proves it against a real
+# server; this catches the edit before anyone has a database to run that against.
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql
 need_grep 'ENABLE ROW LEVEL SECURITY' deploy/schema.sql
 # WITH CHECK as well as USING, or a tenant may insert a row it cannot then read.
@@ -496,7 +545,7 @@ need_grep 'applied_once' deploy/schema.sql
 # restores startup parameters and clears session SETs, so a `SET search_path` from a connect
 # hook survives exactly one checkout and every one after it resolves against public --
 # silently, because the first query on each connection works.
-# The behavioural guard is backend/tests/test_postgres.py, which fails with `public` if
+# The behavioural guard is backend/tests/integration/test_postgres.py, which fails with `public` if
 # this changes; this only asserts the mechanism is still the one that test is about.
 need_grep 'server_settings' backend/app/store/pg.py
 need backend/devtools/export_openapi.py
@@ -540,8 +589,8 @@ need_grep 'separate_input_output_schemas=False' backend/app/main.py
 # The generator needs its own TypeScript; the frontend is on a major where the
 # compiler API it uses no longer exists.
 need_grep 'pnpm dlx openapi-typescript@' frontend/package.json
-need frontend/tests/contract.test.ts
-need_grep 'CONTRACT_TARGET' frontend/tests/contract.test.ts
+need frontend/tests/api/contract.test.ts
+need_grep 'CONTRACT_TARGET' frontend/tests/api/contract.test.ts
 # Starting the mock worker during the live run would intercept the very requests
 # that run exists to make, and the suite would pass while proving nothing.
 need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
@@ -603,10 +652,14 @@ need backend/devtools/comments.py
 # which also opened a block comment that ran to the end of the file and hid every real
 # comment below it. A gate that cries wolf is a gate people route around, and one that
 # goes quiet is worse. The table is what holds both directions.
-need frontend/tests/comments.test.ts
+need frontend/tests/devtools/comments.test.ts
 need_grep 'startsARegex' frontend/devtools/comments.mjs
 need_grep 'devtools/comments.mjs' frontend/package.json
 need_grep 'devtools/comments.py' backend/devtools/lint.py
+# Both halves enforce the same rule, so both gates are tested. The Python one has its own
+# trap -- a `#` inside a string -- and a parser that grepped would fail this table and pass
+# every file in the project, which is the failure that has no other witness.
+need backend/tests/devtools/test_comments.py
 (cd frontend && node devtools/comments.mjs src tests e2e devtools) \
     || fail "the rendered frontend carries a comment"
 (cd backend && python3 devtools/comments.py app tests devtools) \
@@ -1117,9 +1170,9 @@ if docker info >/dev/null 2>&1; then
     run "make db-test" make db-test
     echo "    postgres: yes (container) -- store contract and migration suites ran"
 else
-    echo "    postgres: NO DOCKER -- backend/tests/test_postgres.py and the Postgres half of"
-    echo "    the store contract did not run. Everything about the schema that a fake"
-    echo "    connection can answer did (backend/tests/test_schema.py), and nothing here"
+    echo "    postgres: NO DOCKER -- backend/tests/integration/ did not run, so neither did the"
+    echo "    Postgres half of the store contract. Everything about the schema that a fake"
+    echo "    connection can answer did (backend/tests/store/test_schema.py), and nothing here"
     echo "    proves the DDL parses."
 fi
 

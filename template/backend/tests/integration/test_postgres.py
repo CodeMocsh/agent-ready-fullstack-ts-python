@@ -1,6 +1,6 @@
 """What only a real server can answer.
 
-`tests/test_schema.py` covers everything about the schema that a fake connection can drive,
+`tests/store/test_schema.py` covers everything about the schema that a fake connection can drive,
 so what is left here is the part that needs Postgres to actually parse and apply the DDL:
 that it applies, that re-applying is a no-op, that `check` reads a real ledger, that a
 database missing a later column gets repaired, and that the whole stack -- HTTP, the wiring,
@@ -10,8 +10,8 @@ The application never applies anything here, because it cannot: every setup belo
 through `conftest.apply_schema`, which is a separate privileged connection, exactly as
 `make migrate` is.
 
-Every test takes a schema of its own and drops it afterwards. Skips itself with no
-`TEST_DATABASE_URL`; `make db-test` supplies one.
+Every test takes a schema of its own and drops it afterwards. Run the suite with
+`make db-test`, which supplies the server and the `TEST_DATABASE_URL` pointing at it.
 """
 
 from typing import Any
@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.store import Database, ddl
 from app.store.migrate import emit_sql, known_version
-from tests.conftest import (
+from tests.integration.conftest import (
     Provisioned,
     a_fresh_schema_name,
     apply_schema,
@@ -46,8 +46,8 @@ def a_database(schema: str) -> Any:
     return PostgresDatabase(dsn=postgres_dsn(), schema=schema)
 
 
-async def test_the_schema_applies_and_reports_its_version(pg_database: Database) -> None:
-    assert await pg_database.schema_version() == known_version()
+async def test_the_schema_applies_and_reports_its_version(database: Database) -> None:
+    assert await database.schema_version() == known_version()
 
 
 async def test_applying_twice_changes_nothing() -> None:
@@ -139,7 +139,7 @@ async def _column_exists(pool: Any, schema: str, column: str) -> bool:
 
 
 def test_the_whole_stack_serves_a_task_round_trip(
-    pg_deployment: Provisioned, monkeypatch: pytest.MonkeyPatch
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """HTTP through the wiring, the pool and real SQL, as the role a deployment runs as.
 
@@ -148,8 +148,8 @@ def test_the_whole_stack_serves_a_task_round_trip(
     does -- including the schema check that runs before the first request, against a schema
     something else applied.
     """
-    monkeypatch.setenv("DATABASE_URL", pg_deployment.app_dsn)
-    monkeypatch.setenv("DB_SCHEMA", pg_deployment.schema)
+    monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
+    monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
 
     with TestClient(create_app()) as client:
         assert client.get("/tasks").json() == []
@@ -173,12 +173,12 @@ def test_the_whole_stack_serves_a_task_round_trip(
 
 
 def test_the_app_reports_postgres_as_its_substrate(
-    pg_deployment: Provisioned, monkeypatch: pytest.MonkeyPatch
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Guards the silent-fallback failure: a deployment that came up on memory would pass
     every test above and lose its data on restart."""
-    monkeypatch.setenv("DATABASE_URL", pg_deployment.app_dsn)
-    monkeypatch.setenv("DB_SCHEMA", pg_deployment.schema)
+    monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
+    monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
 
     app = create_app()
     with TestClient(app):

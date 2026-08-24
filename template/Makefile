@@ -84,21 +84,27 @@ test-e2e-live:
 # The other opt-in member: everything that needs a real PostgreSQL. Also out of the gate,
 # and for the same reason -- `make pre-commit` runs on every commit and must not need a
 # daemon. Everything about the schema that a fake connection can answer is already in
-# `make test` (backend/tests/test_schema.py), including that deploy/schema.sql matches
+# `make test` (backend/tests/store/test_schema.py), including that deploy/schema.sql matches
 # app/store/ddl.py, so there is no separate schema-check target to forget to run.
 #
+# This is the whole of backend/tests/integration/, and that directory is the whole of what
+# needs a server. It is the only tier outside the default `pytest` run, which is why no test
+# in this project skips itself: a test that needs Postgres is a test in here, and a skipped
+# test exits 0 and reads exactly like a passing one. The target selects the folder rather
+# than a list of filenames, so a test added there runs without anyone updating this line.
+#
 # Brings its own database. Set TEST_DATABASE_URL to point at your own instead and this
-# target uses it and skips the container entirely.
+# target uses it rather than starting a container.
 #
 # The container takes an ephemeral host port and a name carrying this shell's PID, because
 # a fixed pair breaks both ways when two checkouts run this at once: a taken port fails the
 # run outright, and a shared name means one teardown destroys the other's database mid-suite.
 DB_TEST_IMAGE ?= postgres:17-alpine
-DB_TEST_FILES = tests/test_store_contract.py tests/test_postgres.py tests/test_isolation.py
+DB_TEST_SUITE = tests/integration
 
 db-test:
 ifdef TEST_DATABASE_URL
-	cd backend && uv run --no-sync pytest -rs $(DB_TEST_FILES)
+	cd backend && uv run --no-sync pytest $(DB_TEST_SUITE)
 else
 	@name=db-test-$$$$; \
 	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
@@ -108,7 +114,7 @@ else
 	until docker exec $$name pg_isready -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
 	echo ' ready'; \
 	cd backend && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$$port/postgres \
-		uv run --no-sync pytest -rs $(DB_TEST_FILES)
+		uv run --no-sync pytest $(DB_TEST_SUITE)
 endif
 
 # The contract suite against a backend that is actually on Postgres. `make test-contract`
@@ -187,7 +193,7 @@ db-demo:
 		uv run --no-sync python devtools/isolation_demo.py
 
 # deploy/schema.sql and deploy/roles.sql are generated from app/store/, the way
-# openapi.json is generated from the models. backend/tests/test_schema.py fails when either
+# openapi.json is generated from the models. backend/tests/store/test_schema.py fails when either
 # committed file drifts, so this is how you make that test pass after a change.
 schema:
 	cd backend && uv run python devtools/schema.py ../deploy/schema.sql

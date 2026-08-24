@@ -16,7 +16,13 @@ import pytest
 
 from app.store.ddl import TENANT_GUC, TENANT_TABLES
 from app.store.migrate import SchemaBehindError, apply, check
-from tests.conftest import Provisioned, a_fresh_schema_name, connect, drop_schema, postgres_dsn
+from tests.integration.conftest import (
+    Provisioned,
+    a_fresh_schema_name,
+    connect,
+    drop_schema,
+    postgres_dsn,
+)
 
 ACME = "acme"
 GLOBEX = "globex"
