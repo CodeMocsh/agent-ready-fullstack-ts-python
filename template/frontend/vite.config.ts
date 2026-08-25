@@ -1,7 +1,9 @@
+import { rmSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { type Plugin, type ResolvedConfig, defineConfig } from "vite";
 
 // The backend half serves bare paths (/tasks). The /api prefix is deployment
 // topology rather than contract, so it is added by the client and stripped here;
@@ -29,8 +31,42 @@ const VENDOR_GROUPS = [
   { name: "style", test: /node_modules\/(tailwind-merge|clsx|class-variance-authority)\// },
 ];
 
+// Mock mode leaves two things behind, and only one of them is code. The dynamic import in
+// main.tsx is unreachable once VITE_ENABLE_MSW folds to undefined, so rolldown never writes
+// the msw chunk -- that one takes care of itself. The worker script does not: it lives in
+// public/, which is copied verbatim into every build whatever the mode, so a production
+// deploy carries a registerable service worker at its own origin and nothing about the mode
+// made it go away. It is inert there, because the worker passes every request through until
+// a page sends it MOCK_ACTIVATE and no production page does. Inert is not the same as
+// explicable, and "why is there a mock service worker on our domain" is a question this
+// template should answer rather than hand to the person who deploys it.
+//
+// It has to be removed after the fact rather than never copied: public/ is copied outside the
+// bundle graph, so generateBundle cannot see the file, and copyPublicDir: false would take
+// favicon.svg with it. The worker cannot move out of public/ either -- msw's postinstall
+// writes it there, addressed by the msw.workerDirectory key in package.json.
+//
+// The env is read from the resolved config rather than from process.env, because the value
+// comes from whichever .env.[mode] vite loaded, and that is the same source main.tsx reads.
+function stripMockWorker(): Plugin {
+  let config: ResolvedConfig;
+  return {
+    name: "strip-mock-worker",
+    apply: "build",
+    configResolved(resolved) {
+      config = resolved;
+    },
+    closeBundle() {
+      if (config.env.VITE_ENABLE_MSW === "true") {
+        return;
+      }
+      rmSync(resolve(config.root, config.build.outDir, "mockServiceWorker.js"), { force: true });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), stripMockWorker()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
