@@ -38,10 +38,10 @@ browser reached over plaintext discards it — so sign-in fails by returning qui
 sign-in screen, with nothing anywhere saying why.
 """
 
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, MutableMapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
@@ -64,12 +64,17 @@ every other one.
 """
 
 CARRY_BODIES: Final = frozenset({"POST", "PUT", "PATCH"})
-"""The methods required to declare a length, so that the cap above is a cap.
+"""The methods expected to declare a length even when nothing says they are sending one.
 
-A body read from `content-length` is only bounded if the header is there to read: a chunked
-request declares no length and would otherwise arrive unmeasured. Refusing it with 411 is what
-that status is for. An endpoint that streams an upload is a reason to narrow this set, and to
-make that endpoint responsible for its own bound.
+The cap reads `content-length`, so a request without one is unmeasured — and refusing that is
+keyed on `transfer-encoding` rather than on the method, because a body may ride any of them. A
+chunked `DELETE` is a legal request this once waved through for no better reason than that
+`DELETE` usually has no body.
+
+This set is the second half of the same rule: under HTTP/1.1 a request with neither header has
+no body at all, but that framing is the transport's guarantee rather than ours, so the methods
+that normally carry one are asked to say so regardless. An endpoint that streams an upload is a
+reason to narrow this set, and to make that endpoint responsible for its own bound.
 """
 
 SECURITY_HEADERS: Final = {
@@ -118,13 +123,26 @@ popup, this is the line to drop, and dropping it costs the cross-window isolatio
 
 Next = Callable[[Request], Awaitable[Response]]
 
+Scope = MutableMapping[str, Any]
+Message = MutableMapping[str, Any]
+Receive = Callable[[], Awaitable[Message]]
+Send = Callable[[Message], Awaitable[None]]
+ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
+"""The ASGI signature, spelled here rather than imported.
 
-def build_server() -> FastAPI:
+These names are Starlette's too, but Starlette is a dependency of FastAPI rather than one this
+project declares, and importing from it would put an undeclared package in the import graph of
+the half whose bounds are the most deliberate thing in `pyproject.toml`. The protocol is a
+specification, not a library's detail, so writing it costs five lines and owes nothing.
+"""
+
+
+def build_server() -> ASGIApp:
     """The server this deployment runs, with the bundle the environment names."""
     return create_server(build_bundle())
 
 
-def create_server(bundle: Path) -> FastAPI:
+def create_server(bundle: Path) -> ASGIApp:
     """One origin: the API under `/api`, and the built frontend under everything else."""
     index = bundle / INDEX
     if not index.is_file():
@@ -141,7 +159,6 @@ def create_server(bundle: Path) -> FastAPI:
 
     server = FastAPI(lifespan=lifespan, openapi_url=None)
     server.middleware("http")(_refuse_oversized)
-    server.middleware("http")(_confine)
     server.mount(PREFIX, api)
 
     @server.get("/{held:path}", include_in_schema=False)
@@ -160,23 +177,48 @@ def create_server(bundle: Path) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"no such asset: {held}")
         return FileResponse(index)
 
-    return server
+    return _confined(server)
 
 
-async def _confine(request: Request, call_next: Next) -> Response:
-    """`SECURITY_HEADERS` on everything this process answers, including what it refuses.
+def _confined(app: ASGIApp) -> ASGIApp:
+    """`SECURITY_HEADERS` on every response that leaves this process, including the ones it
+    never meant to send.
 
-    Registered last, so it wraps the body cap below: Starlette makes the most recently added
-    middleware the outermost, and a header set inside the cap would miss every response the cap
-    generates itself.
+    **Wrapping the finished application rather than registering a middleware**, because
+    Starlette puts its own error handler *outside* every user middleware. An unhandled
+    exception raises back out through a middleware before it can set anything, and the bare 500
+    that handler then writes goes out with no policy on it at all — which is exactly backwards,
+    since a response produced by a failure is the one most likely to be carrying something an
+    attacker put there. The catch-all below serves every HTML page in the application, so this
+    is not a corner: it is the main path, on the day it breaks.
 
-    `setdefault` rather than assignment, so a route with a reason to send its own is not
+    Written against the ASGI message rather than a `Response`, because at this layer there is
+    no response object yet — only the `http.response.start` that every one of them becomes, no
+    matter which layer wrote it.
+
+    A header already present is left alone, so a route with a reason to send its own is not
     overruled by a default it never asked for.
     """
-    response = await call_next(request)
-    for header, value in SECURITY_HEADERS.items():
-        response.headers.setdefault(header, value)
-    return response
+
+    async def confined(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await app(scope, receive, send)
+            return
+
+        async def sending(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                present = list(message.get("headers", []))
+                named = {name.lower() for name, _ in present}
+                message["headers"] = present + [
+                    (header.encode(), value.encode())
+                    for header, value in SECURITY_HEADERS.items()
+                    if header.encode() not in named
+                ]
+            await send(message)
+
+        await app(scope, receive, sending)
+
+    return confined
 
 
 async def _refuse_oversized(request: Request, call_next: Next) -> Response:
@@ -188,11 +230,11 @@ async def _refuse_oversized(request: Request, call_next: Next) -> Response:
     """
     declared = request.headers.get("content-length")
     if declared is None:
-        if request.method not in CARRY_BODIES:
-            return await call_next(request)
-        return JSONResponse(
-            {"detail": f"{request.method} must declare a content-length"}, status_code=411
-        )
+        if request.headers.get("transfer-encoding") or request.method in CARRY_BODIES:
+            return JSONResponse(
+                {"detail": f"{request.method} must declare a content-length"}, status_code=411
+            )
+        return await call_next(request)
     if not declared.isdigit():
         return JSONResponse({"detail": "malformed content-length"}, status_code=400)
     if int(declared) > MAX_BODY_BYTES:

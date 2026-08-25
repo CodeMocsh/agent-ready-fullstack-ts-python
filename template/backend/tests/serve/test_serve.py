@@ -185,6 +185,30 @@ def test_a_bodied_request_that_will_not_say_its_length_is_refused(client: TestCl
     assert answered.status_code == 411
 
 
+def test_a_bodied_method_declaring_nothing_at_all_is_refused(client: TestClient) -> None:
+    """The second half of the rule, and the half no ordinary client can reach.
+
+    Under HTTP/1.1 a request with neither `content-length` nor `transfer-encoding` has no body,
+    so `CARRY_BODIES` never fires there and every normal client sends one header or the other.
+    It is the backstop for a transport that makes neither compulsory — HTTP/2 frames a body with
+    neither — and it has to be built by hand because httpx will always supply a length.
+    """
+    unframed = client.build_request("POST", "/api/tasks", json={"title": "unframed"})
+    del unframed.headers["content-length"]
+    assert "transfer-encoding" not in unframed.headers
+
+    assert client.send(unframed).status_code == 411
+
+
+def test_a_chunked_body_is_refused_whatever_the_method(client: TestClient) -> None:
+    """The cap reads `content-length`, so anything arriving without one is unbounded no matter
+    which method carries it. Asking only the methods that usually have a body left `DELETE` and
+    `GET` free to stream one straight past — a chunked `DELETE` of any size was answered."""
+    for method in ("DELETE", "GET", "POST", "PATCH"):
+        answered = client.request(method, "/api/tasks", content=iter([b"A" * 64]))
+        assert answered.status_code == 411, f"{method} was not refused: {answered.status_code}"
+
+
 def test_a_bodiless_request_needs_no_length(client: TestClient) -> None:
     """The requirement is on the methods that carry bodies and on no others, or every read in
     the application would need a header it has no reason to send."""
@@ -193,8 +217,32 @@ def test_a_bodiless_request_needs_no_length(client: TestClient) -> None:
 
 
 def test_a_refusal_still_carries_the_headers(client: TestClient) -> None:
-    """Registration order, asserted: the header middleware has to wrap the body cap, or the
-    responses this module generates itself are the ones that go out bare."""
+    """A response this module writes itself is still a response the browser applies a policy
+    to, so the refusals must not be the ones that go out bare."""
     answered = client.post("/api/tasks", json={"title": "x" * (MAX_BODY_BYTES + 1)})
     assert answered.status_code == 413
     assert "content-security-policy" in answered.headers
+
+
+def test_a_server_error_still_carries_the_headers(
+    bundle: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A policy that lapses exactly when something breaks is not a policy.
+
+    Starlette wraps every user middleware in its own error handler, so headers applied *as* a
+    middleware are missed by the 500 that handler writes — the middleware raised on the way out
+    and never reached them. The failing route here is the catch-all, which is the one serving
+    every HTML page, and HTML with no policy is the case the policy exists for.
+    """
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    def broken(_bundle: Path, _held: str) -> Path | None:
+        raise RuntimeError("a bug on the way to the bundle")
+
+    monkeypatch.setattr("app.serve._within", broken)
+    with TestClient(create_server(bundle), raise_server_exceptions=False) as fresh:
+        answered = fresh.get("/some/client/route")
+
+    assert answered.status_code == 500
+    for header in SECURITY_HEADERS:
+        assert header in answered.headers
