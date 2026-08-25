@@ -136,7 +136,18 @@ case "$VARIANT" in
 esac
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT INT TERM
+
+# One handler for the whole run, because `set -e` is live inside a trap: a `kill` of a
+# process that has already gone returns non-zero, and an inline handler would skip the
+# `rm -rf` after it and leak a temp tree holding a node_modules and a venv. Steps that
+# start something long-lived set `serve_pid` and leave the stopping to this.
+cleanup() {
+    if [ -n "${serve_pid:-}" ]; then
+        kill "$serve_pid" 2>/dev/null || true
+    fi
+    rm -rf "$WORK"
+}
+trap cleanup EXIT INT TERM
 SRC="$WORK/src"
 OUT="$WORK/out"
 mkdir -p "$SRC"
@@ -1261,6 +1272,124 @@ if not until(lambda: not serving(BACKEND) and not serving(PROXY), 15):
     held = " and ".join(n for n, u in PORTS if serving(u))
     die(f"dev.sh exited but {held} still answering")
 PY
+
+echo "==> the built bundle, answered by app.serve on one origin"
+# The one arrangement nothing else in this file reaches. `make test-e2e` builds the bundle
+# and serves it with nothing behind it; the contract suite runs a real backend behind the
+# *dev* server. So the artifact a deployment actually ships -- the built bundle, answered by
+# `app.serve` -- was the combination no step exercised, and the routing it depends on is
+# covered only by unit tests pointed at a fixture directory holding a stub index.html. Those
+# cannot see a hashed asset name, a real `<script>` tag, or a `base` that moved.
+#
+# What it does NOT reach, so that claim is not read wider than it is: the bundle's own choice
+# of API base. `src/api/base.ts` falls back to a relative `${BASE_URL}api` when
+# VITE_API_BASE_URL is unset, and that fallback is the branch every deployment takes -- but
+# the contract run below has to set the variable, because it fetches from node, where a
+# relative URL has no origin to resolve against. Closing that would mean executing the built
+# javascript, which means a browser, and no step here downloads one. What is proved is the
+# server: that these files, at these URLs, are answered correctly on one origin.
+#
+# The contract suite is re-run rather than re-implemented: the same file the step above uses,
+# aimed at a third edge. That is what proves the claim the whole topology rests on --
+# `server.mount` strips /api exactly as the vite proxy does, so a project developed against
+# one deploys onto the other. A prefix the two handled differently would pass every other
+# check in this file and fail on the first deploy.
+#
+# Started from the venv's own interpreter rather than through `uv run`, which execs a
+# launcher and spawns the server as a child: killing the pid we started would leave that
+# child holding the port, and --app-dir is what makes `app` importable without a subshell
+# whose pid is not the server's.
+ONE_ORIGIN="http://localhost:$BACKEND_PORT"
+# One URL for the pre-flight and the readiness loop both. They probed different paths and the
+# guard was weaker for it: a stale `app.main` on this port answers / with a 404, so the
+# pre-flight saw nothing wrong and only the readiness probe noticed.
+PROBE="$ONE_ORIGIN/api/tasks"
+
+if curl -fsS --max-time 2 "$PROBE" >/dev/null 2>&1; then
+    fail ":$BACKEND_PORT is answering before app.serve started -- something else has it"
+fi
+
+# DATABASE_URL is dropped so this is the in-memory substrate: the contract suite asserts
+# shapes and status codes rather than rows, and a Postgres that happened to be exported
+# would make this step depend on a daemon the gate does not require.
+env -u DATABASE_URL FRONTEND_BUNDLE="$OUT/frontend/dist" \
+    backend/.venv/bin/python -m uvicorn --app-dir backend \
+    --factory app.serve:build_server --port "$BACKEND_PORT" --log-level warning \
+    >"$WORK/serve.log" 2>&1 &
+serve_pid=$!
+
+serve_deadline=$(($(date +%s) + 30))
+until curl -fsS --max-time 2 "$PROBE" >/dev/null 2>&1; do
+    if ! kill -0 "$serve_pid" 2>/dev/null; then
+        echo "--- app.serve exited during startup ---" >&2
+        cat "$WORK/serve.log" >&2
+        exit 1
+    fi
+    [ "$(date +%s)" -lt "$serve_deadline" ] \
+        || fail "app.serve did not answer $PROBE within 30s"
+    sleep 1
+done
+
+# Every curl below is bounded. A server that accepts and then never answers would otherwise
+# hang the whole gate, which has no outer timeout, and `|| fail` on each capture is what
+# keeps a non-2xx from exiting silently under `set -e` and taking serve.log with it.
+shell="$(curl -fsS --max-time 10 "$ONE_ORIGIN/")" \
+    || fail "app.serve did not answer / at all"
+printf '%s' "$shell" | grep -q '<div id="root">' \
+    || fail "app.serve answered / with something that is not the built shell"
+
+# A reload on a client route has to reach the same document. This failing while the dev
+# server works is exactly the divergence between the two edges that this step exists to deny.
+deep="$(curl -fsS --max-time 10 "$ONE_ORIGIN/some/client/route")" \
+    || fail "app.serve refused a client route instead of falling back to the shell"
+[ "$deep" = "$shell" ] || fail "a deep link did not fall back to the built index.html"
+
+# Every file the shell asks for, at the exact URL it asks for it -- leading slash and `base`
+# and all -- read out of the document so this follows the build rather than needing an edit
+# each time a hash moves. Scripts and stylesheets both: they are hashed the same way and a
+# `base` moves them together.
+#
+# Matching only the tail was tried and is worthless: with a `base` this server does not serve
+# from, `assets/index-*.js` still resolves because the file is on disk under that name, while
+# the browser asks for `/app/assets/...`, misses, and is handed the shell by the fallback. So
+# the answer is checked by type, not by status -- a script tag given a page of HTML is a 200,
+# and it is the whole failure this step exists to see.
+# Collected before the loop rather than piped into it, because a `for` over nothing runs no
+# body and reports success: a build that stopped naming its assets the expected way would
+# turn this check off rather than fail it.
+refs="$(printf '%s' "$shell" | grep -oE '(src|href)="[^"]*\.(js|css)"' \
+            | sed 's/^[a-z]*="//; s/"$//')"
+[ -n "$refs" ] || fail "the built index.html names no script or stylesheet to load"
+
+for ref in $refs; do
+    case "$ref" in
+        *.js)  want=javascript ;;
+        *.css) want=css ;;
+        *)     continue ;;
+    esac
+    ref_type="$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' "$ONE_ORIGIN$ref")"
+    case "$ref_type" in
+        *"$want"*) ;;
+        *) fail "the shell asks for $ref and app.serve answered it as ${ref_type:-nothing}" ;;
+    esac
+done
+
+# An asset name carries the build's hash, so one the bundle does not hold is a stale
+# document. Answering it with the shell hands a script tag a page of HTML, which fails as a
+# syntax error a long way from the deploy that caused it.
+stale_status="$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
+    "$ONE_ORIGIN/assets/index-deadbee.js")"
+[ "$stale_status" = "404" ] \
+    || fail "a hashed asset the bundle lacks answered $stale_status, not 404"
+
+# The package script rather than the spec's path, so renaming that file is a change in one
+# place the generated project owns rather than a break in the generator's gate.
+run "contract suite (app.serve)" env CONTRACT_TARGET=live VITE_API_BASE_URL="$ONE_ORIGIN/api" \
+    pnpm -C frontend test:contract
+
+kill "$serve_pid" 2>/dev/null || true
+wait "$serve_pid" 2>/dev/null || true
+serve_pid=""
 
 echo "==> assert the drift gate is two-sided, on both halves"
 # A ratchet that only ever rises is not a ratchet. Whatever a tree improved since its
