@@ -369,12 +369,14 @@ project without failing anything — the target still exists, and the gate never
   things that share path shapes — a `/tasks` page in the router and a `/tasks` route here are
   the same URL. Something has to strip the prefix: the vite proxy in development, a load
   balancer in a deployment, and when there is neither, `uvicorn --factory app.serve:build_server`
-  with `FRONTEND_BUNDLE` naming what `make build` wrote. Mounting is the whole implementation
+  with `FRONTEND_BUNDLE` naming what `make build` wrote. Mounting is most of the implementation
   and the trap is that **Starlette does not run a mounted application's lifespan** — the
   process comes up with nothing on `app.state`, every route raises where it reaches for the
   database, and it reads as a broken handler rather than as a deployment that never started.
   `create_server` delegates to the mounted app's lifespan context; `tests/serve/test_serve.py`
   drives a real `TestClient` because nothing that calls a handler directly can see this.
+  Having no proxy is also why it sets the security headers and body cap, and why `main.py`
+  sets neither: behind a real edge those would be a second, weaker copy. Keep them there.
 
 - **It is an application, not a library.** There is no build backend, no version, and
   nothing is published, so `[tool.uv] package = false` and `app` is importable from the

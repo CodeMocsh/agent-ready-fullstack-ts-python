@@ -55,3 +55,5 @@ The concept is what the template is sure of. The word is yours.
 - **0002** — tenant isolation is forced, and always on.
 - **0003** — the application never applies DDL.
 - **0004** — the schema and the binary must match.
+- **0005** — a test never decides whether to run.
+- **0006** — the one-origin entrypoint is the edge.
