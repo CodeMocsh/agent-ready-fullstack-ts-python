@@ -12,7 +12,17 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.serve import ASSETS, INDEX, MAX_BODY_BYTES, SECURITY_HEADERS, create_server
+from app.main import create_app
+from app.serve import (
+    ASSETS,
+    INDEX,
+    MAX_BODY_BYTES,
+    SECURITY_HEADERS,
+    ASGIApp,
+    Message,
+    Scope,
+    create_server,
+)
 from app.wiring import BUNDLE_ENV, BundleMissing, build_bundle
 
 SHELL = "<!doctype html><title>the shell</title>"
@@ -135,11 +145,11 @@ def test_the_shell_carries_the_headers_a_proxy_would_have_set(client: TestClient
 
 
 def test_the_api_carries_them_too(client: TestClient) -> None:
-    """The middleware wraps the mount rather than sitting inside it, so one registration covers
-    both halves and neither can be left out by being added later."""
+    """The wrapper sits outside the mount rather than inside it, so one application of the
+    policy covers both halves and the mounted one cannot be left out by being added later."""
     headers = client.get("/api/tasks").headers
-    for header in SECURITY_HEADERS:
-        assert header in headers
+    for header, value in SECURITY_HEADERS.items():
+        assert headers[header] == value
 
 
 def test_the_policy_confines_scripts_and_framing_to_this_origin(client: TestClient) -> None:
@@ -154,9 +164,8 @@ def test_the_policy_confines_scripts_and_framing_to_this_origin(client: TestClie
 
 
 def test_the_transport_policy_does_not_claim_subdomains(client: TestClient) -> None:
-    """`includeSubDomains` from a template is a promise about hosts this deployment has never
-    seen — it would take a plaintext sibling on the same apex down from a header nobody
-    remembers setting. `preload` is the same mistake, and irreversible."""
+    """Neither `includeSubDomains` nor `preload` ships from a template. Both are decisions
+    about a domain rather than about this code, and `docs/adr/0006` says why."""
     transport = client.get("/").headers["strict-transport-security"]
     assert transport.startswith("max-age=")
     assert "includeSubDomains" not in transport
@@ -183,6 +192,84 @@ def test_a_bodied_request_that_will_not_say_its_length_is_refused(client: TestCl
     length is otherwise the way around it."""
     answered = client.post("/api/tasks", content=iter([b'{"title": "smuggled"}']))
     assert answered.status_code == 411
+
+
+async def drive(
+    app: ASGIApp,
+    method: str,
+    path: str,
+    headers: list[tuple[bytes, bytes]],
+    version: str = "1.1",
+) -> Message:
+    """Push one request through the ASGI application and hand back its response start.
+
+    For the cases httpx cannot construct. It re-encodes a header value on the way out — a
+    latin-1 `content-length` arrives as two utf-8 bytes and stops being the input under test —
+    and it speaks only HTTP/1.1, so a transport that frames a body without headers is out of
+    reach entirely. Both are real over the wire, so both are driven at the layer that has them.
+    """
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"A" * 4096, "more_body": False}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": version,
+        "method": method,
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "scheme": "https",
+        "query_string": b"",
+        "headers": headers,
+        "client": ("127.0.0.1", 1234),
+        "server": ("testserver", 443),
+    }
+    await app(scope, receive, send)
+    return sent[0]
+
+
+def test_a_length_that_is_not_a_number_is_refused_rather_than_crashed_on(
+    client: TestClient,
+) -> None:
+    """A length this cannot parse is a refusal, not an exception on the way to one."""
+    for value in ("1.5", " 12", "-1", "", "12abc"):
+        unparsable = client.build_request("POST", "/api/tasks", json={"title": "x"})
+        unparsable.headers["content-length"] = value
+        assert client.send(unparsable).status_code == 400, f"{value!r} was not refused"
+
+
+async def test_a_length_that_is_a_digit_but_not_a_number_is_refused(bundle: Path) -> None:
+    """`'²'.isdigit()` is `True` while `int('²')` raises, so screening with the wrong predicate
+    turns this 400 into an unhandled 500.
+
+    U+00B2 is one latin-1 byte, which a header value may carry as obs-text, so the input is
+    reachable over the wire. It is not reachable through httpx, which re-encodes it to two utf-8
+    bytes that decode back as something no predicate calls a digit — a test that goes through a
+    client passes here against either spelling, for the wrong reason.
+    """
+    started = await drive(
+        create_server(bundle), "POST", "/api/tasks", [(b"content-length", b"\xb2")]
+    )
+    assert started["status"] == 400
+
+
+async def test_a_body_on_a_transport_that_frames_it_without_headers_is_refused(
+    bundle: Path,
+) -> None:
+    """HTTP/2 makes both framing headers optional, so on it a bodied `DELETE` can announce
+    nothing at all — and a rule keyed on the verb waves it through exactly as the chunked one
+    was waved through."""
+    started = await drive(create_server(bundle), "DELETE", "/api/tasks/1", [], version="2")
+
+    assert started["status"] == 411
+    named = {name.lower() for name, _ in started["headers"]}
+    assert b"content-security-policy" in named
 
 
 def test_a_bodied_method_declaring_nothing_at_all_is_refused(client: TestClient) -> None:
@@ -231,18 +318,31 @@ def test_a_server_error_still_carries_the_headers(
 
     Starlette wraps every user middleware in its own error handler, so headers applied *as* a
     middleware are missed by the 500 that handler writes — the middleware raised on the way out
-    and never reached them. The failing route here is the catch-all, which is the one serving
-    every HTML page, and HTML with no policy is the case the policy exists for.
+    and never reached them. The route that fails here is the catch-all, which is the one
+    serving every HTML page, and HTML with no policy is the case the policy exists for.
+
+    The shell is removed *after* the server is built rather than a function being replaced: a
+    deploy that swaps the directory beneath a live process is how this actually happens, it
+    needs no private name to arrange, and the build-time check cannot catch it.
     """
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    server = create_server(bundle)
+    (bundle / INDEX).unlink()
 
-    def broken(_bundle: Path, _held: str) -> Path | None:
-        raise RuntimeError("a bug on the way to the bundle")
-
-    monkeypatch.setattr("app.serve._within", broken)
-    with TestClient(create_server(bundle), raise_server_exceptions=False) as fresh:
+    with TestClient(server, raise_server_exceptions=False) as fresh:
         answered = fresh.get("/some/client/route")
 
     assert answered.status_code == 500
+    for header, value in SECURITY_HEADERS.items():
+        assert answered.headers[header] == value
+
+
+def test_the_service_on_its_own_sets_none_of_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`app.main` is what runs behind a real proxy, and an edge's headers are that proxy's to
+    set. Two `content-security-policy` headers are enforced as their intersection, so a second
+    copy from here would silently narrow whatever the deployment's edge allowed."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with TestClient(create_app()) as bare:
+        headers = bare.get("/tasks").headers
     for header in SECURITY_HEADERS:
-        assert header in answered.headers
+        assert header not in headers

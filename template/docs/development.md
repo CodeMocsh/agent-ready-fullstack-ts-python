@@ -533,7 +533,9 @@ Not configured, deliberately — deployment shape is yours. The pieces:
   — so sign-in fails by returning quietly to the sign-in screen with nothing saying why.
 
   With nothing in front, this process is also the edge: read `SECURITY_HEADERS` and
-  `MAX_BODY_BYTES` in `app/serve.py` before your first deploy.
+  `MAX_BODY_BYTES` in `app/serve.py` before your first deploy, and
+  [adr/0006](adr/0006-the-one-origin-entrypoint-is-the-edge.md) for why `app.main` sets
+  neither and why the refusals they produce are not in `openapi.json`.
 - If the bundle is served from a subpath, pass `--base=/that/path/` to `vite build`.
 - Never ship mock mode: production builds must leave `VITE_ENABLE_MSW` unset.
 - **Set `DATABASE_URL`, or you are deploying the in-memory substrate.** It resets on every

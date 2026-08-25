@@ -17,25 +17,14 @@ Run it with `uvicorn --factory app.serve:build_server`. A factory rather than a 
 app because the bundle is read from the environment, and a module that raises on import is a
 module no test can reach.
 
-**This module is also the edge, and that is the half worth reading before deploying it.** A
-reverse proxy is not only a router: it caps request bodies and sets the response headers that
-decide what an injected string is allowed to become. `app.main` behind one inherits both and
-declares neither, which is correct there and leaves nothing at all doing it here. So this
-module carries what the proxy would have carried, and `app.main` still does not — a service
-behind an edge must not send a second, weaker copy of headers that edge already set.
+**This module is also the edge**, because nothing is in front of it. It carries what a proxy
+would have carried — `SECURITY_HEADERS` and `MAX_BODY_BYTES` below — and `app.main` carries
+neither, deliberately: two policies disagreeing is worse than either alone. `docs/adr/0006`
+holds that reasoning and the options it rejected, including why the refusals this module
+issues are absent from `openapi.json`.
 
-**Prefer a platform that fronts this process to running it as the public edge.** Cloud Run,
-Fly, App Runner and an identity-aware proxy all terminate TLS, parse HTTP and absorb the
-slow-client attacks a Python process should not be meeting, and they forward cleartext to this
-one — so give it `--host 0.0.0.0 --port $PORT` and **no** `--ssl-keyfile`, or the platform's
-health check meets a TLS handshake and the deploy never goes green. Serving 443 directly with
-`--ssl-keyfile` is the shape to think twice about: it puts the TLS private key in the same
-process that resolves client-supplied paths against a directory, and `_within` is then the
-only thing standing between the two.
-
-**Whatever terminates TLS, something must.** A session cookie worth setting is `Secure`, and a
-browser reached over plaintext discards it — so sign-in fails by returning quietly to the
-sign-in screen, with nothing anywhere saying why.
+**Run it behind something that terminates TLS rather than as the public edge.** How, and the
+one mistake that is easiest to make here, are in `docs/development.md` under *Deploying*.
 """
 
 from collections.abc import AsyncGenerator, Awaitable, Callable, MutableMapping
@@ -64,17 +53,21 @@ every other one.
 """
 
 CARRY_BODIES: Final = frozenset({"POST", "PUT", "PATCH"})
-"""The methods expected to declare a length even when nothing says they are sending one.
+"""The methods asked to declare a length even when nothing else says they are sending one.
 
-The cap reads `content-length`, so a request without one is unmeasured — and refusing that is
-keyed on `transfer-encoding` rather than on the method, because a body may ride any of them. A
-chunked `DELETE` is a legal request this once waved through for no better reason than that
-`DELETE` usually has no body.
+The last and weakest of the three tests in `_unmeasurable`, and the only one keyed on the verb.
+An endpoint that streams an upload is a reason to narrow this set and to make that endpoint
+bound itself, rather than to raise `MAX_BODY_BYTES` for every other route.
+"""
 
-This set is the second half of the same rule: under HTTP/1.1 a request with neither header has
-no body at all, but that framing is the transport's guarantee rather than ours, so the methods
-that normally carry one are asked to say so regardless. An endpoint that streams an upload is a
-reason to narrow this set, and to make that endpoint responsible for its own bound.
+FRAMED_BY_HEADERS: Final = "1."
+"""The HTTP versions on which a missing `content-length` is a promise there is no body.
+
+HTTP/1.x frames a body with `content-length` or `transfer-encoding` and offers nothing else, so
+a request carrying neither is one that cannot have a body — which is the whole reason the verb
+list above is safe. HTTP/2 and HTTP/3 frame in the protocol instead and make both headers
+optional, so on those a bodied request may arrive announcing nothing at all. `uvicorn` speaks
+only HTTP/1.1 today; this is what stops that from being load-bearing.
 """
 
 SECURITY_HEADERS: Final = {
@@ -99,26 +92,19 @@ SECURITY_HEADERS: Final = {
 }
 """What the edge would have set, and therefore what this module sets.
 
-`script-src 'self'` is the one that matters: it is what keeps an injected string from becoming
-executable, and a vite build has no inline script for it to break. Keep it that way — if
-something one day needs an inline script, give it a nonce or a hash rather than widening this
-to `'unsafe-inline'`, which would return the directive to decoration.
+Three of these carry a caveat that will cost an afternoon if it is met without warning, and
+each is argued in `docs/adr/0006`:
 
-**`style-src` is deliberately weaker, and the reason is shadcn.** Radix positions its overlays
-with inline `style` attributes, so a strict `style-src` breaks every popover and dialog added
-after generation — quietly, as misplacement rather than as an error. Inline CSS cannot
-execute, so the concession costs far less than the directive above would.
+- `script-src 'self'` holds only while the build emits no inline script. Something that needs
+  one gets a nonce or a hash, never `'unsafe-inline'`.
+- `style-src` already allows `'unsafe-inline'`, because Radix positions every `shadcn` overlay
+  with inline `style` attributes and a strict directive breaks them as misplacement rather
+  than as an error.
+- `cross-origin-opener-policy` severs `window.opener`, which is what a popup-based OAuth flow
+  hands its result back through. Redirect flows are unaffected.
 
-`strict-transport-security` names no subdomains: `includeSubDomains` from a template is a
-promise about hosts this deployment has never seen, and it would take a plaintext sibling on
-the same apex down from a header nobody remembers setting. Add it, and `preload`, once you own
-every name under the domain and have checked they are all on TLS.
-
-**`cross-origin-opener-policy` is the one to remember when you add sign-in.** It severs
-`window.opener`, which is what a popup-based OAuth flow uses to hand its result back — the
-popup completes, closes, and the page that opened it is never told, which reads as a sign-in
-that did nothing. A redirect flow is unaffected and is the one to prefer. If you need the
-popup, this is the line to drop, and dropping it costs the cross-window isolation it buys.
+`strict-transport-security` names no subdomains, and adding `includeSubDomains` or `preload`
+is a decision about a domain rather than about this code.
 """
 
 Next = Callable[[Request], Awaitable[Response]]
@@ -198,6 +184,10 @@ def _confined(app: ASGIApp) -> ASGIApp:
 
     A header already present is left alone, so a route with a reason to send its own is not
     overruled by a default it never asked for.
+
+    `headers` is read with a default because ASGI declares the key optional and empty when
+    absent. That is the specification's own answer, not a missing value being papered over —
+    the distinction the *Fail loudly* rule turns on.
     """
 
     async def confined(scope: Scope, receive: Receive, send: Send) -> None:
@@ -230,16 +220,30 @@ async def _refuse_oversized(request: Request, call_next: Next) -> Response:
     """
     declared = request.headers.get("content-length")
     if declared is None:
-        if request.headers.get("transfer-encoding") or request.method in CARRY_BODIES:
+        if _unmeasurable(request):
             return JSONResponse(
                 {"detail": f"{request.method} must declare a content-length"}, status_code=411
             )
         return await call_next(request)
-    if not declared.isdigit():
+    if not declared.isdecimal():
         return JSONResponse({"detail": "malformed content-length"}, status_code=400)
     if int(declared) > MAX_BODY_BYTES:
         return JSONResponse({"detail": f"body exceeds {MAX_BODY_BYTES} bytes"}, status_code=413)
     return await call_next(request)
+
+
+def _unmeasurable(request: Request) -> bool:
+    """Whether a request with no `content-length` could still be carrying a body.
+
+    Three ways it can, and the method is the least of them. Keying only on the verb is what
+    once let a chunked `DELETE` of any size through, so the framing is asked first.
+    """
+    if request.headers.get("transfer-encoding"):
+        return True
+    version = request.scope.get("http_version", "1.1")
+    if not version.startswith(FRAMED_BY_HEADERS):
+        return True
+    return request.method in CARRY_BODIES
 
 
 def _within(bundle: Path, held: str) -> Path | None:
