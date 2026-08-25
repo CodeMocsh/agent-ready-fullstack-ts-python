@@ -1262,6 +1262,95 @@ if not until(lambda: not serving(BACKEND) and not serving(PROXY), 15):
     die(f"dev.sh exited but {held} still answering")
 PY
 
+echo "==> the built bundle, answered by app.serve on one origin"
+# The one arrangement nothing else in this file reaches. `make test-e2e` builds the bundle
+# and serves it with nothing behind it; the contract suite runs a real backend behind the
+# *dev* server. So the artifact a deployment actually ships -- the built bundle, answered by
+# `app.serve` -- was the combination no step exercised, and the routing it depends on is
+# covered only by unit tests pointed at a fixture directory holding a stub index.html. Those
+# cannot see a hashed asset name, a real `<script>` tag, or a `base` that moved.
+#
+# The contract suite is re-run rather than re-implemented: the same file the step above uses,
+# aimed at a third edge. That is what proves the claim the whole topology rests on --
+# `server.mount` strips /api exactly as the vite proxy does, so a project developed against
+# one deploys onto the other. A prefix the two handled differently would pass every other
+# check in this file and fail on the first deploy.
+#
+# Started from the venv's own interpreter rather than through `uv run`, which execs a
+# launcher and spawns the server as a child: killing the pid we started would leave that
+# child holding the port, and --app-dir is what makes `app` importable without a subshell
+# whose pid is not the server's.
+ONE_ORIGIN="http://localhost:$BACKEND_PORT"
+if curl -fsS --max-time 2 "$ONE_ORIGIN/" >/dev/null 2>&1; then
+    fail ":$BACKEND_PORT is answering before app.serve started -- something else has it"
+fi
+
+env -u DATABASE_URL FRONTEND_BUNDLE="$OUT/frontend/dist" \
+    backend/.venv/bin/python -m uvicorn --app-dir backend \
+    --factory app.serve:build_server --port "$BACKEND_PORT" --log-level warning \
+    >"$WORK/serve.log" 2>&1 &
+serve_pid=$!
+trap 'kill "$serve_pid" 2>/dev/null; rm -rf "$WORK"' EXIT INT TERM
+
+serve_deadline=$(($(date +%s) + 30))
+until curl -fsS --max-time 2 "$ONE_ORIGIN/api/tasks" >/dev/null 2>&1; do
+    if ! kill -0 "$serve_pid" 2>/dev/null; then
+        echo "--- app.serve exited during startup ---" >&2
+        cat "$WORK/serve.log" >&2
+        exit 1
+    fi
+    [ "$(date +%s)" -lt "$serve_deadline" ] \
+        || fail "app.serve did not answer on :$BACKEND_PORT within 30s"
+    sleep 1
+done
+
+shell="$(curl -fsS "$ONE_ORIGIN/")"
+printf '%s' "$shell" | grep -q '<div id="root">' \
+    || fail "app.serve answered / with something that is not the built shell"
+
+# A reload on a client route has to reach the same document. This failing while the dev
+# server works is exactly the divergence between the two edges that this step exists to deny.
+[ "$(curl -fsS "$ONE_ORIGIN/some/client/route")" = "$shell" ] \
+    || fail "a deep link did not fall back to the built index.html"
+
+# The exact URL the shell asks for, leading slash and `base` and all, read out of the
+# document rather than written here so this follows the build instead of needing an edit
+# every time the hash moves.
+#
+# Matching only the tail was tried and is worthless: with a `base` this server does not serve
+# from, `assets/index-*.js` still resolves because the file is on disk under that name, while
+# the browser asks for `/app/assets/...`, misses, and is handed the shell by the fallback. So
+# the answer is checked by type, not by status -- a script tag given a page of HTML is a 200,
+# and it is the whole failure this step exists to see.
+asset="$(printf '%s' "$shell" | grep -o 'src="[^"]*\.js"' | head -1 | sed 's/^src="//; s/"$//')"
+[ -n "$asset" ] || fail "the built index.html names no script to load"
+asset_type="$(curl -s -o /dev/null -w '%{content_type}' "$ONE_ORIGIN$asset")"
+case "$asset_type" in
+    *javascript*) ;;
+    *) fail "the shell asks for $asset and app.serve answered it as ${asset_type:-nothing}" ;;
+esac
+
+# An asset name carries the build's hash, so one the bundle does not hold is a stale
+# document. Answering it with the shell hands a script tag a page of HTML, which fails as a
+# syntax error a long way from the deploy that caused it.
+missing="$(curl -s -o /dev/null -w '%{http_code}' "$ONE_ORIGIN/assets/index-deadbee.js")"
+[ "$missing" = "404" ] || fail "a hashed asset the bundle lacks answered $missing, not 404"
+
+# Nothing is in front of this process, so it is the only thing that can send these. The unit
+# suite asserts them against a fixture; this asserts them on the document a browser gets.
+served_headers="$(curl -sI "$ONE_ORIGIN/")"
+for header in content-security-policy strict-transport-security x-content-type-options; do
+    printf '%s' "$served_headers" | grep -qi "^$header:" \
+        || fail "the built shell went out without $header"
+done
+
+run "contract suite (app.serve)" env CONTRACT_TARGET=live VITE_API_BASE_URL="$ONE_ORIGIN/api" \
+    sh -c 'cd frontend && pnpm exec vitest run tests/api/contract.test.ts'
+
+kill "$serve_pid" 2>/dev/null
+wait "$serve_pid" 2>/dev/null || true
+trap 'rm -rf "$WORK"' EXIT INT TERM
+
 echo "==> assert the drift gate is two-sided, on both halves"
 # A ratchet that only ever rises is not a ratchet. Whatever a tree improved since its
 # baseline was recorded is slack, and slack is added to what the next commit may spend,

@@ -139,10 +139,11 @@ The script renders from the working tree rather than from a tag, so it validates
 are about to commit.
 
 A full run installs both toolchains, lints and tests both halves, regenerates the contract
-artifacts and diffs them, and runs the contract suite with the backend actually serving the
-frontend — which is the only step that proves the two halves interoperate. Levels below it
-all pass green on a project whose frontend cannot reach its backend at all. It also audits
-the frontend's production dependencies and boots `make dev` to check both ports are freed.
+artifacts and diffs them, and runs the contract suite twice against a live backend — through
+the dev proxy, and through `app.serve` on one origin — which are the only steps that prove
+the two halves interoperate. Levels below them all pass green on a project whose frontend
+cannot reach its backend at all. It also audits the frontend's production dependencies and
+boots `make dev` to check both ports are freed.
 
 **No test the template ships may skip itself.** A test that needs a daemon or a browser goes
 in a tier — a folder declared in `template/backend/tests/tiers.py` and run by a target of its
