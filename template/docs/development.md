@@ -53,6 +53,17 @@ have no effect. That line is the only place outside `src/main.tsx` that reads
 `VITE_ENABLE_MSW` — keep it that way, since a feature that behaves differently between the
 modes makes mock mode a lie rather than a stand-in.
 
+**A production build carries none of it, and that is the absence of a file rather than a
+setting.** Vite loads `.env.[mode]`, and there is deliberately no `.env` and no
+`.env.production`, so `pnpm build` finds nothing, `VITE_ENABLE_MSW` folds to `undefined`, and
+the dynamic `import()` in `src/main.tsx` becomes unreachable — msw is roughly 157 KB gzipped
+and not one byte of it is written. Do not add a `.env.production` to make that explicit: it
+would create the one file in which someone can later switch mock mode back on. The worker
+script in `public/` is the exception that needs code, because `public/` is copied into every
+build regardless of mode; the `strip-mock-worker` plugin in `vite.config.ts` deletes it again
+for any build that is not mock mode, and removing that plugin puts a registerable service
+worker on your production origin.
+
 ### Ports and the proxy
 
 The backend serves bare paths (`/tasks`). The `/api` prefix is deployment topology, not

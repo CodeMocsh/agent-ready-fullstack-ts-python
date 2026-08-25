@@ -288,7 +288,11 @@ project without failing anything — the target still exists, and the gate never
   turns it off so requests reach the backend through the `/api` proxy in
   `vite.config.ts`. All three are committed and hold no secrets. The agent guard blocks
   writes to any `.env*` file, which is the right default and applies here too — if one
-  needs to change, say so and let a human edit it.
+  needs to change, say so and let a human edit it. There is no `.env.production`, on
+  purpose: production mode loads no file, so mock mode is off because nothing turns it on.
+  Do not add one. The `strip-mock-worker` plugin in `vite.config.ts` covers what no mode
+  can — `public/` is copied into every build whatever the mode, so without it a production
+  deploy ships `mockServiceWorker.js` to its own origin.
 
 - **Never assume the app is served from `/`.** The service worker's registration URL, the
   API base in `src/api/base.ts`, and the router's basepath all derive from

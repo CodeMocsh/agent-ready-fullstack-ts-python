@@ -475,6 +475,10 @@ need_grep 'VITE_ENABLE_MSW=true' frontend/.env.development
 need_grep 'VITE_ENABLE_MSW=true' frontend/.env.mock
 need_grep 'VITE_ENABLE_MSW=false' frontend/.env.live
 need_grep '"private": true' frontend/package.json
+# The worker is a public/ asset, so no mode keeps it out of a build; the plugin that deletes
+# it again is the only thing standing between a production deploy and a service worker on the
+# user's origin. Named here as well as asserted against a real build, so `make fast` notices.
+need_grep 'strip-mock-worker' frontend/vite.config.ts
 # Subpath safety: none of these may hard-code a leading slash.
 need_grep 'BASE_URL}mockServiceWorker.js' frontend/src/main.tsx
 need_grep 'basepath: import.meta.env.BASE_URL' frontend/src/router.tsx
@@ -1118,6 +1122,19 @@ PY
 
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
+echo "==> assert the mock build is still a mock build"
+# One predicate, asserted both ways a few lines apart, so it is spelled once: the two
+# directions drifting apart is exactly how a pair like this stops being a pair.
+bundles_msw() { grep -rl 'setupWorker' frontend/dist/assets/*.js >/dev/null 2>&1; }
+# Asserted before the production build below, and in this direction, because the plugin that
+# keeps the worker out of production is one `if` away from removing it everywhere -- and
+# nothing else here would notice. This script downloads no browser and runs no playwright, so
+# the mock-mode e2e suite, the only other thing that needs a worker to start, is exactly the
+# check that is absent. The production build runs second so `dist` is left as what ships.
+run "vite build --mode mock" pnpm -C frontend build:mock
+need frontend/dist/mockServiceWorker.js
+bundles_msw || fail "the mock build no longer bundles msw; its e2e specs cannot pass"
+
 run "vite build" pnpm -C frontend build
 
 echo "==> assert the build output"
@@ -1126,10 +1143,10 @@ ls frontend/dist/assets/index-*.js >/dev/null
 ls frontend/dist/assets/index-*.css >/dev/null
 # Mock mode is a development and test concern. Shipping the worker to users would
 # have it answering their requests.
-if grep -rl 'setupWorker' frontend/dist/assets/*.js >/dev/null 2>&1; then
-    echo "msw leaked into the production bundle" >&2
-    exit 1
-fi
+! bundles_msw || fail "msw leaked into the production bundle"
+# The other thing mock mode leaves behind, and the one no mode turns off by itself: public/
+# is copied into every build, so this file is written and then deleted again by vite.config.ts.
+need_absent frontend/dist/mockServiceWorker.js
 
 echo "==> assert the contract artifacts are in sync with the code"
 run "make openapi" make openapi
