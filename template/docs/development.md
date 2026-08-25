@@ -506,7 +506,8 @@ Not configured, deliberately — deployment shape is yours. The pieces:
 
   ```bash
   cd backend
-  FRONTEND_BUNDLE=../frontend/dist uvicorn --factory app.serve:build_server --port 8000
+  FRONTEND_BUNDLE=../frontend/dist uvicorn --factory app.serve:build_server \
+    --host 0.0.0.0 --port 8000
   ```
 
   `cd backend` for the reason the bullet above it runs there: this half installs nothing, so
@@ -520,6 +521,19 @@ Not configured, deliberately — deployment shape is yours. The pieces:
   a page of HTML fails as a syntax error a long way from the deploy that caused it. There is
   no `FRONTEND_BUNDLE` default, because a process that came up on the wrong directory would
   answer every path with a file it never found.
+
+  **Run it behind something, not as the public edge.** Cloud Run, Fly, App Runner and an
+  identity-aware proxy terminate TLS and absorb the slow-client attacks a Python process should
+  not be meeting, then forward cleartext to your container — so bind the `$PORT` they give you
+  and pass **no** `--ssl-keyfile`, or the platform's health check meets a TLS handshake and the
+  deploy never goes green.
+
+  **Whatever terminates TLS, something must**, and dropping the proxy drops what usually did.
+  A session cookie worth setting is `Secure`, and a browser reached over plaintext discards it
+  — so sign-in fails by returning quietly to the sign-in screen with nothing saying why.
+
+  With nothing in front, this process is also the edge: read `SECURITY_HEADERS` and
+  `MAX_BODY_BYTES` in `app/serve.py` before your first deploy.
 - If the bundle is served from a subpath, pass `--base=/that/path/` to `vite build`.
 - Never ship mock mode: production builds must leave `VITE_ENABLE_MSW` unset.
 - **Set `DATABASE_URL`, or you are deploying the in-memory substrate.** It resets on every

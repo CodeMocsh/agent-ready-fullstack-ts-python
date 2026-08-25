@@ -16,15 +16,35 @@ exactly one database, opened before the first request and closed after the last.
 Run it with `uvicorn --factory app.serve:build_server`. A factory rather than a module-level
 app because the bundle is read from the environment, and a module that raises on import is a
 module no test can reach.
+
+**This module is also the edge, and that is the half worth reading before deploying it.** A
+reverse proxy is not only a router: it caps request bodies and sets the response headers that
+decide what an injected string is allowed to become. `app.main` behind one inherits both and
+declares neither, which is correct there and leaves nothing at all doing it here. So this
+module carries what the proxy would have carried, and `app.main` still does not — a service
+behind an edge must not send a second, weaker copy of headers that edge already set.
+
+**Prefer a platform that fronts this process to running it as the public edge.** Cloud Run,
+Fly, App Runner and an identity-aware proxy all terminate TLS, parse HTTP and absorb the
+slow-client attacks a Python process should not be meeting, and they forward cleartext to this
+one — so give it `--host 0.0.0.0 --port $PORT` and **no** `--ssl-keyfile`, or the platform's
+health check meets a TLS handshake and the deploy never goes green. Serving 443 directly with
+`--ssl-keyfile` is the shape to think twice about: it puts the TLS private key in the same
+process that resolves client-supplied paths against a directory, and `_within` is then the
+only thing standing between the two.
+
+**Whatever terminates TLS, something must.** A session cookie worth setting is `Secure`, and a
+browser reached over plaintext discards it — so sign-in fails by returning quietly to the
+sign-in screen, with nothing anywhere saying why.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Final
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.main import create_app
 from app.wiring import BundleMissing, build_bundle
@@ -32,6 +52,71 @@ from app.wiring import BundleMissing, build_bundle
 INDEX: Final = "index.html"
 ASSETS: Final = "assets"
 PREFIX: Final = "/api"
+
+MAX_BODY_BYTES: Final = 1_048_576
+"""What a request body may weigh before this process refuses to read it.
+
+One megabyte, because the largest thing this API accepts is a task title. Nothing else here
+bounds a body — Starlette reads what the transport hands it — so without this the cheapest
+request that can hurt this process is the one nobody wrote a route for. Raise it deliberately
+for an endpoint that takes an upload, and prefer streaming that endpoint to raising this for
+every other one.
+"""
+
+CARRY_BODIES: Final = frozenset({"POST", "PUT", "PATCH"})
+"""The methods required to declare a length, so that the cap above is a cap.
+
+A body read from `content-length` is only bounded if the header is there to read: a chunked
+request declares no length and would otherwise arrive unmeasured. Refusing it with 411 is what
+that status is for. An endpoint that streams an upload is a reason to narrow this set, and to
+make that endpoint responsible for its own bound.
+"""
+
+SECURITY_HEADERS: Final = {
+    "content-security-policy": "; ".join(
+        (
+            "default-src 'self'",
+            "script-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "font-src 'self' data:",
+            "connect-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "frame-ancestors 'none'",
+            "form-action 'self'",
+        )
+    ),
+    "strict-transport-security": "max-age=31536000",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "cross-origin-opener-policy": "same-origin",
+}
+"""What the edge would have set, and therefore what this module sets.
+
+`script-src 'self'` is the one that matters: it is what keeps an injected string from becoming
+executable, and a vite build has no inline script for it to break. Keep it that way — if
+something one day needs an inline script, give it a nonce or a hash rather than widening this
+to `'unsafe-inline'`, which would return the directive to decoration.
+
+**`style-src` is deliberately weaker, and the reason is shadcn.** Radix positions its overlays
+with inline `style` attributes, so a strict `style-src` breaks every popover and dialog added
+after generation — quietly, as misplacement rather than as an error. Inline CSS cannot
+execute, so the concession costs far less than the directive above would.
+
+`strict-transport-security` names no subdomains: `includeSubDomains` from a template is a
+promise about hosts this deployment has never seen, and it would take a plaintext sibling on
+the same apex down from a header nobody remembers setting. Add it, and `preload`, once you own
+every name under the domain and have checked they are all on TLS.
+
+**`cross-origin-opener-policy` is the one to remember when you add sign-in.** It severs
+`window.opener`, which is what a popup-based OAuth flow uses to hand its result back — the
+popup completes, closes, and the page that opened it is never told, which reads as a sign-in
+that did nothing. A redirect flow is unaffected and is the one to prefer. If you need the
+popup, this is the line to drop, and dropping it costs the cross-window isolation it buys.
+"""
+
+Next = Callable[[Request], Awaitable[Response]]
 
 
 def build_server() -> FastAPI:
@@ -55,6 +140,8 @@ def create_server(bundle: Path) -> FastAPI:
             yield
 
     server = FastAPI(lifespan=lifespan, openapi_url=None)
+    server.middleware("http")(_refuse_oversized)
+    server.middleware("http")(_confine)
     server.mount(PREFIX, api)
 
     @server.get("/{held:path}", include_in_schema=False)
@@ -74,6 +161,43 @@ def create_server(bundle: Path) -> FastAPI:
         return FileResponse(index)
 
     return server
+
+
+async def _confine(request: Request, call_next: Next) -> Response:
+    """`SECURITY_HEADERS` on everything this process answers, including what it refuses.
+
+    Registered last, so it wraps the body cap below: Starlette makes the most recently added
+    middleware the outermost, and a header set inside the cap would miss every response the cap
+    generates itself.
+
+    `setdefault` rather than assignment, so a route with a reason to send its own is not
+    overruled by a default it never asked for.
+    """
+    response = await call_next(request)
+    for header, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    return response
+
+
+async def _refuse_oversized(request: Request, call_next: Next) -> Response:
+    """Refuse before reading, which is the only point at which refusing is cheap.
+
+    The declared length is checked rather than the body counted, because a body counted is a
+    body already received — and the request worth refusing is exactly the one it would have
+    cost something to read.
+    """
+    declared = request.headers.get("content-length")
+    if declared is None:
+        if request.method not in CARRY_BODIES:
+            return await call_next(request)
+        return JSONResponse(
+            {"detail": f"{request.method} must declare a content-length"}, status_code=411
+        )
+    if not declared.isdigit():
+        return JSONResponse({"detail": "malformed content-length"}, status_code=400)
+    if int(declared) > MAX_BODY_BYTES:
+        return JSONResponse({"detail": f"body exceeds {MAX_BODY_BYTES} bytes"}, status_code=413)
+    return await call_next(request)
 
 
 def _within(bundle: Path, held: str) -> Path | None:
