@@ -25,9 +25,12 @@ words and no synonyms.
 - **`template/`** — the files rendered into a new project, in two halves plus a root layer.
 - **`template/.claude/` + `template/.entire/`** — the agent-ready layer that ships in
   generated projects.
-- **`devtools/check_template.sh`** — renders the template and exercises the result. The
-  pre-commit hook and `make check` both call this one script, and it is the whole of the
-  enforcement: no workflow runs, so nothing checks a push you did not check yourself.
+- **`devtools/render.sh`** — renders the template from the working tree, asserts nothing
+  was left unrendered, and prints where the project landed. It owns the copier pin, and
+  `check_template.sh` reads that back through `--spec` rather than keeping a second copy.
+- **`devtools/check_template.sh`** — exercises a rendered project. The pre-commit hook and
+  `make check` both call this one script, and it is the whole of the enforcement: no
+  workflow runs, so nothing checks a push you did not check yourself.
 - **`docs/adr/`** — the four decisions that are surprising enough to need writing down.
 
 There is no `src/`, no `package.json`, and no `licenses/` directory. Copier removes the need
@@ -67,11 +70,12 @@ user replaces the demo and regenerates the artifacts in the same commit.
 **Defaults must stay behavior-preserving.** `copier update --defaults` has to be a no-op for
 an existing project, so a new question needs a default that reproduces today's output.
 
-The safety net for all of this is in `check_template.sh`: after rendering it asserts that no
+The safety net for all of this is in `render.sh`: before it prints a path it asserts that no
 `{{ … }}` survives, no `{% … %}` survives, and no `*.jinja` file remains on disk. The
 forgotten-suffix failure mode — a token left in a file that was never rendered — produces a
 generated project containing literal `{{ package_name }}`, and that assertion is what
-catches it.
+catches it. It lives with the render rather than with the checks, so `make render` cannot
+hand back a tree that was never looked at.
 
 ## Constraints that bite
 
@@ -125,9 +129,17 @@ Edit files under `template/` to change what generated projects receive. After an
 make check        # default variant, end to end
 make check-all    # every license variant
 make fast         # render and assert only, skipping install/lint/test/build
+make render       # render only, print the path, assert nothing
 ```
 
-All three call `devtools/check_template.sh`, which is also what the pre-commit hook runs.
+`make render` is the one to reach for while working on a single check. A full run renders,
+installs both toolchains, lints and tests both halves and builds — so paying it per edit to
+a check is minutes for a change worth seconds. Render once, then run the check against the
+path until it says what you meant. The directory is yours to remove.
+
+The first three call `devtools/check_template.sh`, which is also what the pre-commit hook
+runs; `make render` calls `devtools/render.sh` alone and asserts nothing beyond the render
+itself.
 That was always the point — a check cannot exist in CI and be missing locally — and since
 the workflow was removed it is the only thing standing between a change and `main`, so
 **`make hooks` is not optional**. It installs a shim per committed hook rather than setting

@@ -260,6 +260,17 @@ That is the whole selection rule. A convention an agent can verify by reading it
 belongs in `AGENTS.md`, where it costs nothing. A convention that only fails on a screen
 nobody opened needs a check.
 
+`frontend/tests/devtools/conformance.test.ts` holds the table, in both directions: markup
+breaking all ten of its rules reports all ten, a stylesheet breaking its three reports
+three, and markup that only resembles a violation reports nothing. A gate whose rule
+quietly stopped matching looks exactly like a clean codebase, which is why the silent
+direction is worth as much of the table as the loud one.
+
+The count in the passing line is derived from the rules rather than written down, and the
+table asserts it against the union of the rules it demonstrates. So a rule added without a
+case proving it fires makes `conformance ok: … N checks` disagree with the table, and the
+table is what fails — which is the only way a count nobody maintains stays honest.
+
 **The theme is the only place a colour is defined** — `raw-colour`, `palette-utility`,
 `named-colour`. Dark mode in this project is entirely the `@theme` block and `.dark` in
 `frontend/src/index.css`. A `bg-white`, a `#f5f5f5`, a `bg-blue-500` or a
@@ -511,11 +522,25 @@ Two scripts, one per half, both wired into `make lint`:
 
 **Neither greps.** The Python one tokenizes, so a `#` inside a string or a URL is not a
 finding. The JavaScript one walks the file as a sequence of regions — quoted strings,
-template literals, line comments, block comments — and reports only the comment ones, which
-is the same scanner `conformance.mjs` uses to ignore strings. That matters more here than it
-looks: `devtools/complexity.mjs` documents `--exclude` in a multi-line template literal
-containing `/**`, and both scripts carry a `/\/\*\*$/` regex literal. A line-based check
-fails on both, and a check that cries wolf is a check people route around.
+template literals, line comments, block comments — and reports only the comment ones. That
+matters more here than it looks: `devtools/complexity.mjs` documents `--exclude` in a
+multi-line template literal containing `/**`, and both scripts carry a `/\/\*\*$/` regex
+literal. A line-based check fails on both, and a check that cries wolf is a check people
+route around.
+
+**The scanner lives in `frontend/devtools/scan.mjs`, and it is one module rather than a
+shape each gate reimplements.** `comments.mjs` reads the comment regions out of it, and
+`conformance.mjs` calls `withoutStringsAndComments` before looking for an effect that
+fetches or a font size in a `style` prop. That was two forks until it was one:
+`conformance.mjs` carried a copy with the regex handling below left out, so a file whose
+regex held `/*` blanked the rest of itself and both of that gate's code checks reported
+nothing — while the nine line-based rules, which never read the blanked text, went on
+passing. The gate said `conformance ok` and meant it about nine checks out of eleven.
+
+`frontend/devtools/gate.mjs` is the other half of what the three share, and it is a
+separate file because it changes for a different reason: finding the files, reading the
+`package.json` section, and formatting the report are what every gate does around its
+rules, and none of it is about reading a source file as text.
 
 **Regex literals are a region too**, and they have to be. `/[/*]/` is a perfectly ordinary
 way to match a slash or a star, and to a scanner that only knows strings and comments it
