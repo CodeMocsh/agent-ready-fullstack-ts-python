@@ -102,9 +102,9 @@ Anything finer than the tenant is enforced in code, beside a route, and never in
 to a setting and nothing else, so a per-user or per-project rule needs a join it may not do.
 The tenant boundary is the database's; everything below it is the route's.
 
-The guarantee holds at commit time, on a machine where `make hooks` has been run. This project
-ships no workflow, so nothing runs the check after a commit and a contributor who never
-installed the hook is checked by nothing.
+The guarantee is checked twice: by the git hook before a commit, and by
+`.github/workflows/ci.yml` after a push, which runs the same target against a fresh checkout.
+The second is what covers a clone where `make hooks` was never run.
 
 A route shape the test cannot drive is refused rather than skipped. A websocket has no HTTP
 methods, so it cannot be driven as `(method, path)`; `test_no_route_shape_escapes_being_driven`

@@ -167,8 +167,10 @@ Each of these is something a reasonable edit undoes without anything failing unt
 - **No test skips itself.** A test that needs a daemon or a browser goes in a tier
   declared in `backend/tests/tiers.py`. Everything else mirrors the source it covers. A
   skip exits 0 and looks like a pass, so `test_gate.py` fails on one.
-- **The gate is `make pre-commit`, and there is nothing else.** No workflow ships, so a
-  commit that skipped the hook was checked by nothing. New checks go in the gate.
+- **The gate is `make pre-commit`, and there is nothing else.** The git hook runs it before
+  a commit and `.github/workflows/ci.yml` runs the same target after a push, against a fresh
+  checkout nobody configured. New checks go in the gate, never into the workflow: a workflow
+  that re-lists the steps is a second copy, and the copy is the one that goes stale.
 - **The tiers are deliberately outside it** — `make test-e2e`, `make test-e2e-live` and
   `make db-test` each need something fetched or started first, and a gate that fetches a
   browser or a daemon is a gate people learn to commit around. They are the one tier nothing

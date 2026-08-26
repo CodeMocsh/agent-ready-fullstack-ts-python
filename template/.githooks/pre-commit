@@ -6,8 +6,8 @@
 # clone that has installed only one of them is a legitimate way to work here. That
 # is also the one dangerous thing in this file: a run where everything skipped exits
 # 0 and looks exactly like a run where everything passed. So a partial run says what
-# it did not do, on stderr, every time. No workflow runs the list afterwards, so this
-# script and `make pre-commit` on your own machine are the whole of the enforcement.
+# it did not do, on stderr, every time. The workflow runs the same target after a push,
+# on a checkout with both halves, which is what catches the half a partial run skipped.
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"

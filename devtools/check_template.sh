@@ -403,10 +403,15 @@ done
 # `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
 # foreground command returns, which on Ctrl-C it never does.
 need_grep '^SHELL := /bin/bash' Makefile
-# No workflow ships. The gate is `make pre-commit`, run by the git hook, and a project
-# that grows a workflow later has to point it at that same target rather than at a
-# hand-copied subset -- backend/tests/test_gate.py is what refuses the subset.
-need_absent .github/workflows
+# A workflow ships, and it runs `make pre-commit` -- the target the git hook runs, so the
+# two cannot drift. The hook checks the machine that commits; the workflow checks a fresh
+# checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
+# well as in test_gate.py because that test walks the workflows it finds, and a directory
+# that stopped existing is a walk over nothing. docs/adr/0004 records why this repository
+# still ships none of its own.
+need .github/workflows/ci.yml
+need_grep 'make pre-commit' .github/workflows/ci.yml
+need_no_grep '\.jinja' .github/workflows/ci.yml
 
 # `make dev` has to stop what it started. Job control puts the backend in a process
 # group of its own, so a Ctrl-C in the terminal reaches only the script -- and the

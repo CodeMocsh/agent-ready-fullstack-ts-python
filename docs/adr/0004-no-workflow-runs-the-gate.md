@@ -1,8 +1,19 @@
-# No workflow runs the gate, in this repository or in the ones it generates
+# No workflow runs the gate in this repository
 
-`.github/workflows/ci.yml` is gone from both this repository and `template/`. `make
-pre-commit` — here, `devtools/check_template.sh` — is the gate, the git hook runs it, and
-nothing runs afterwards.
+`.github/workflows/ci.yml` is gone from this repository. `make pre-commit` — here,
+`devtools/check_template.sh` — is the gate, the git hook runs it, and nothing runs afterwards.
+
+**Amended 2026-08-26, for `template/` only.** A generated project ships a workflow again, and
+the reasoning below is why this repository still does not. The cost argument was never about
+the generated project: what was expensive here is rendering the template three times per push,
+once per license variant, and a generated project renders nothing — its workflow installs both
+halves once and runs `make pre-commit`, which is the fast tier. The structural argument does
+not carry either. It says CI here was a duplicate of the hook, and names what the duplicate
+bought: *"a hook runs on the machine of whoever commits, against whatever they happen to have
+installed, while a workflow ran against a fresh checkout nobody had configured."* That is a
+different property rather than a copy, and it is worth more to a team of several people than to
+one maintainer. **The decision below stands for this repository and is reversed for the one it
+generates**, which is the asymmetry the original record did not separate.
 
 **The immediate reason is cost.** This repository's workflow rendered the template three
 times per push, once per license variant, and each render installed both toolchains, linted,
