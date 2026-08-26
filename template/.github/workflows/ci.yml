@@ -1,0 +1,68 @@
+name: CI
+
+# One job, and it runs `make pre-commit` -- the same target the git hook runs.
+#
+# Not a list of steps that happens to match the gate. A re-listed copy drifts, always in
+# the direction of checking less, and the drift surfaces as a green push that a commit
+# would have refused. backend/tests/test_gate.py fails on a workflow that does not name
+# the target, and it reads this file with comments stripped, so naming it here would not
+# satisfy the check.
+#
+# The gate is deliberately the fast tier: lint, the contract artifacts, and the tests that
+# need nothing fetched or started. The suites that need a Postgres daemon or a browser are
+# tiers of their own -- `make db-test`, `make test-e2e` -- and they stay out of this file
+# for the reason they stay out of the hook. Add one here and the check people wait on stops
+# being the check they can run.
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          # There is no root package.json; the version lives in the half's own.
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          # backend/pyproject.toml requires this floor: older uv rejects the relative
+          # exclude-newer with a date-parsing error naming neither.
+          version: "0.11.25"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # Installed directly rather than through `make install`, which also arms the git
+      # hooks -- there is no commit to gate here. Both halves install frozen, so a
+      # lockfile that does not match its manifest fails here rather than resolving
+      # something no developer has.
+      - run: pnpm -C frontend install --frozen-lockfile
+
+      - name: Install the backend
+        working-directory: backend
+        run: |
+          uv python install
+          uv sync --all-groups --frozen
+
+      - run: make pre-commit

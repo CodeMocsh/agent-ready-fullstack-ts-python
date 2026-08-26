@@ -5,11 +5,11 @@ Everything here reads a file rather than an import: the `Makefile`, the git hook
 and nothing but this file notices when they stop -- a gate that lost a member, a tier nothing
 runs, a test that switched itself off.
 
-**This project ships no CI workflow, so the git hook is the whole of the enforcement.** That
-puts more weight on the tests below than they carried before: the hook must run the gate,
-must say so when it could only run half of it, and must offer no way past itself. Add a
-workflow when you want a second pair of eyes -- and point it at `make pre-commit`, which is
-what `test_a_workflow_runs_the_gate_rather_than_a_copy_of_it` is here to insist on.
+**The hook and the workflow run the same target, and that is the point.** The hook checks a
+commit on the machine making it; the workflow checks a push against a fresh checkout nobody
+configured, which is what catches a clone where `make hooks` was never run. Neither may grow
+its own list of steps -- `test_a_workflow_runs_the_gate_rather_than_a_copy_of_it` is what
+insists the workflow names the target instead.
 
 Two of its helpers are imported by `devtools/check_template.sh` in the generator repository,
 which is why this module imports no third-party package and does its one version-dependent
@@ -92,12 +92,23 @@ def workflows() -> list[tuple[Path, str]]:
 
 
 def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
-    """No workflow ships today, so this asserts nothing until one is added -- which is the
-    moment it matters. A workflow that runs its own list of steps drifts from `make
-    pre-commit` silently, in the direction of checking less, and the drift shows up as a
-    green push that a commit would have refused. Run the target instead. If it needs to run
-    only part of the gate, make that part a target too."""
-    for path, body in workflows():
+    """A workflow that runs its own list of steps drifts from `make pre-commit` silently, in
+    the direction of checking less, and the drift shows up as a green push that a commit would
+    have refused. Run the target instead. If it needs to run only part of the gate, make that
+    part a target too.
+
+    The body is read with comments stripped, so a workflow naming the target in a comment and
+    running `true` does not satisfy this."""
+    shipped = workflows()
+
+    assert shipped, (
+        "no workflow ships, so this test loops over nothing and passes without checking "
+        "anything -- the shape a check takes when it has quietly stopped being one. Restore "
+        "`.github/workflows/ci.yml`, or, if this project runs its checks somewhere GitHub "
+        "cannot see, delete this assertion on purpose rather than leaving it green."
+    )
+
+    for path, body in shipped:
         assert "make pre-commit" in body or "check_template.sh" in body, (
             f"{path.relative_to(ROOT)} does not run `make pre-commit`. A workflow that "
             f"re-lists the gate's steps is a second copy of the gate, and the copy is what "

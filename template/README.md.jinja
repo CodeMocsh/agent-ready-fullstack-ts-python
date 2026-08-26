@@ -62,9 +62,10 @@ make build          # production build of the frontend
 make upgrade        # update dependencies, then regenerate the contract
 ```
 
-`make pre-commit` is what the git hook runs, and it is the whole of the enforcement — this
-project ships no CI workflow, so a commit that skipped the hook was checked by nothing. It
-needs no browser, no database daemon and no second terminal. The opt-in targets each need one
+`make pre-commit` is what the git hook runs before a commit, and what
+`.github/workflows/ci.yml` runs after a push — one target, two moments, so a commit that
+skipped the hook is still checked. It needs no browser, no database daemon and no second
+terminal. The opt-in targets each need one
 of those, which is why they are opt-in — and why nothing will tell you that you did not run
 them.
 
