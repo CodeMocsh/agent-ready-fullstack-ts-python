@@ -32,6 +32,24 @@ from app.store.memory import MemoryDatabase
 
 DATABASE_URL_ENV: Final = "DATABASE_URL"
 BUNDLE_ENV: Final = "FRONTEND_BUNDLE"
+ACKNOWLEDGED_ENV: Final = "UNAUTHENTICATED_IS_INTENTIONAL"
+"""Set by a deployment that means to serve everybody, so it is told at `INFO` rather than
+warned on every boot. It changes a log level and nothing else -- `docs/adr/0008`.
+"""
+
+
+DENIALS: Final = frozenset({"", "0", "false", "no", "off"})
+"""Spellings of "no" that must not read as an acknowledgement.
+
+Any non-empty value counting would make `UNAUTHENTICATED_IS_INTENTIONAL=0` silence the
+warning, which is the opposite of what somebody typing it meant -- and the only way they
+would find out is by not being told.
+"""
+
+
+def unauthenticated_is_acknowledged() -> bool:
+    """Whether this deployment has said out loud that it serves everybody on purpose."""
+    return os.environ.get(ACKNOWLEDGED_ENV, "").strip().lower() not in DENIALS
 
 
 class OwnerCredentialVisible(RuntimeError):

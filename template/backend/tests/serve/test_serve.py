@@ -6,12 +6,15 @@ application whose lifespan never ran, and it is invisible to anything that calls
 directly.
 """
 
+import inspect
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import serve
 from app.main import create_app
 from app.serve import (
     ASSETS,
@@ -335,6 +338,53 @@ def test_a_server_error_still_carries_the_headers(
     assert answered.status_code == 500
     for header, value in SECURITY_HEADERS.items():
         assert answered.headers[header] == value
+
+
+DECLARED_HERE = re.compile(r"@server\.(?:websocket|get|post|put|patch|delete|head|options)\(")
+ADDED_HERE = re.compile(r"server\.add_(?:api_)?(?:route|websocket_route)\(")
+MOUNTED_HERE = re.compile(r"server\.mount\(")
+"""Every way a surface gets onto this origin, counted rather than named.
+
+`MOUNTED_HERE` used to capture an identifier — `mount\\(\\s*([A-Za-z_]\\w*)` — which matched
+`server.mount(PREFIX, api)` and **not** `server.mount("/admin", opaque)`, so a mount written
+the ordinary way left the captured list unchanged and the assertion passed over it. Counting
+the calls has no such hole: one `mount`, one route decorator, and nothing added imperatively.
+
+`websocket` and `add_route` are here because a route need not arrive through an HTTP-verb
+decorator, and each of those is a way onto the deployment's own origin that the guarantee in
+`tests/routes/` never sees."""
+
+
+def test_the_server_adds_exactly_the_bundle_surface() -> None:
+    """What this module puts in front of the API, named rather than counted.
+
+    `tests/routes/test_guarantee.py` drives every route and demands a refusal, and it cannot be
+    pointed at this application: a mount reports its routes *without* its prefix, so `/tasks`
+    read off the server does not match `/api/tasks` when driven, falls through to the shell
+    fallback, and is answered `200` with HTML. A route added here is therefore invisible to the
+    guarantee, and it would be a route on the deployment's own origin that nothing checks.
+
+    Read from the source because `create_server` returns the confined callable rather than the
+    application — the routes cannot be read back off what it hands out. Static, and the thing it
+    is watching for is a decorator somebody typed, which is exactly what source shows.
+    """
+    source = inspect.getsource(serve)
+
+    assert len(DECLARED_HERE.findall(source)) == 1, (
+        "app/serve.py declares a route besides the bundle fallback. Routes belong on `router` "
+        "in app/routes.py, where the tenant is resolved and the guarantee test can drive them."
+    )
+    assert ADDED_HERE.findall(source) == [], (
+        "app/serve.py adds a route imperatively, which no decorator scan would have shown. "
+        "Routes belong on `router` in app/routes.py."
+    )
+    assert len(MOUNTED_HERE.findall(source)) == 1, (
+        "app/serve.py mounts something besides the API, so there is a surface on this origin "
+        "that neither this file nor the guarantee test looks at."
+    )
+    assert "mount(PREFIX, api)" in source, (
+        "the one mount in app/serve.py is no longer the API under its own prefix"
+    )
 
 
 def test_the_service_on_its_own_sets_none_of_them(monkeypatch: pytest.MonkeyPatch) -> None:
