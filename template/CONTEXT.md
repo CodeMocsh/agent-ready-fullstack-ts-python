@@ -1,8 +1,8 @@
 # Context
 
 The glossary: what a word means here, and which words to avoid because they mean something
-else. Five terms come from the template and the rest is yours — add a term the moment two
-people use two words for one thing, which is earlier than it feels.
+else. The tenancy terms come from the template and the rest is yours — add a term the moment
+two people use two words for one thing, which is earlier than it feels.
 
 ## Tenancy
 
@@ -40,20 +40,16 @@ by design.
 ## Renaming `tenant_id`
 
 Almost no product's users say "tenant"; they say org, workspace, team or account. If yours
-does, rename the column now — while the only rows are the demo's. The name appears in
-`app/store/ddl.py`, the policy in the same file, `app/identity.py`, and the `TENANT_GUC`
-setting. After you have real data it is a migration, a backfill and a policy rewrite, so this
-is a day-one decision or a never decision.
+does, rename the column now — while the only rows are the demo's. `grep -r tenant_id` finds
+every place it has to change: the schema and its policy, the identity stub, and the setting
+the policy reads. After you have real data it is a migration, a backfill and a policy rewrite,
+so this is a day-one decision or a never decision.
 
 The concept is what the template is sure of. The word is yours.
 
 ## Decisions
 
-`docs/adr/` holds the ones that would otherwise look like they could be simpler:
-
-- **0001** — two substrates behind one contract.
-- **0002** — tenant isolation is forced, and always on.
-- **0003** — the application never applies DDL.
-- **0004** — the schema and the binary must match.
-- **0005** — a test never decides whether to run.
-- **0006** — the one-origin entrypoint is the edge.
+`docs/adr/` holds the design decisions that would otherwise look like they could be simpler —
+the store's two substrates, forced tenant isolation, why the application never applies DDL.
+Each file's name is the decision it records, so the directory listing is the index. Its
+[README](docs/adr/README.md) says what belongs there and how to write one.

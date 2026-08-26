@@ -13,7 +13,7 @@ DEFAULT_TOLERANCE = 0.05
 DEFAULT_CEILING = 3.0
 DEFAULT_MIN_CALLABLES = 50
 
-_DESCRIPTION = "Complexity drift and ceiling checks, measured by ruff. See docs/agent-tooling.md."
+_DESCRIPTION = "Complexity drift and ceiling checks, measured by ruff. See AGENTS.md."
 
 _COMPLEXITY_IN_RUFF_C901_MESSAGE = re.compile(r"\((\d+) > 0\)")
 

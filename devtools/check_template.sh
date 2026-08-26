@@ -35,11 +35,34 @@ need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2"; }
 need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
 
 
+# AGENTS.md tells an agent to keep the principle sections word-for-word in step with
+# template/AGENTS.md.jinja, and the same file argues that a rule nothing enforces does not
+# hold. This is that enforcement. The range ends at the first heading each file owns, so
+# everything below the shared block is free to differ. `sed -E` is load-bearing: BSD sed has
+# no \| alternation in a basic regex, so the range would never find its end and the check
+# would compare whole files, reporting every local section as drift.
+shared_prose() {
+    sed -E -n "/^## Approach/,/^## (Simplified technical English|Layout|The template is inert)/p" "$1" |
+        sed '$d'
+}
+PROSE_ROOT="$(mktemp)"
+PROSE_TEMPLATE="$(mktemp)"
+shared_prose "$REPO/AGENTS.md" >"$PROSE_ROOT"
+shared_prose "$REPO/template/AGENTS.md.jinja" >"$PROSE_TEMPLATE"
+if ! diff -q "$PROSE_ROOT" "$PROSE_TEMPLATE" >/dev/null; then
+    echo "check: the principle sections have drifted between the two AGENTS.md files:" >&2
+    diff "$PROSE_ROOT" "$PROSE_TEMPLATE" | sed 's/^/check:   /' >&2
+    rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
+    fail "keep Approach, Fail loudly, Zero comments and Simplified technical English identical."
+fi
+# An empty range means the headings moved and the check silently compared nothing.
+[ -s "$PROSE_ROOT" ] || fail "the shared prose range in check_template.sh matched no lines"
+rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
+
 # One pin, many copies. devtools/render.sh owns it -- it is the script that runs copier
-# -- and the value read back through `--spec` above is also written into README.md, both
-# AGENTS.md files, updating.md, installation.md, pyproject.toml.jinja, the ADR and the
-# design doc, because every one of them is a command someone runs rather than a
-# reference to one. Nothing kept them in step, and the stale copy is the one a user
+# -- and the value read back through `--spec` above is also written wherever a doc shows
+# the command rather than refers to it. The grep below is the inventory, because a doc
+# rewrite moves them around. Nothing kept them in step, and the stale copy is the one a user
 # pastes: they would generate with a release this script never exercised, and after this
 # bump, with one missing two published security fixes. A grep is cheap, so grep.
 STALE="$(grep -rEoh 'copier@[0-9]+\.[0-9]+\.[0-9]+' "$REPO" \
@@ -173,7 +196,6 @@ need .claude/hooks/agent_guard.py
 python3 -m py_compile .claude/hooks/agent_guard.py
 need .entire/settings.json
 python3 -c "import json,sys; json.load(open('.entire/settings.json'))"
-need docs/agent-tooling.md
 # AGENTS.md sends every rationale that is not a commit message here, so the directory
 # has to exist in a fresh project rather than being somewhere an agent is told to
 # write and finds missing.
@@ -190,7 +212,7 @@ need_exec devtools/contract-test.sh
 
 if [ "$VARIANT" = "default" ]; then
     echo "==> assert hostile answers stay data, not syntax"
-    # Four of the six questions are free-form prose, and two of the files they land
+    # The free-form questions are prose, and some of the files their answers land
     # in are hand-written JSON and TOML. An answer interpolated raw takes its quotes
     # and backslashes with it, and the result is a manifest no tool can parse -- a
     # failure that surfaces in someone else's project, on `pnpm install`, with

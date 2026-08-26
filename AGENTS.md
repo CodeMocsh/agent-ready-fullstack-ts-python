@@ -1,194 +1,200 @@
 # Project Instructions for AI Agents
 
-Instructions for AI coding agents working on **agent-ready-fullstack-ts-python itself** —
-the Copier template. Follows the [AGENTS.md](https://agents.md) convention.
+Instructions for AI coding agents working on **agent-ready-fullstack-ts-python itself** — the
+Copier template. Follows the [AGENTS.md](https://agents.md) convention.
 
-> **Important:** this repo is a *template*, not a runnable project. Nothing at the root
-> installs, builds, or serves anything. Everything an end user gets lives under `template/`,
-> is inert until [Copier](https://copier.readthedocs.io/) renders it, and cannot be linted or
-> tested in place. Editing `template/` and running nothing proves nothing: **render it and
-> exercise the output.**
->
-> Two stacks live under `template/` — a pnpm React frontend and a uv FastAPI backend — and
-> neither of them runs during generation. Do not reason about a template file as though it
-> were executing.
+This file is the principles, the map, and the index.
 
-[CONTEXT.md](CONTEXT.md) defines the vocabulary — generator, template, generated project,
-half, live mode, contract artifact, agent-ready layer, vendored code, mock mode. Use those
-words and no synonyms.
+The three sections that follow — *Approach*, *Fail loudly*, *Zero comments* — are the rules a
+generated project lives under, and this repo lives under them too. A rule the template asserts
+and its own generator ignores is a rule nobody believes. **Keep them word-for-word in step with
+[template/AGENTS.md.jinja](template/AGENTS.md.jinja)**; everything below them is this repo's
+own and is expected to differ. Where an example names a route or a mock handler, it names the
+code you write into `template/`.
 
-## Repo Layout
+## Approach
 
-- **`copier.yml`** — the six questions, their validators, the one computed answer, and the
-  `_message_after_copy` shown after generation. `_subdirectory: template` means only
-  `template/` is rendered.
-- **`template/`** — the files rendered into a new project, in two halves plus a root layer.
-- **`template/.claude/` + `template/.entire/`** — the agent-ready layer that ships in
-  generated projects.
-- **`devtools/render.sh`** — renders the template from the working tree, asserts nothing
-  was left unrendered, and prints where the project landed. It owns the copier pin, and
-  `check_template.sh` reads that back through `--spec` rather than keeping a second copy.
-- **`devtools/check_template.sh`** — exercises a rendered project. The pre-commit hook and
-  `make check` both call this one script, and it is the whole of the enforcement: no
-  workflow runs, so nothing checks a push you did not check yourself.
-- **`docs/adr/`** — the four decisions that are surprising enough to need writing down.
+You are a principal engineer. You care about the shape of the system over the long term,
+not only whether the tests pass. Elegance is less code doing more: every line must earn
+its keep.
 
-There is no `src/`, no `package.json`, and no `licenses/` directory. Copier removes the need
-for generator code, and its Jinja handles the license variants directly.
+Resolve ambiguity before building, not after. A request you could satisfy two different
+ways is a request you do not understand yet. Ask, or state the assumption you are
+proceeding on and why. Guessing and building is the expensive failure; asking costs one
+round.
 
-## Copier conventions
+Code is the source of truth for behaviour; docs are the source of truth for intent. When
+they disagree the doc is wrong. Fix the doc, not the code.
 
-Two mechanisms, and both are easy to get subtly wrong:
+Tests validate outcomes, not implementation. A test earns its keep by failing when
+behaviour breaks: one that mirrors the implementation only makes refactoring expensive,
+and one that cannot fail is dead weight. Cover the seams and the edges that actually
+bite. Coverage percentage is not the goal, and deleting a test that no longer
+distinguishes anything is a real improvement.
 
-- **A `.jinja` suffix renders a file's contents**, and the suffix is stripped on output. A
-  file without it is copied byte for byte.
-- **Jinja in a *filename*** makes the file conditional or renames it. The name
-  `{% if package_license != 'None' %}LICENSE{% endif %}.jinja` emits nothing at all when it
-  evaluates empty.
+## Fail loudly
 
-Four rules govern where those may be used, and each exists because breaking it fails
-somewhere far from the edit:
+No code path continues past a condition it did not plan for. Four bans, and both halves
+are in scope:
 
-**Never suffix a `.ts`, `.tsx`, or `.py` source file.** A `.jinja` suffix takes the file out
-of its own toolchain: the editor stops type-checking it, biome and ruff stop seeing it, and
-every gate this template ships stops applying to it. Anything project-specific a source file
-needs comes from a value it reads at runtime, not from a token.
+- No `except Exception`, and no `catch` that continues.
+- No default standing in for a failure — no `or {}`, no `?? []`, no quietly returned
+  `None` or `undefined`.
+- No failure signalled by a return value a caller can drop. If continuing would be
+  wrong, raise or throw.
+- No warning where the code cannot correctly proceed.
 
-**A workflow file, if one ever returns, is never `.jinja`.** GitHub Actions uses `${{ }}`
-and so does Jinja. Keeping `.github/workflows/*.yml` unrendered means the two syntaxes never
-meet, and no expression ever has to be escaped. None ships today —
-[docs/adr/0004](docs/adr/0004-no-workflow-runs-the-gate.md) says why.
+Not crashing is legitimate only when all three of these hold: the design plans for the
+condition, the contract names it, and the code reports it. Fewer than three, and it
+raises.
 
-**The backend half is entirely token-free.** Its only `.jinja` is `pyproject.toml.jinja`.
-Nothing in `backend/app/` may carry a token, because everything in `app/` feeds
-`openapi.json` — a committed contract artifact that is sworn never to be hand-edited. A
-project name in the FastAPI title would make every generated project's spec differ from the
-one in this repo, and the drift would surface as a failing `make openapi-check` in someone
-else's project. The demo API is titled `"Tasks API"` everywhere; rebranding happens when a
-user replaces the demo and regenerates the artifacts in the same commit.
+This is not a style preference, because in an app with two halves **a silent failure
+looks like an empty screen**. A route that swallows a store error answers `200 []` and
+the table renders "No tasks yet". A `catch` around a mutation leaves the optimistic
+update on screen and the write on the floor. A mock handler that answers a case the
+backend refuses makes the contract suite green against a shape the real service never
+returns. Every one of those reads as working software — and a test that asserts the
+*absence* of an effect passes just as happily against the bug. Assert the failure
+itself.
 
-**Defaults must stay behavior-preserving.** `copier update --defaults` has to be a no-op for
-an existing project, so a new question needs a default that reproduces today's output.
+The contract is where this is cheapest to get right: declare every status code a route
+can return, with a model for anything that has a body, and the other half then cannot
+fail to handle it without a type error.
 
-The safety net for all of this is in `render.sh`: before it prints a path it asserts that no
-`{{ … }}` survives, no `{% … %}` survives, and no `*.jinja` file remains on disk. The
-forgotten-suffix failure mode — a token left in a file that was never rendered — produces a
-generated project containing literal `{{ package_name }}`, and that assertion is what
-catches it. It lives with the render rather than with the checks, so `make render` cannot
-hand back a tree that was never looked at.
+## Zero comments
 
-## Constraints that bite
+No explanatory comments, no docblocks, no TODO/FIXME notes, no lint or type suppression
+directives (`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`),
+no commented-out code. Shebangs and TypeScript `///` directives are executable
+directives, not comments.
 
-Four things in this template are load-bearing in ways a reasonable edit would undo.
+Express intent through names, structure, types, and tests. Rationale goes in the commit
+message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
+so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
+explanation.
 
-**`openapi-typescript` runs through `pnpm dlx` at an exact pin, and must not become a
-devDependency.** It declares `peerDependencies: { typescript: "^5.x" }` and builds its AST
-with `ts.factory`, which TypeScript 7 — the native port — does not have. The frontend is on
-TypeScript 7 to stay in step with the TS sibling, so installing the generator into that half
-crashes at run time, in `ts.mjs`, on a `createKeywordTypeNode` that no longer exists. pnpm
-only *warns* about the peer mismatch, so this fails when someone runs `make openapi`, not
-when they install. `pnpm dlx openapi-typescript@7.13.0`
-gives it its own TypeScript in its own resolution, at a cost of about a second warm. The
-trade, recorded in `template/docs/development.md`, is that the version lives in a script
-string rather than the lockfile: **pin it exactly and bump it deliberately**, because a
-floating version would silently rewrite a committed contract artifact. When
-openapi-typescript supports TypeScript 7, collapse it back into a devDependency.
+**An ADR cites nothing by section number.** Name the thing — the route, the function,
+the rule, the invariant — and let the reader grep. A section number points into one
+revision of one document, and an ADR outlives the document whose structure it borrowed.
 
-**Dependency floors must clear the 14-day cool-off on both sides.** A `^` range or a `>=`
-floor whose value is the latest release cannot resolve, because the policy the template
-enforces on itself forbids the only version that satisfies it. This applies to
-`template/frontend/package.json` under `minimumReleaseAge: 20160` and to
-`template/backend/pyproject.toml.jinja` under `exclude-newer = "14 days"`. When bumping
-either, pick the highest version published *more than 14 days ago*, not the newest.
+One carve-out: a published public API. Where a package is consumed outside this repo its
+exported surface carries JSDoc or a docstring, because that text is shipped documentation,
+not an explanation aimed at a reader of the source. Everything internal stays bare. Such a
+doc states contracts, not reasoning: behaviour, failure, timing, ownership, safe use. Link
+the rationale; don't restate it.
 
-**The `trustPolicyExclude` entry in `template/frontend/pnpm-workspace.yaml` is
-load-bearing.** `shadcn` reaches `@babel/core` → `semver@6.3.1`, which the
-`trustPolicy: no-downgrade` setting reads as a takeover. Removing the exclusion breaks both
-`pnpm install` and
-`pnpm dlx shadcn add` in every generated project — `dlx` reads the project's settings too.
-Keep it pinned to the exact version.
+Scope: source, tests, scripts. Config files may carry comments where the format offers no
+other way to explain a rule, and that includes `frontend/*.config.ts`, which is
+configuration that happens to be written in TypeScript. **Vendored and generated code is
+out of scope entirely.**
 
-**`src/api/schema.ts` must stay in four exclusion lists.** The generated contract artifact
-is a plain `.ts` file that grows with the API and clears the 500-line file gate early, and
-it is invisible to every automatic skip. It has to be named in `files.includes` in
-`template/frontend/biome.json`, and in `complexity.exclude`, `conformance.exclude` and
-`comments.exclude` in `template/frontend/package.json`. Three out of four passes today and
-fails later for reasons that will not be obvious — `openapi-typescript` writes the spec's
-descriptions out as JSDoc, so the comment gate is the one that fails first.
-`check_template.sh` asserts all four.
+**The rule is enforced, because on its own it does not hold.** `make lint` fails on any
+comment token under `frontend/{src,tests,e2e,devtools}` and `backend/{app,tests,devtools}`
+— `frontend/devtools/comments.mjs` and `backend/devtools/comments.py` are the two gates.
+An agent reads this file at the top of a session and explains in place anyway, because
+that is what the training data does. The suppression half is the half most worth
+mechanising: refusing the spelling turns a threshold decision taken silently at the point
+of pain into either a fix in the code or a reviewable line in `biome.json`,
+`tsconfig.json` or `pyproject.toml`.
 
-`devtools/check_template.sh` catches every one of these, but only in a full run.
-`make fast` will not.
+## Simplified technical English
 
-## Making Changes
+Every word a human reads is written the way ASD-STE100 says to write a maintenance manual: one
+idea per sentence, active voice, and one meaning per term. That covers prose and code alike —
+docs, commit messages, decisions, identifiers, test names, log lines, and the message a failure
+carries.
 
-Edit files under `template/` to change what generated projects receive. After any change,
-**render the template and exercise the output** rather than trusting the diff:
+**Take the rules, not the dictionary.** ASD-STE100 ships a controlled vocabulary chosen for
+aircraft maintenance, and this repo has its own nouns. `CONTEXT.md` is the word list that binds
+here: one term per concept, and that term every time the concept appears — in a sentence, in a
+symbol name, in the text of an error.
+
+This is what makes *Zero comments* affordable. With no comment to fall back on, the name and the
+failure message are the whole explanation, so they are worth the care the code gets.
+
+## The template is inert
+
+Nothing at the root installs, builds or serves anything. Everything a user gets lives under
+`template/`, does not exist until [Copier](https://copier.readthedocs.io/) renders it, and
+cannot be linted or tested in place. A React frontend and a FastAPI backend live in there and
+neither one runs during generation, so do not reason about a template file as though it were
+executing.
+
+**Editing `template/` and running nothing proves nothing: render it and exercise the output.**
+A change that looks obviously right in the diff is a change nobody has run.
+
+## The gate lives before the commit, and nowhere else
+
+`devtools/render.sh` renders the template; `devtools/check_template.sh` exercises what it
+rendered. The pre-commit hook runs the check script, `make check` runs it, and no workflow
+ships — so a check that is not in that script runs nowhere, and an unarmed clone commits
+unchecked with nothing anywhere saying so. **`make hooks` is not optional.** The cost of that
+arrangement is recorded in [docs/adr/0004](docs/adr/0004-no-workflow-runs-the-gate.md).
+
+The render is from the working tree rather than from a tag, so the gate validates what you are
+about to commit. A full run installs both toolchains, lints and tests both halves, regenerates
+the contract artifacts and diffs them, and runs the contract suite twice against a live
+backend — through the dev proxy, and through `app.serve` on one origin — which are the only
+steps that prove the two halves interoperate. Every level below them passes green on a project
+whose frontend cannot reach its backend at all.
+
+`make fast` skips all of that. It cannot catch anything that only shows up once the code runs,
+which includes every constraint in [docs/constraints.md](docs/constraints.md).
+
+## Documentation carries principles, not inventories
+
+A count goes wrong the first time the number changes. Nothing fails when it does, so it stays
+wrong. Name the thing and let the reader look. The same goes for a list that restates a file:
+`copier.yml` is the questions, the `Makefile` is the targets, `docs/adr/` is the decisions.
+Write down the reasoning that lives nowhere else. Point at the rest.
+
+This bites hardest on this file and on `template/AGENTS.md.jinja`. Both are where an agent
+reaches to write something down, and both grow one reasonable-looking paragraph at a time.
+
+A new rule belongs in this file only if it is a principle. Anything with detail in it goes in
+`docs/` and gets a link from the index below.
+
+## Layout
+
+```
+copier.yml              the questions, their validators, and the post-copy message
+template/               everything rendered into a new project
+  AGENTS.md.jinja       the generated project's own agent instructions
+  frontend/ backend/    the two halves
+  .claude/ .entire/     the agent-ready layer that ships in generated projects
+  docs/                 the generated project's own docs
+devtools/
+  render.sh             renders the template and asserts nothing was left unrendered
+  check_template.sh     exercises what render.sh produced -- the whole gate
+  install-hooks.sh      installs a shim per committed hook
+docs/                   constraints.md, conformance.md, adr/ -- see the index below
+CONTEXT.md              the vocabulary
+```
+
+There is no `src/` and no `package.json`. Copier removes the need for generator code, and its
+Jinja handles the license variants directly.
+
+## Commands
 
 ```bash
-make check        # default variant, end to end
+make check        # the default variant, end to end -- what the pre-commit hook runs
 make check-all    # every license variant
 make fast         # render and assert only, skipping install/lint/test/build
 make render       # render only, print the path, assert nothing
+make hooks        # arm the pre-commit hook (once per clone)
 ```
 
-`make render` is the one to reach for while working on a single check. A full run renders,
-installs both toolchains, lints and tests both halves and builds — so paying it per edit to
-a check is minutes for a change worth seconds. Render once, then run the check against the
-path until it says what you meant. The directory is yours to remove.
+**Reach for `make render` while working on a single check.** A full run installs both
+toolchains, lints and tests both halves, and builds. Render once instead, then run the check
+against that path until it says what you meant. The directory is yours to remove.
 
-The first three call `devtools/check_template.sh`, which is also what the pre-commit hook
-runs; `make render` calls `devtools/render.sh` alone and asserts nothing beyond the render
-itself.
-That was always the point — a check cannot exist in CI and be missing locally — and since
-the workflow was removed it is the only thing standing between a change and `main`, so
-**`make hooks` is not optional**. It installs a shim per committed hook rather than setting
-`core.hooksPath`; the reasoning is in `devtools/install-hooks.sh`. An unarmed clone commits
-unchecked and nothing anywhere notices, which is the cost recorded in
-[docs/adr/0004](docs/adr/0004-no-workflow-runs-the-gate.md).
+## Where to read more
 
-The script renders from the working tree rather than from a tag, so it validates what you
-are about to commit.
-
-A full run installs both toolchains, lints and tests both halves, regenerates the contract
-artifacts and diffs them, and runs the contract suite twice against a live backend — through
-the dev proxy, and through `app.serve` on one origin — which are the only steps that prove
-the two halves interoperate. Levels below them all pass green on a project whose frontend
-cannot reach its backend at all. It also audits the frontend's production dependencies and
-boots `make dev` to check both ports are freed.
-
-**No test the template ships may skip itself.** A test that needs a daemon or a browser goes
-in a tier — a folder declared in `template/backend/tests/tiers.py` and run by a target of its
-own. A skip does not: it exits 0 and looks like a test that passed, and `check_template.sh`
-and the generated project's `test_gate.py` both fail on one. Every other test file mirrors
-the source it covers. Tiers are named for what they need, never for who runs them —
-`check_template.sh` runs `make db-test` itself wherever Docker answers. Layout in
-`template/AGENTS.md.jinja`.
-
-No step downloads a browser. The generated project ships Playwright specs, in mock mode and
-in live mode, and the gate runs neither — a deliberate trade recorded in
-`template/docs/development.md`. If you change UI in `template/frontend/`, run
-`pnpm test:e2e` inside a rendered project yourself.
-
-## Distribution
-
-Nothing is published. The template is run straight from the repository:
-
-```bash
-uvx --exclude-newer "14 days" copier@9.17.1 copy \
-  gh:CodeMocsh/agent-ready-fullstack-ts-python my-app
-```
-
-That works against a private repository because git supplies the credentials. Releases are
-tagged `v0.x.y`, because `copier update` resolves against tags — an untagged change is
-invisible to every generated project.
-
-## Upstream
-
-This repo is the third sibling of
-[agent-ready-ts](https://github.com/CodeMocsh/agent-ready-ts) and
-[agent-ready-python](https://github.com/CodeMocsh/agent-ready-python), and it is a **pure
-downstream consumer** of the agent-ready layer. Shared-layer files here are read-only: a fix
-discovered in this repo is PR'd to the repo that owns the file and pulled back, never
-originated here. [updating.md](updating.md) says which repo owns what, and how to check for
-drift.
+| | |
+|---|---|
+| [docs/constraints.md](docs/constraints.md) | **read this before editing `template/`** — the load-bearing details, the Copier rules, and how each one fails |
+| [docs/conformance.md](docs/conformance.md) | why the template gates what it gates, and the measurements behind every threshold |
+| [CONTEXT.md](CONTEXT.md) | the vocabulary — use its words, and no synonyms for them |
+| [docs/adr/](docs/adr/) | the decisions |
+| [README.md](README.md) | what the template is and the command that runs it |
+| [template/AGENTS.md.jinja](template/AGENTS.md.jinja) | what a generated project tells its own agents — and the rules the code you write into `template/` lives under |

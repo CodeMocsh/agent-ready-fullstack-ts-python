@@ -45,10 +45,10 @@ The backend is the source of truth. After changing a model or a route:
 make openapi        # regenerates openapi.json and frontend/src/api/schema.ts
 ```
 
-Commit both alongside the change; `make openapi-check` fails if they drift. The frontend's mock handlers
-are typed against the spec, so a mock that disagrees with the backend is a build error
-rather than a surprise at runtime — and `make test-contract` runs one test suite against
-both implementations to prove they still agree.
+Commit both alongside the change; `make openapi-check` fails if they drift. The frontend's
+mock handlers are typed against the spec, so a mock that disagrees with the backend is a
+build error rather than a surprise at runtime — and `make test-contract` runs one test suite
+against both implementations to prove they still agree.
 
 ## Everyday commands
 
@@ -62,15 +62,16 @@ make build          # production build of the frontend
 make upgrade        # update dependencies, then regenerate the contract
 ```
 
-`make pre-commit` is what the git hook runs, and it is the whole of the enforcement —
-this project ships no CI workflow, so a commit that skipped the hook was checked by
-nothing. It needs no browser, no database daemon and no second terminal. The three
-opt-in targets need one of those, which is why they are opt-in — and why nothing will tell
-you that you did not run them.
+`make pre-commit` is what the git hook runs, and it is the whole of the enforcement — this
+project ships no CI workflow, so a commit that skipped the hook was checked by nothing. It
+needs no browser, no database daemon and no second terminal. The opt-in targets each need one
+of those, which is why they are opt-in — and why nothing will tell you that you did not run
+them.
 
-See [docs/installation.md](docs/installation.md) for prerequisites,
-[docs/development.md](docs/development.md) for workflows, and
-[AGENTS.md](AGENTS.md) for how AI coding agents should work in this repo.
+[AGENTS.md](AGENTS.md) is the map: the principles, the layout, the rules that bite, and an
+index into [docs/installation.md](docs/installation.md) for prerequisites,
+[docs/deployment.md](docs/deployment.md) for shipping it, and
+[docs/adr/](docs/adr/) for the decisions.
 
 ## License
 

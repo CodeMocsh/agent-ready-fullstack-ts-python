@@ -30,7 +30,7 @@ const USAGE = `usage: node devtools/complexity.mjs <paths...> [options]
   --ceiling-factor <n>  multiple of the origin baseline that is never exceeded
   --exclude <pattern>   skip a path; repeatable, and trailing /** is optional
 
-See docs/agent-tooling.md for what each threshold does and where it came from.`;
+See AGENTS.md for what to do when a threshold is crossed.`;
 
 function measurable(name) {
   return SOURCE.test(name) && !GENERATED.test(name);

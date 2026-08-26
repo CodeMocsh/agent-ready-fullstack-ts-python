@@ -3,6 +3,10 @@
 Instructions for AI coding agents working on {{ package_name }}. Follows the
 [AGENTS.md](https://agents.md) convention.
 
+This file is the principles, the map, and the index. Everything else is one link away — so a
+new rule belongs here only if it is a principle, and anything with detail in it goes in `docs/`
+with a pointer from here.
+
 ## Approach
 
 You are a principal engineer. You care about the shape of the system over the long term,
@@ -50,7 +54,7 @@ itself.
 
 The contract is where this is cheapest to get right: declare every status code a route
 can return, with a model for anything that has a body, and the other half then cannot
-fail to handle it without a type error. See *Declare responses fully* below.
+fail to handle it without a type error.
 
 ## Zero comments
 
@@ -77,7 +81,7 @@ the rationale; don't restate it.
 Scope: source, tests, scripts. Config files may carry comments where the format offers no
 other way to explain a rule, and that includes `frontend/*.config.ts`, which is
 configuration that happens to be written in TypeScript. **Vendored and generated code is
-out of scope entirely** — see below.
+out of scope entirely.**
 
 **The rule is enforced, because on its own it does not hold.** `make lint` fails on any
 comment token under `frontend/{src,tests,e2e,devtools}` and `backend/{app,tests,devtools}`
@@ -88,423 +92,191 @@ mechanising: refusing the spelling turns a threshold decision taken silently at 
 of pain into either a fix in the code or a reviewable line in `biome.json`,
 `tsconfig.json` or `pyproject.toml`.
 
-The guardrails this project ships are described in
-[docs/agent-tooling.md](docs/agent-tooling.md), including where each threshold came from,
-why the conformance checks fail closed, and why the agent guard fails open.
+## Simplified technical English
 
-## The two halves
+Every word a human reads is written the way ASD-STE100 says to write a maintenance manual: one
+idea per sentence, active voice, and one meaning per term. That covers prose and code alike —
+docs, commit messages, decisions, identifiers, test names, log lines, and the message a failure
+carries.
 
-This repository is one application in two halves:
+**Take the rules, not the dictionary.** ASD-STE100 ships a controlled vocabulary chosen for
+aircraft maintenance, and this repo has its own nouns. `CONTEXT.md` is the word list that binds
+here: one term per concept, and that term every time the concept appears — in a sentence, in a
+symbol name, in the text of an error.
 
-- **`frontend/`** — a React app. Everything pnpm touches lives here.
-- **`backend/`** — a FastAPI service. Everything uv touches lives here.
+This is what makes *Zero comments* affordable. With no comment to fall back on, the name and the
+failure message are the whole explanation, so they are worth the care the code gets.
 
-Each half installs, lints, tests and builds on its own, without the other's toolchain
-present. Run `pnpm` from `frontend/` and `uv` from `backend/`, or use the root `make`
-targets, which fan out to both. There is no root `package.json`, and `pnpm install` at the
-root will fail — that is deliberate.
+## Layout
 
-## The contract
-
-`openapi.json` at the repository root is what the halves agree on, and it is derived from
-the backend, never written by hand:
+Two halves and a root layer. Each half installs, lints, tests and builds without the
+other's toolchain: `pnpm` runs in `frontend/`, `uv` in `backend/`, `make` at the root fans
+out to both. There is no root `package.json`, and `pnpm install` at the root is meant to
+fail.
 
 ```
-backend/app/{models,routes}.py  ->  openapi.json  ->  frontend/src/api/schema.ts
-                                                       -> types.ts, mocks/handlers.ts
+openapi.json          the contract -- generated from the backend, committed
+Makefile              the interface across both halves
+CONTEXT.md            the vocabulary
+docs/adr/             decisions that would otherwise look like they could be simpler
+
+frontend/             everything pnpm touches
+  src/api/            the contract: base.ts, client.ts, types.ts, schema.ts (generated)
+  src/mocks/          the fake implementation of that contract -- permanent, not a scaffold
+  src/components/     UI; ui/ is vendored shadcn
+  src/index.css       the @theme block -- see the theme rule below
+  src/router.tsx      routes
+  tests/              mirrors src/
+  e2e/                Playwright; *.live.spec.ts needs a running backend
+  devtools/           the frontend's own gates, and the scanner they share
+
+backend/              everything uv touches
+  app/main.py         builds the FastAPI app
+  app/models.py       the pydantic models the contract is made of
+  app/routes.py       the endpoints
+  app/deps.py         what a route is handed
+  app/wiring.py       the only reader of the environment
+  app/serve.py        the one-origin entrypoint: app.main plus the frontend bundle
+  app/identity.py     which tenant a request is -- ships as a stub returning "default"
+  app/store/          the data layer; ddl.py is the schema, as data
+  tests/              mirrors app/, except tests/integration/, which is a tier
+  tests/tiers.py      what a tier needs and what runs it
+  tests/test_gate.py  tests the repository rather than the app
+
+deploy/               schema.sql and roles.sql -- generated from app/store/
 ```
 
-After any change to a pydantic model or a route, run **`make openapi`** and commit
-`openapi.json` and `frontend/src/api/schema.ts` alongside the source change.
-`make openapi-check` fails otherwise, and it is in the gate.
+## The rules that bite
 
-Both artifacts are committed so each half stays independently operable — the frontend
-regenerates types, tests and builds with no Python installed at all.
+Each of these is something a reasonable edit undoes without anything failing until later.
 
-Three things about the spec are deliberate and should not be "fixed":
+**The contract**
 
-- **`422` responses appear on every route with a parameter or a body.** FastAPI adds them,
-  along with `HTTPValidationError` and `ValidationError` schemas. They describe real
-  behaviour.
-- **Every error response declares a `model`.** A `404` declared without one says the
-  response has no body, while `HTTPException` returns `{"detail": ...}` — the spec would be
-  lying, and the typed handlers would refuse to mock it.
-- **`redirect_slashes` is off.** With it on, `/api/tasks/` answers with a redirect to the
-  backend's own origin, which escapes the dev proxy and fails CORS in a browser.
+- `openapi.json` and `frontend/src/api/schema.ts` are generated from
+  `backend/app/{models,routes}.py`. Change the backend, run `make openapi`, commit all
+  three. Never hand-edit either artifact, and never hand-merge one: take a side and
+  regenerate.
+- Declare every status code a route can return, with a `model` for anything that has a
+  body. An undeclared code is invisible to the other half.
+- `frontend/tests/api/contract.test.ts` runs against the mock handlers and against the
+  real backend. Assert shapes, status codes and the `detail` a refusal carries — never
+  seed data, which the two implementations differ on by design.
 
-If the two artifacts conflict during a merge, do not hand-merge them. Take either side and
-run `make openapi`.
+**Tests**
 
-**The mock handlers and the backend are two implementations of one contract.**
-`frontend/tests/api/contract.test.ts` is run against both — `pnpm test` uses the handlers,
-`make test-contract` starts both halves and runs the same file against the real service
-through the dev proxy. Assertions there describe the contract only: shapes, status codes
-and the `detail` a refusal carries, never seed data, which the two are free to differ on.
+- **No test skips itself.** A test that needs a daemon or a browser goes in a tier
+  declared in `backend/tests/tiers.py`. Everything else mirrors the source it covers. A
+  skip exits 0 and looks like a pass, so `test_gate.py` fails on one.
+- **The gate is `make pre-commit`, and there is nothing else.** No workflow ships, so a
+  commit that skipped the hook was checked by nothing. New checks go in the gate.
+- **The tiers are deliberately outside it** — `make test-e2e`, `make test-e2e-live` and
+  `make db-test` each need something fetched or started first, and a gate that fetches a
+  browser or a daemon is a gate people learn to commit around. They are the one tier nothing
+  will tell you that you did not run: `test-e2e` after a UI change, `db-test` after touching
+  `app/store/` or `deploy/`.
+- **You have a browser. Use it.** After a UI change, run the app and look at it rather
+  than inferring from the JSX. A screenshot is evidence; reading markup is a guess.
 
-**A refusal's `detail` is part of the contract, not decoration.** Every non-2xx answer
-carries an `ErrorBody`, and `src/api/client.ts` throws that sentence — so it is what the UI
-renders, and the two implementations have to agree on it the way they agree on a status
-code. Falling back to `"PATCH /tasks/x failed with 404"` is what happens when a response
-carries no readable `detail`, and it is a worse thing to put on a screen than the sentence
-the service already wrote.
+**Vendored and generated code — do not tidy**
 
-## Vendored and generated code — do not tidy
+- `frontend/src/components/ui/**`, `frontend/src/lib/utils.ts` and
+  `frontend/public/mockServiceWorker.js` were written by a tool. You may change what they
+  *do*; do not reformat them, strip their comments, or restyle them to match house rules.
+- `openapi.json` and `frontend/src/api/schema.ts` are regenerate-only. A hand edit is a bug.
+- `pnpm dlx shadcn add` does not put everything in `src/components/ui`. A block, a chart, a
+  hook or a lib file lands in ordinary scanned source and will fail `make lint` in shadcn's
+  idiom. Fix the values to tokens, or add that one path to `conformance.exclude` — never
+  `conformance.allow`, which matches text rather than path.
 
-Two kinds of file here were written by a tool, and neither is yours to style.
+**Frontend**
 
-**Vendored** — a tool wrote it, this project owns it, and you may change how it *behaves*:
+- **Never fetch in a `useEffect`.** Server state comes from TanStack Query hooks against
+  `src/api/client.ts`. Effects are for synchronising with something outside React.
+- **The theme is the only place a colour, a type size or a spacing step is defined.** A hex
+  literal, a palette step like `bg-blue-500`, a `text-[13px]`, a `p-[7px]` or an opacity
+  modifier like `bg-primary/80` fails `pnpm conformance`. Add a token to `src/index.css`.
+- **Icon stroke comes from `--icon-stroke`**, not from the call site.
+- **Never assume the app is served from `/`.** The worker registration, `src/api/base.ts`
+  and the router basepath all derive from `import.meta.env.BASE_URL`.
+- **Do not delete `src/mocks/`** when the backend feels real enough. It is the fixture
+  layer every component test runs against.
+- Use the `@/` alias for anything under `src/`. TypeScript is `strict`, plus
+  `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
+- **There is no `.env.production`, on purpose.** Production mode loads no env file, so mock
+  mode is off because nothing turns it on — do not add one, or you create the file in which
+  someone can switch it back on. `public/` is copied into every build whatever the mode, so
+  the `strip-mock-worker` plugin in `vite.config.ts` covers what no mode can; without it a
+  production deploy ships `mockServiceWorker.js` to its own origin.
+- The agent guard blocks writes to any `.env*` file. If one needs to change, say so and let
+  a human edit it.
 
-- `frontend/src/components/ui/**` and `frontend/src/lib/utils.ts` —
-  [shadcn](https://ui.shadcn.com/) components, added with `pnpm dlx shadcn@latest add
-  <component>`. shadcn copies source into the repo; that source is yours.
-- `frontend/public/mockServiceWorker.js` — written by Mock Service Worker's installer.
-  Never hand-edit it; regenerate with `pnpm dlx msw init public --save`.
+**Backend**
 
-**Generated** — regenerate-only, and a hand edit is a bug:
+- **`app/wiring.py` is the only reader of the environment.** Everything below it takes its
+  DSN, schema and migrate mode as arguments. Nothing degrades from Postgres to memory: a
+  bad `DATABASE_URL` fails at boot.
+- **Never widen the store's surface to take a tenant.** `Database.store(tenant_id)` is the
+  only way to get one, and the tenant is a parameter on no method. A store you can hold is
+  a store already scoped.
+- **Every index on a tenant table leads with `tenant_id`**, or the policy's predicate
+  cannot be satisfied and Postgres scans. Right answers, quietly slower, until the table is
+  too large to fix cheaply.
+- **Migrations are additive, and the application never applies them.** No `DROP COLUMN`, no
+  `ALTER COLUMN ... TYPE`, no `RENAME`. `make migrate` applies; `make schema` and
+  `make roles` regenerate the committed artifacts in `deploy/`.
+- **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key. Never
+  edit a shipped entry; a column added later lands twice, once in its table's `CREATE` and
+  once in the `0200_` repair band. Run `make schema` and commit.
+- **The application must never see `DATABASE_OWNER_URL`.** It refuses to start if it can.
+- **Do not delete `MemoryDatabase`** when Postgres feels real enough. The gate runs on it
+  and must not need a daemon, and one implementation of a `Protocol` is a shape nothing
+  checks.
+- Seed rows are asserted in `tests/routes/test_tasks.py` and nowhere else. Memory hands out
+  `"1"`, Postgres hands out uuids — pattern-match neither.
 
-- `openapi.json` and `frontend/src/api/schema.ts` — see *The contract*. Change the backend
-  and run `make openapi`.
+**Both halves**
 
-Both kinds are excluded from lint, from the complexity ratchet, and from the conformance
-checks. Do not reformat them, strip their comments, or "simplify" them to match house
-style.
+- When a complexity gate fails, **split the function.** Raising a threshold or re-recording
+  a baseline upward is a deliberate, reviewable decision, not the way to green. `make lint`
+  lowers a stale baseline for you, and that change belongs in your commit.
+- A **supply-chain cool-off** applies in both halves, so a package published in the last
+  fortnight will not resolve — including via `pnpm dlx shadcn add`. Commit both lockfiles.
 
-**Not everything `shadcn add` writes lands in those paths.** Only registry items typed
-`registry:ui` go to `frontend/src/components/ui`. A block or a chart lands in
-`frontend/src/components`, a hook in `frontend/src/hooks`, a library file in
-`frontend/src/lib` beside the one exempt `utils.ts` — all of them ordinary scanned source,
-arriving in shadcn's own idiom rather than this project's, so `make lint` will have opinions
-about a block the moment you add one. Prefer fixing the values to tokens: it is a component
-you will edit anyway, and it is yours now. If you would rather keep it verbatim, add that
-path to `conformance.exclude` in `frontend/package.json`, which is a reviewable line naming
-one file. Do not reach for `conformance.allow` — it matches on text rather than on path, so
-allowing a vendored block's `bg-primary/80` allows that fade everywhere.
-
-## Build and Test
-
-`make` at the root is the interface across both halves:
+## Commands
 
 ```bash
 make install        # both halves, then activate the versioned git hooks
 make pre-commit     # the gate: lint-check + openapi-check + test
-make dev            # both halves: backend on :8000, frontend on :5173 in live mode
-                    #   BACKEND_PORT / FRONTEND_PORT override both, for a second checkout
+make dev            # both halves: backend :8000, frontend :5173, live mode
 make dev-frontend   # frontend only, mock mode -- no backend required
-make dev-backend    # backend only, with reload
-make lint           # auto-fix and lint both halves
-make lint-check     # check-only variant
+make lint           # auto-fix and lint both halves (lint-check is the check-only variant)
 make test           # both halves, then the contract suite against the real backend
-make test-fast      # both halves only
-make test-contract  # the contract suite against the backend half
-make test-e2e       # opt-in: Playwright in mock mode (installs chromium)
-                    #   PREVIEW_PORT overrides its own server; it reuses no other
-make test-e2e-live  # opt-in: the same against a running `make dev`
-                    #   follows FRONTEND_PORT, so it meets the dev server you started
-make db-test        # opt-in: backend/tests/integration/, on a Postgres it starts itself
-make db             # a Postgres to develop against; prints the DATABASE_URL to export
-make db-demo        # two tenants against one table, so the isolation is visible
-make migrate        # the release step: applies the schema. The app never does.
-make schema         # regenerate deploy/schema.sql after a migration entry
-make roles          # regenerate deploy/roles.sql after a role change
 make openapi        # regenerate the contract artifacts
-make openapi-check  # fail if the committed artifacts are stale
+make db             # a Postgres to develop against; prints the DATABASE_URL to export
 make build          # production build of the frontend
-make upgrade        # update both halves' dependencies, then regenerate the contract
 ```
 
-Or work in one half with its own tools: `pnpm -C frontend test:watch`,
-`cd backend && uv run pytest -q tests/routes/test_tasks.py`, `pnpm -C frontend add some-package`,
+The `Makefile` is the full list — the tiers, the migration targets and the per-half variants
+as well. Each script under `devtools/` explains what it does and why, at the top.
+`BACKEND_PORT`, `FRONTEND_PORT` and `PREVIEW_PORT` move every server, so a second checkout can
+run at the same time.
+
+Or work in one half with its own tools — `pnpm -C frontend test:watch`,
+`pnpm -C frontend add some-package`, `cd backend && uv run pytest -q tests/routes/`,
 `cd backend && uv add some-package`.
 
-**The checks live before the commit, and nowhere else.** `make pre-commit` is the gate
-and the git hook `make hooks` installs runs it for you. **New checks go in
-`make pre-commit`** — a check there costs seconds, and the same check discovered after a
-push costs a billed minute plus the round trip to find out which of your last four commits
-broke it. This project ships no workflow, so **`make hooks` is not optional**: an unarmed
-clone commits unchecked and nothing anywhere says so. `make install` arms it, and
-`backend/tests/test_gate.py` fails if the hook stops running the gate or grows a way past
-itself.
+## Where to read more
 
-The hook skips a half this clone has not installed, because working in one half alone is
-legitimate here. That is the one dangerous thing about it — a run where everything
-skipped exits 0 and looks exactly like a run where everything passed — so a partial run
-says on stderr what it did not check. Read that before believing the green.
+| | |
+|---|---|
+| [CONTEXT.md](CONTEXT.md) | the glossary, and why renaming `tenant_id` is a day-one decision |
+| [docs/deployment.md](docs/deployment.md) | serving the two halves, the release step, and two ways to ship something broken |
+| [docs/installation.md](docs/installation.md) | prerequisites, and taking a later template update |
+| [docs/adr/](docs/adr/) | the decisions, and [when to write one](docs/adr/README.md) |
 
-**Three things are deliberately not in the gate**, and all three need something fetched or
-started first. `make test-e2e` and `make test-e2e-live` need a Playwright binary, and the
-live one needs `make dev` in another terminal. `make db-test` needs a Docker daemon. A gate
-that fetches any of those is a gate people learn to commit around, and `test_gate.py`
-asserts all three stay out of it. Opt-in is not the same as deleted — see *See what you
-built*, and run `make db-test` after touching `app/store/` or `deploy/`.
+This project was generated from
+[agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python)
+and can receive its later changes — see `docs/installation.md`. It ships
+[Entire](https://entire.io) session hooks and an agent guard in `.claude/`; both are
+optional; the guard says why it refused, in the refusal.
 
-**No test skips itself.** A test that needs a daemon or a browser goes in a tier — see
-*Where a test goes*. A skip does not: it exits 0 and looks like a test that passed, so
-`test_gate.py` fails on a skip, an `xfail`, a `.skipIf` or a `.only`, in either half.
-
-## See what you built
-
-You have a browser. Use it. After a UI change, run the app and look at it rather than
-inferring from the JSX:
-
-```bash
-make test-e2e       # the mock-mode specs in e2e/; installs chromium the first time
-```
-
-To check the real system end to end, run `make dev` in one terminal and then:
-
-```bash
-make test-e2e-live
-```
-
-To look at a screen the specs don't cover, add a throwaway spec in `frontend/e2e/` that
-navigates to it and calls `await page.screenshot({ path: "shot.png" })`, run it, and read
-the image. Delete the spec afterwards unless it earned its keep as a test. A screenshot is
-evidence; reasoning about markup is a guess.
-
-These specs are in no tier the gate runs, which makes them the one thing nothing will
-tell you that you did not run. `frontend/e2e/tasks.live.spec.ts` is the live one and it will
-fail against a backend that is not up; that failure is the point, and it is not a reason
-to delete the spec.
-
-**A `*.live.spec.ts` must exist.** Rename or delete the last one and that tier leaves the
-project without failing anything — the target still exists, and the gate never ran it.
-`test_gate.py` asserts one is there, which is the only thing that notices.
-
-## Frontend conventions
-
-- **Layout**: `src/api/` is the contract with the backend (generated types plus a typed
-  `fetch` wrapper), `src/mocks/` is the fake implementation of that contract,
-  `src/components/` is UI, `src/router.tsx` wires routes. Tests mirror those directories
-  under `tests/`; end-to-end specs live in `e2e/`.
-
-- **The mock layer is permanent.** `src/mocks/handlers.ts` is both a zero-backend
-  development mode and the fixture layer every component test runs against. It is typed
-  against the spec by [openapi-msw](https://github.com/christoph-fricke/openapi-msw), so a
-  handler that returns an undeclared status code or the wrong shape is a type error rather
-  than a surprise at runtime. Do not delete `src/mocks/` when the backend feels real
-  enough — you would delete the test suite's foundation with it.
-
-- **Modes**: `.env.development` and `.env.mock` set `VITE_ENABLE_MSW=true`; `.env.live`
-  turns it off so requests reach the backend through the `/api` proxy in
-  `vite.config.ts`. All three are committed and hold no secrets. The agent guard blocks
-  writes to any `.env*` file, which is the right default and applies here too — if one
-  needs to change, say so and let a human edit it. There is no `.env.production`, on
-  purpose: production mode loads no file, so mock mode is off because nothing turns it on.
-  Do not add one. The `strip-mock-worker` plugin in `vite.config.ts` covers what no mode
-  can — `public/` is copied into every build whatever the mode, so without it a production
-  deploy ships `mockServiceWorker.js` to its own origin.
-
-- **Never assume the app is served from `/`.** The service worker's registration URL, the
-  API base in `src/api/base.ts`, and the router's basepath all derive from
-  `import.meta.env.BASE_URL`. A hard-coded leading slash works on your laptop and breaks
-  under a subpath, including the worker's scope, which silently stops it intercepting
-  anything. The Playwright suite runs against a subpath build to catch exactly this.
-
-- **Imports**: use the `@/` alias for anything under `src/`.
-
-- **TypeScript**: `strict`, plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
-  Request and response types come from `src/api/types.ts`, which aliases the generated
-  schema — change the backend, not those aliases.
-
-- **Styling**: [Tailwind CSS](https://tailwindcss.com/) v4, configured in CSS. There is no
-  `tailwind.config.js` — the theme is the `@theme` block in `src/index.css`, and it is the
-  only place a colour or a type size is defined. Reach for design tokens
-  (`bg-background`, `text-muted-foreground`) over raw colours, and for the type and
-  spacing scales (`text-sm`, `p-4`, `gap-6`) over arbitrary values. This is enforced:
-  `pnpm conformance` fails on a hex literal, a colour keyword, a fixed palette step like
-  `bg-blue-500` or `border-t-red-500`, a `text-[13px]`, and a `p-[7px]`. The reason is dark
-  mode and drift — a literal renders perfectly in the theme you are looking at and keeps its
-  value in the one you are not. Add a token to `src/index.css` instead.
-
-  An opacity modifier — `bg-primary/80`, `bg-primary/[0.31]` — fails for the same reason,
-  and the fix is not a fade per colour but a name for the role. A scrim, a hover tint and a
-  subtle wash are three tokens; `/80`, `/75` and `/70` scattered across three files are
-  three guesses. Two things that look similar stay legal: Tailwind's scale shorthand, where
-  the slash is not opacity at all (`text-sm/6` sets line height), and a fade that reads a
-  custom property (`bg-card/(--wash)`), which was declared somewhere reviewable.
-
-  **Icon stroke comes from `--icon-stroke`,** not from the call site. `src/index.css` sets
-  it once and `.lucide { stroke-width: var(--icon-stroke) }` applies it to every
-  lucide-react icon, so `strokeWidth={1.5}` and `className="stroke-2"` both fail
-  conformance. Change the token to change every icon in the app.
-
-  The two fail differently, which is worth knowing when you meet one. A `stroke-2` class
-  overrides the token, because Tailwind's utilities sort after `@layer base`. A
-  `strokeWidth` prop does not: a CSS declaration outranks an SVG presentation attribute, so
-  the prop is already doing nothing, and deleting it changes no pixels.
-
-  Three values stay legal, because none is an escape from the theme: sizing (`w-[240px]`,
-  `max-w-[65ch]` — there is no token for how wide a sidebar is), any value that reads a
-  theme variable (`gap-[--spacing(var(--gap))]`, `stroke-(length:--icon-stroke)`, and note
-  that the bare `stroke-[var(--icon-stroke)]` sets the paint rather than the width), and a
-  one-off piece of SVG geometry whose weight is a named constant rather than a literal.
-
-- **Data**: server state comes from TanStack Query hooks against `src/api/client.ts`.
-  Never fetch in a `useEffect`: it skips the cache, the deduplication, and the loading and
-  error states the rest of the UI is written against. Effects are for synchronising with
-  something outside React — a subscription, an event listener, imperative DOM work — and
-  those are fine. Derived values are computed during render, not stored in state and
-  refreshed by an effect.
-
-- **Components**: prefer composing what is already in `src/components/ui/`. To add
-  another, run `pnpm dlx shadcn@latest add <name>` rather than writing it by hand.
-
-- **Lint/format**: [biome](https://biomejs.dev/) handles both, with its React domain rules
-  on. Type checking is `tsc --noEmit`.
-
-## Backend conventions
-
-- **Layout**: `app/` is the service — `main.py` builds the FastAPI app, `models.py` holds
-  the pydantic models the contract is made of, `routes.py` declares the endpoints,
-  `deps.py` is what a route is handed, `wiring.py` chooses the substrate, `serve.py` is the
-  one-origin entrypoint, and `store/` is the data layer. Tests live in `tests/`.
-
-- **Where a test goes: the tier decides, then the source.** A folder that needs something a
-  laptop may not have is a **tier** — `backend/tests/integration/` needs a daemon,
-  `frontend/e2e/` needs a browser — declared in `backend/tests/tiers.py` and run by a target
-  of its own. Everything else mirrors what it covers: `tests/routes/` for `app/routes.py`,
-  `frontend/tests/components/` for `src/components/`. Adding a tier is an entry in
-  `tiers.py`, and for one pytest would collect, its folder in `norecursedirs` as well;
-  `test_gate.py` checks the rest. Moving a test file, check its `parents[n]`. The table and
-  the reasoning are in [docs/development.md](docs/development.md).
-
-- **`app.main` is the service; `app.serve` is the service plus the frontend.** The browser
-  asks for `/api/...` and this service answers bare paths, because one host name carries two
-  things that share path shapes — a `/tasks` page in the router and a `/tasks` route here are
-  the same URL. Something has to strip the prefix: the vite proxy in development, a load
-  balancer in a deployment, and when there is neither, `uvicorn --factory app.serve:build_server`
-  with `FRONTEND_BUNDLE` naming what `make build` wrote. Mounting is most of the implementation
-  and the trap is that **Starlette does not run a mounted application's lifespan** — the
-  process comes up with nothing on `app.state`, every route raises where it reaches for the
-  database, and it reads as a broken handler rather than as a deployment that never started.
-  `create_server` delegates to the mounted app's lifespan context; `tests/serve/test_serve.py`
-  drives a real `TestClient` because nothing that calls a handler directly can see this.
-  Having no proxy is also why it sets the security headers and body cap, and why `main.py`
-  sets neither: behind a real edge those would be a second, weaker copy. Keep them there.
-
-- **It is an application, not a library.** There is no build backend, no version, and
-  nothing is published, so `[tool.uv] package = false` and `app` is importable from the
-  project root rather than from site-packages. That is why `pytest` sets `pythonpath` and
-  `devtools/export_openapi.py` adjusts `sys.path`.
-
-- **The store is two implementations of one contract, and both are permanent.**
-  `MemoryDatabase` is the default and `PostgresDatabase` takes over when `DATABASE_URL` is
-  set. `tests/store_contract.py` is one suite and both substrates run it, memory in the gate
-  and Postgres in the tier — which is what makes `TaskStore` a contract rather than a shape
-  nothing checks, and it is the same pattern this repository already runs one layer up, where
-  `frontend/tests/api/contract.test.ts` runs against the mock handlers and against this
-  service. Do not delete the in-memory substrate when Postgres feels real enough: it is what
-  `make test` and `make pre-commit` stand on, and the gate must not need a daemon. See
-  [docs/adr/0001-two-substrates-behind-one-contract.md](docs/adr/0001-two-substrates-behind-one-contract.md).
-
-- **Seed rows belong to one suite.** The in-memory substrate seeds three tasks and Postgres
-  starts empty, deliberately: a suite that passes against both cannot have assumed either.
-  `tests/routes/test_tasks.py` is the only file allowed to know about the seeds, and ids are
-  the same trap — memory hands out `"1"`, Postgres hands out uuids, and nothing may
-  pattern-match one.
-
-- **`wiring.py` is the only reader of the environment.** `build()` reads what the service
-  needs and `build_bundle()` what `app.serve` needs; everything below them takes its DSN,
-  schema and migrate mode as arguments. Keeping both in one file is what makes the list of
-  what a deployment configures reviewable, and it is why no test has to mutate `os.environ`
-  to pick a substrate. Nothing degrades from
-  Postgres to memory on an error — a deployment that silently came up on memory has data
-  that will not be there tomorrow, so a bad `DATABASE_URL` fails at boot.
-
-- **The schema is data, and `deploy/schema.sql` is generated from it.** `app/store/ddl.py`
-  holds one statement per entry under a four-digit key; run **`make schema`** and commit the
-  result after adding one, the same way `openapi.json` follows the models.
-  `tests/store/test_schema.py` fails when they drift. Two rules there are load-bearing and
-  are explained in that file: never edit a shipped entry, and a column added later lands **twice**
-  — in its table's `CREATE`, and as an `ALTER TABLE … ADD COLUMN IF NOT EXISTS` in the `0200_`
-  repair band, which sorts above everything because `migrate()` compares `max(key)`.
-
-- **The Postgres tier is opt-in.** `make db-test` starts its own `postgres:17-alpine` on an
-  ephemeral port, runs `backend/tests/integration/` whole and tears the container down; set
-  `TEST_DATABASE_URL` to use your own server instead. It is not in `make pre-commit`, for
-  the same reason the Playwright specs are not. `make db` gives you a database to
-  develop against and prints the `DATABASE_URL` to export.
-
-- **Declare responses fully.** Every status code a route can return belongs in the
-  decorator, with a `model` for anything that has a body. The spec is generated from those
-  declarations, and the frontend's handlers are typed from the spec, so an undeclared
-  status code is invisible to the other half.
-
-- **Lint/format**: [ruff](https://docs.astral.sh/ruff/) for both, `basedpyright` for types,
-  `codespell` for prose. `uv run python devtools/lint.py` runs the lot, which is what
-  `make lint` calls.
-
-## Tenancy and the database
-
-Five rules. The reasoning is in `docs/adr/0002`, `0003` and `0004`; these are the ones an
-agent breaks without noticing.
-
-- **Every index on a tenant table leads with `tenant_id`.** An index that does not cannot
-  satisfy the policy's predicate, so Postgres scans instead. It fails invisibly — right
-  answers, quietly slower — until the table is large enough that fixing it means rebuilding
-  indexes on live data. `backend/tests/store/test_schema.py` enforces it.
-
-- **A policy may only compare a column to a setting.** Anything needing a join or a
-  row-dependent function call is a bug in the schema, not a policy to write: those are the
-  ones the planner runs per row.
-
-- **Migrations are additive, and the application never applies them.** No `DROP COLUMN`, no
-  `ALTER COLUMN ... TYPE`, no `RENAME` — a test refuses the spelling, because that is what
-  makes an expand-and-contract change possible across two releases. `make migrate` applies;
-  `make schema` and `make roles` regenerate the committed artifacts in `deploy/`.
-
-- **The schema version must match the build exactly.** A database ahead of the running build
-  is refused as firmly as one behind, so a rolling deploy has a window in which a restarting
-  instance of the previous release will not start, and a rollback needs the schema rolled back
-  too. That is deliberate — `docs/adr/0004` — not something to soften when it bites.
-
-- **The application must never see `DATABASE_OWNER_URL`.** It refuses to start if it can. Only
-  `python -m app.migrate` reads it.
-
-- **Never widen the store's surface to take a tenant.** `Database.store(tenant_id)` is the only
-  way to get one, and the tenant is a parameter on no method — a store you can hold is a store
-  already scoped. Adding `tenant_id=` to a method would put the filter back in the hands of
-  whoever remembered it.
-
-`CONTEXT.md` is the glossary, and says why renaming `tenant_id` to your product's word is a
-day-one decision.
-
-## Both halves
-
-- **Complexity**: each half gates its own, in its own unit, and the numbers do not
-  transfer. The frontend gates per-function cognitive complexity, function length and file
-  length, then checks codebase-wide density against `frontend/.complexity-baseline.json`.
-  The backend gates cyclomatic complexity and statements per function, then checks its own
-  density baseline. When any of them fails, split the function; raising a threshold or
-  re-recording a baseline upward is a deliberate, reviewable decision, not the quick way to
-  green. Drift is two-sided on both halves: when a codebase improves past its tolerance,
-  `make lint` lowers that half's `.complexity-baseline.json` for you, and the change belongs
-  in your commit.
-
-- **Dependencies**: `pnpm add` in `frontend/`, `uv add` in `backend/`. Commit both
-  lockfiles. A 14-day supply-chain cool-off applies on both sides, so a package published
-  in the last fortnight will not resolve — including via `pnpm dlx shadcn add`. See
-  [docs/development.md](docs/development.md), which also explains where the two halves'
-  protections differ.
-
-- **Agent session tracking**: this project ships [Entire](https://entire.io) hooks in
-  `.claude/settings.json` that checkpoint agent coding sessions alongside git history.
-  They no-op unless the `entire` CLI is on `PATH`; install it and run `entire enable` to
-  activate, or delete `.claude/` and `.entire/` to opt out.
-
-- **Agent guardrails**: `.claude/hooks/agent_guard.py` is a small, dependency-free
-  `PreToolUse` hook that blocks a few unambiguously dangerous actions (`rm -rf /`, disk
-  wipes, force-push to `main`/`master`, writing `.env` files or hard-coded secrets). It's
-  a seatbelt, not a scanner, and fails open. Edit the patterns in that file, or remove its
-  `PreToolUse` entry in `.claude/settings.json`, to change or drop it.
-
-- **This project was generated from a template, and can receive its later changes.**
-  `.copier-answers.yml` records which template and which commit, so
-  `uvx --exclude-newer "14 days" copier@9.17.1 update` replays what has changed since into
-  this project as a three-way merge. Files you never touched update cleanly; files you
-  rewrote — `app/routes.py` and `app/models.py`, first among them — come back as conflicts to
-  resolve, which is the honest cost of having made the project your own. Run `make openapi`
-  afterwards, because the contract artifacts are generated rather than merged. The template
-  is [agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python).
-
-See [docs/development.md](docs/development.md) for full developer workflows.

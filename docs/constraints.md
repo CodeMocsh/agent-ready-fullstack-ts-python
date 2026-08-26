@@ -1,0 +1,81 @@
+# Constraints
+
+Things a reasonable edit undoes, that fail somewhere far from the edit. Each is here because it
+has nowhere better to be: its natural home is a `.json` file, which cannot carry a comment, or
+it is a rejected option, or it is a rule about editing the template rather than running it.
+
+Anything with a home keeps it. `render.sh` explains the unrendered-token assertion,
+`pnpm-workspace.yaml` explains every supply-chain setting it carries, `check_template.sh`
+explains each assertion where it makes it, and `backend/tests/tiers.py` explains why the gate
+fetches no browser.
+
+## Where Jinja may be used
+
+Copier has two mechanisms. A **`.jinja` suffix** renders a file's contents and is stripped on
+output; a file without it is copied byte for byte. **Jinja in a filename** makes the file
+conditional or renames it, so `{% if package_license != 'None' %}LICENSE{% endif %}.jinja`
+emits nothing at all when it evaluates empty.
+
+**Never suffix a `.ts`, `.tsx` or `.py` source file.** The suffix takes the file out of its own
+toolchain: the editor stops type-checking it, biome and ruff stop seeing it, and every gate this
+template ships stops applying to it. Anything project-specific a source file needs comes from a
+value it reads at runtime, not from a token.
+
+**A workflow file, if one ever returns, is never `.jinja`.** GitHub Actions uses `${{ }}` and so
+does Jinja. Keeping `.github/workflows/*.yml` unrendered means the two syntaxes never meet.
+
+**The backend half is token-free.** Its only `.jinja` is `pyproject.toml.jinja`. Everything in
+`backend/app/` feeds `openapi.json`, a committed artifact sworn never to be hand-edited, so a
+project name in the FastAPI title would make every generated project's spec differ from this
+one — surfacing as a failing `make openapi-check` in someone else's project. The demo API is
+titled `"Tasks API"` everywhere; rebranding happens when a user replaces the demo and
+regenerates in the same commit.
+
+**A new question needs a behavior-preserving default**, because `copier update --defaults` has
+to be a no-op for an existing project.
+
+## `openapi-typescript` runs through `pnpm dlx` at an exact pin
+
+It must not become a devDependency. It declares `peerDependencies: { typescript: "^5.x" }` and
+builds its AST with `ts.factory`, which TypeScript 7 — the native port — does not have. The
+frontend is on TypeScript 7, so installing the generator into that half crashes at run time, in
+`ts.mjs`, on a `createKeywordTypeNode` that no longer exists.
+
+pnpm only *warns* about the peer mismatch, so this fails when someone runs `make openapi`, not
+when they install. `pnpm dlx` gives it its own TypeScript in its own resolution.
+
+The trade is that the version lives in a script string rather than the lockfile: **pin it
+exactly and bump it deliberately**, because a floating version would silently rewrite a
+committed contract artifact. When openapi-typescript supports TypeScript 7, collapse it back
+into a devDependency.
+
+## `tsconfig.json` expresses the `@/` alias with `paths` alone
+
+TypeScript 7 removed `baseUrl`. Reintroducing it because a tutorial uses it breaks the build in
+a way the error message does not explain.
+
+## `src/api/schema.ts` must stay in every exclusion list
+
+The generated contract artifact is a plain `.ts` file that grows with the API and is invisible
+to every automatic skip. It has to be named in `files.includes` in `biome.json`, and in
+`complexity.exclude`, `conformance.exclude` and `comments.exclude` in `package.json` — JSON
+files, none of which can say why.
+
+Naming it in all but one passes today and fails later for reasons that will not be obvious:
+`openapi-typescript` writes the spec's descriptions out as JSDoc, so the comment gate fails
+first. `check_template.sh` asserts every list, and the same applies to any generated or vendored
+file added under `frontend/src/` afterwards.
+
+## Dependency floors must clear the cool-off
+
+A `>=` floor whose value is the *latest* release **cannot resolve**: the cool-off forbids the
+only version that satisfies it. When bumping in either half, pick the highest version published
+outside the window rather than the newest. `pnpm-workspace.yaml` carries the mechanism and the
+exceptions it currently needs, each pinned to an exact version.
+
+## `apps/web` + `apps/api` was rejected, and stays rejected
+
+That layout advertises a many-package workspace with shared `packages/*`, which this is not —
+and pnpm's workspace machinery cannot span into Python anyway. `frontend/` and `backend/` are
+toolchain boundaries, not workspace members. There is no root `package.json`, and
+`pnpm-workspace.yaml` stays inside `frontend/` as a settings carrier.

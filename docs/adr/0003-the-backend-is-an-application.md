@@ -66,9 +66,8 @@ else.
 
 **Negative.** This diverges from agent-ready-python in the file most likely to be diffed
 against it. A change ported from that sibling's `pyproject.toml` may assume a build backend,
-a dynamic version, a `src/` layout or a matrix, and cannot be applied blind. `updating.md`
-records the stacks as per-repo forever, but the two `pyproject.toml` files will keep looking
-similar enough to tempt a copy.
+a dynamic version, a `src/` layout or a matrix, and cannot be applied blind. Two
+`pyproject.toml` files can look similar enough to tempt a copy and still not be portable.
 
 `app` is a fixed name, and fixed names cost something. Two backends in one workspace
 collide. Renaming it is not a rename of one directory: `uvicorn app.main:app`, the
