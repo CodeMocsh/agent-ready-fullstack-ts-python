@@ -26,6 +26,15 @@ that passes against both cannot have assumed either. Seed rows are asserted in
 `tests/routes/test_tasks.py` and nowhere else, which is the same rule
 `frontend/tests/api/contract.test.ts` already follows one layer up.
 
+**And the rule reaches `frontend/e2e/tasks.live.spec.ts`, which is where it was broken.**
+That spec asserted `Read AGENTS.md` — a row that exists only because the in-memory
+substrate put it there — so it passed on the default `make dev` and failed against a real
+database, on a fixture nothing in the frontend half declares. It now creates the row it
+asserts and deletes it again, which is the only shape that means the same thing on both
+substrates and does not leave a run's litter behind on the one that remembers. The mock
+spec still names the seed, and may: those rows are the frontend's own, in
+`src/mocks/store.ts`.
+
 ## Considered options
 
 **Postgres only, deleting the in-memory store.** Rejected: it puts a daemon on the default

@@ -1,8 +1,5 @@
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { gate } from "./harness";
 
 const OFFENDERS = [
   '/// <reference types="vite/client" />',
@@ -44,29 +41,20 @@ const AFTER_A_REGEX = [
 
 const AFTER_A_REGEX_LINES = [2, 3];
 
-let directory = "";
+const comments = gate("comments.mjs", "comments");
 
 function scan(name: string, lines: string[]) {
-  const path = join(directory, name);
-  writeFileSync(path, `${lines.join("\n")}\n`);
-  const finished = spawnSync("node", ["devtools/comments.mjs", directory], {
-    encoding: "utf8",
-  });
-  const reported = finished.stderr
-    .split("\n")
-    .filter((line) => line.startsWith(`${path}:`))
-    .map((line) => Number.parseInt(line.slice(path.length + 1), 10));
-  return { status: finished.status, reported };
+  const { status, path, lines: reported } = comments.run(name, lines);
+  return {
+    status,
+    reported: reported.map((line) => Number.parseInt(line.slice(path.length + 1), 10)),
+  };
 }
 
 describe("the comment gate", () => {
-  beforeEach(() => {
-    directory = mkdtempSync(join(tmpdir(), "comments-"));
-  });
+  beforeEach(comments.open);
 
-  afterEach(() => {
-    rmSync(directory, { recursive: true, force: true });
-  });
+  afterEach(comments.close);
 
   it("reports every comment, and every suppression spelled as one", () => {
     const { status, reported } = scan("offenders.ts", OFFENDERS);

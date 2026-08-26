@@ -1,15 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { excluded, fail, section, sourceFiles } from "./gate.mjs";
 
 const DEFAULTS = {
   cap: 15,
@@ -25,7 +19,6 @@ const RULE = "lint/complexity/noExcessiveCognitiveComplexity";
 const SCORE = /Excessive complexity of (\d+) detected/;
 const SOURCE = /\.(?:ts|tsx|mts|cts|mjs|js)$/;
 const GENERATED = /\.(?:d|test|spec)\.(?:ts|tsx|mts|cts|mjs|js)$/;
-const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage", ".git"]);
 
 const USAGE = `usage: node devtools/complexity.mjs <paths...> [options]
 
@@ -39,34 +32,8 @@ const USAGE = `usage: node devtools/complexity.mjs <paths...> [options]
 
 See docs/agent-tooling.md for what each threshold does and where it came from.`;
 
-function excluded(path, patterns) {
-  return patterns.some((pattern) => {
-    const prefix = pattern.replace(/\/\*\*$/, "");
-    return path === prefix || path.startsWith(`${prefix}/`);
-  });
-}
-
 function measurable(name) {
   return SOURCE.test(name) && !GENERATED.test(name);
-}
-
-function walk(directory, exclude, found) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = join(directory, entry.name);
-    if (excluded(child, exclude)) continue;
-    if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) walk(child, exclude, found);
-    else if (entry.isFile() && measurable(entry.name)) found.push(child);
-  }
-}
-
-function sourceFiles(paths, exclude) {
-  const found = [];
-  for (const path of paths) {
-    if (excluded(path, exclude)) continue;
-    if (statSync(path).isDirectory()) walk(path, exclude, found);
-    else if (measurable(path)) found.push(path);
-  }
-  return found;
 }
 
 function nonBlankLines(files) {
@@ -149,7 +116,10 @@ function scores(paths, cap) {
 }
 
 function measure(paths, config) {
-  const files = sourceFiles(paths, config.exclude);
+  const files = sourceFiles(paths, {
+    matches: measurable,
+    skipped: (path) => excluded(path, config.exclude),
+  });
   if (files.length === 0) fail(`no source files under ${paths.join(", ")}`);
   const lines = nonBlankLines(files);
   const { functions, sum } = scores(files, config.cap);
@@ -162,17 +132,8 @@ function measure(paths, config) {
   };
 }
 
-function fail(message) {
-  process.stderr.write(`error: ${message}\n`);
-  process.exit(2);
-}
-
 function settings(flags) {
-  const file = "package.json";
-  const configured = existsSync(file)
-    ? (JSON.parse(readFileSync(file, "utf8")).complexity ?? {})
-    : {};
-  const resolved = { exclude: [], ...DEFAULTS, ...configured, ...flags };
+  const resolved = { exclude: [], ...DEFAULTS, ...section("complexity"), ...flags };
   for (const [key, value] of Object.entries(DEFAULTS)) {
     if (typeof resolved[key] !== "number" || !Number.isFinite(resolved[key])) {
       fail(`${key} must be a number (default ${value}).`);

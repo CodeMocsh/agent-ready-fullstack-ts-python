@@ -1,8 +1,11 @@
 #!/bin/sh
-# Render the template and exercise the result. One script, two callers: the
-# pre-commit hook, and your laptop. When these steps lived only in the workflow file
-# they could only run on GitHub, and a check that cannot run locally is a check
-# people learn to discover late.
+# Exercise a rendered template. One script, two callers: the pre-commit hook, and
+# your laptop. When these steps lived only in the workflow file they could only run
+# on GitHub, and a check that cannot run locally is a check people learn to discover
+# late.
+#
+# Rendering itself is devtools/render.sh, which prints a project and is worth running
+# on its own while working on any one check here.
 #
 # Usage: check_template.sh [default|proprietary|no-license]
 #        FAST=1 check_template.sh   -- render and assert only, skipping the installs
@@ -16,10 +19,11 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
 
 VARIANT="${1:-default}"
 FAST="${FAST:-0}"
-COPIER_SPEC="copier@9.17.1"
 export UV_EXCLUDE_NEWER="14 days"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+RENDER="$REPO/devtools/render.sh"
+COPIER_SPEC="$(sh "$RENDER" --spec)"
 
 # `set -e` makes a bare `test -f` exit silently, which turns a one-line problem into
 # a bisect. These say what they were looking for.
@@ -31,7 +35,8 @@ need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2"; }
 need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
 
 
-# One pin, eleven copies. The version above is also written into README.md, both
+# One pin, many copies. devtools/render.sh owns it -- it is the script that runs copier
+# -- and the value read back through `--spec` above is also written into README.md, both
 # AGENTS.md files, updating.md, installation.md, pyproject.toml.jinja, the ADR and the
 # design doc, because every one of them is a command someone runs rather than a
 # reference to one. Nothing kept them in step, and the stale copy is the one a user
@@ -47,7 +52,10 @@ if [ -n "$STALE" ]; then
     exit 1
 fi
 
-for tool in uvx uv tar python3 git node pnpm curl; do
+# What this script needs. uvx and tar are render.sh's and are probed there, so they are
+# not repeated here; git is in both lists because both use it -- render.sh to commit the
+# staged template, this script to init the smoke project and diff the contract artifacts.
+for tool in uv git python3 node pnpm curl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "check: $tool is required and not on PATH." >&2
         echo "check: see template/docs/installation.md for how to install it." >&2
@@ -71,6 +79,13 @@ done
 # something pointed at it, and answering "I used a different one" three hundred lines
 # later is worse than refusing here with the reason. The two are decided independently,
 # so naming one does not stop the other from moving out of the way.
+#
+# This stays here rather than moving into render.sh with the rest of the setup, and the
+# reason is the `held` list below: each allocation keeps its socket bound until the
+# process that made it exits, which is what stops two of them coming back as the same
+# number. Allocating in render.sh would release every one of them the moment it
+# returned, handing this script a pair that was free a second ago and telling it they
+# still are. Rendering does not need a port anyway.
 PORTS="$(python3 - "${BACKEND_PORT:+named}" "${BACKEND_PORT:-8000}" \
                    "${FRONTEND_PORT:+named}" "${FRONTEND_PORT:-5173}" <<'PY'
 import socket
@@ -128,13 +143,6 @@ BACKEND_PORT="${PORTS%% *}"
 FRONTEND_PORT="${PORTS##* }"
 export BACKEND_PORT FRONTEND_PORT
 
-case "$VARIANT" in
-    default)      EXTRA="" ;;
-    proprietary)  EXTRA="--data package_license=Proprietary" ;;
-    no-license)   EXTRA="--data package_license=None" ;;
-    *) echo "check: unknown variant '$VARIANT' (default|proprietary|no-license)" >&2; exit 2 ;;
-esac
-
 WORK="$(mktemp -d)"
 
 # One handler for the whole run, because `set -e` is live inside a trap: a `kill` of a
@@ -148,41 +156,10 @@ cleanup() {
     rm -rf "$WORK"
 }
 trap cleanup EXIT INT TERM
-SRC="$WORK/src"
-OUT="$WORK/out"
-mkdir -p "$SRC"
 
 echo "==> render ($VARIANT)"
 echo "    ports: backend :$BACKEND_PORT, frontend :$FRONTEND_PORT"
-# Staged through a file rather than a pipe on purpose: in a pipeline only the last
-# command's status reaches "set -e", so a failed archive step would still extract
-# whatever it managed to write and the run would go on against a partial tree --
-# passing checks on a template that is not the one on disk. "set -o pipefail" is the
-# usual fix but is not in POSIX sh, and this script runs under dash wherever /bin/sh is,
-# where that line is itself an error.
-tar --exclude=.git --exclude=node_modules --exclude=.venv \
-    -cf "$WORK/tree.tar" -C "$REPO" .
-tar -xf "$WORK/tree.tar" -C "$SRC"
-rm -f "$WORK/tree.tar"
-
-# Users generate from a git URL, and Copier records the template commit in the
-# answers file so `copier update` knows where it started. Rendering the working-tree
-# copy as a plain directory would skip that path entirely, so commit it first.
-git -C "$SRC" init -q -b main
-git -C "$SRC" -c user.email=check@example.com -c user.name=check \
-    -c commit.gpgsign=false add -A
-git -C "$SRC" -c user.email=check@example.com -c user.name=check \
-    -c commit.gpgsign=false commit -qm "working tree under test"
-
-uvx --exclude-newer "14 days" "$COPIER_SPEC" copy --defaults --quiet --trust \
-    --vcs-ref=HEAD \
-    --data package_name=smoke-test \
-    --data package_description="A smoke test project" \
-    --data package_author_name="Test Author" \
-    --data package_author_email=test@example.com \
-    --data package_github_org=testorg \
-    $EXTRA \
-    "$SRC" "$OUT"
+OUT="$(sh "$RENDER" "$VARIANT" --into "$WORK/render")"
 
 cd "$OUT"
 
@@ -211,21 +188,6 @@ need_exec devtools/install-hooks.sh
 need_exec devtools/dev.sh
 need_exec devtools/contract-test.sh
 
-echo "==> assert nothing was left unrendered"
-# The [^$] excludes GitHub Actions' ${{ }}, which is not a Copier token.
-if grep -rEn '(^|[^$])\{\{ *[a-z_]+ *\}\}' . 2>/dev/null; then
-    echo "unrendered token above: a file carrying tokens needs the .jinja suffix" >&2
-    exit 1
-fi
-if grep -rn '{%' . 2>/dev/null; then
-    echo "unrendered Jinja statement above" >&2
-    exit 1
-fi
-if [ -n "$(find . -name '*.jinja' 2>/dev/null)" ]; then
-    echo "a .jinja file survived rendering: $(find . -name '*.jinja')" >&2
-    exit 1
-fi
-
 if [ "$VARIANT" = "default" ]; then
     echo "==> assert hostile answers stay data, not syntax"
     # Four of the six questions are free-form prose, and two of the files they land
@@ -235,20 +197,16 @@ if [ "$VARIANT" = "default" ]; then
     # nothing in the diff to suggest why. This renders what a person could plausibly
     # type and parses both manifests back. It runs once: nothing here varies with
     # the license.
-    HOSTILE="$WORK/hostile"
     H_DESC='A "quoted" project: Bob'"'"'s tasks & <friends>, C:\notes'
     H_AUTHOR='O'"'"'Brien "Bob" \ Tester'
     H_EMAIL="o'brien@example.com"
     H_ORG='test"org'
     export H_DESC H_AUTHOR H_EMAIL H_ORG
-    uvx --exclude-newer "14 days" "$COPIER_SPEC" copy --defaults --quiet --trust \
-        --vcs-ref=HEAD \
-        --data package_name=smoke-test \
+    HOSTILE="$(sh "$RENDER" --into "$WORK/hostile" -- \
         --data package_description="$H_DESC" \
         --data package_author_name="$H_AUTHOR" \
         --data package_author_email="$H_EMAIL" \
-        --data package_github_org="$H_ORG" \
-        "$SRC" "$HOSTILE"
+        --data package_github_org="$H_ORG")"
     python3 - "$HOSTILE" <<'PY'
 import json
 import os
@@ -457,6 +415,50 @@ need_no_grep 'localhost:5173' frontend/playwright.live.config.ts
 # run rather than a failure: Playwright checks that something answers on the URL, never
 # that the something is this build. A stranger's server on the port absorbs the suite.
 need_grep 'reuseExistingServer: false' frontend/playwright.config.ts
+# The live spec must name no seed row at all. Those exist only because the in-memory
+# substrate put them there -- docs/adr/0001 says Postgres starts empty on purpose -- so an
+# assertion on one passes against the default `make dev` and fails against a real database,
+# on a fixture nothing in this half declares. It creates what it asserts instead.
+#
+# Read against the seed itself rather than against one title spelled here. Naming a single
+# row would leave the other two enforceable in name only: the next spec to reach for "Run
+# the app in mock mode" would pass this gate and fail on Postgres, which is the whole of
+# what the rule exists to stop.
+python3 - <<'PY'
+import ast
+import pathlib
+import sys
+
+memory = pathlib.Path("backend/app/store/memory.py")
+tree = ast.parse(memory.read_text(encoding="utf-8"))
+seeds = [
+    ast.literal_eval(node.value)
+    for node in ast.walk(tree)
+    if isinstance(node, (ast.Assign, ast.AnnAssign))
+    and node.value is not None
+    for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+    if getattr(target, "id", "") == "SEED"
+]
+if not seeds:
+    print(f"check: no SEED found in {memory}", file=sys.stderr)
+    raise SystemExit(1)
+
+titles = [row[1] for row in seeds[0]]
+live = pathlib.Path("frontend/e2e/tasks.live.spec.ts")
+named = [title for title in titles if title in live.read_text(encoding="utf-8")]
+if named:
+    print(f"check: {live} names a seed row: {named}", file=sys.stderr)
+    print("check: those rows exist only on the in-memory substrate. Postgres starts",
+          file=sys.stderr)
+    print("check: empty on purpose (docs/adr/0001), so the spec must create what it",
+          file=sys.stderr)
+    print("check: asserts rather than assume a fixture this half never declares.",
+          file=sys.stderr)
+    raise SystemExit(1)
+PY
+# The mock spec may name one: in mock mode the rows are the frontend's own, declared in
+# src/mocks/store.ts, so the assertion and the fixture are in the same half.
+need_grep 'Read AGENTS.md' frontend/e2e/tasks.spec.ts
 # The Makefile must not name the contract URL. It never exported the variable, so the
 # default reached nothing, and re-adding one that did would override the port the script
 # actually started the dev server on.
@@ -656,7 +658,16 @@ need backend/devtools/comments.py
 # comment below it. A gate that cries wolf is a gate people route around, and one that
 # goes quiet is worse. The table is what holds both directions.
 need frontend/tests/devtools/comments.test.ts
-need_grep 'startsARegex' frontend/devtools/comments.mjs
+# One scanner, not three. The regex handling below used to live in comments.mjs alone,
+# and conformance.mjs carried a copy of everything around it with that part missing --
+# so a file whose regex held `/*` went quiet in the gate that had no table. Both read
+# devtools/scan.mjs now, and each has a table of its own.
+need frontend/devtools/scan.mjs
+need frontend/devtools/gate.mjs
+need frontend/tests/devtools/conformance.test.ts
+need_grep 'startsARegex' frontend/devtools/scan.mjs
+need_no_grep 'const REGIONS' frontend/devtools/comments.mjs
+need_no_grep 'const REGIONS' frontend/devtools/conformance.mjs
 need_grep 'devtools/comments.mjs' frontend/package.json
 need_grep 'devtools/comments.py' backend/devtools/lint.py
 # Both halves enforce the same rule, so both gates are tested. The Python one has its own
@@ -719,6 +730,28 @@ export function Commented({ load }: { load: (rows: string[]) => void }) {
     fetch("/api/rows").then(async (response) => load(await response.json()));
   }, [load]);
   return null;
+}
+BAD
+
+# The two checks that read blanked source rather than raw lines are the two a
+# scanner failure silences, and it silences them without a word: a regex holding
+# `/*` opens a block comment that runs to the end of the file, and everything
+# below it is blanked. That shipped -- conformance.mjs carried a copy of the
+# comment gate's scanner with the regex handling left out, so this file reported
+# `conformance ok` while both checks did nothing. Both halves now share
+# devtools/scan.mjs, and frontend/tests/devtools/conformance.test.ts holds the
+# table; this is the same case one tier out, where `make fast` reaches it.
+cat >"$CONF/bad/regex.tsx" <<'BAD'
+import { useEffect, useState } from "react";
+
+const SLASH_OR_STAR = /[/*]/;
+
+export function Regex() {
+  const [items, setItems] = useState<string[]>([]);
+  useEffect(() => {
+    fetch("/api/items").then(async (response) => setItems(await response.json()));
+  }, []);
+  return <p style={{ fontSize: 13 }}>{SLASH_OR_STAR.source}{items.length}</p>;
 }
 BAD
 
@@ -870,7 +903,8 @@ for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
                 'arbitrary.tsx:13.*named-colour' 'arbitrary.tsx:13.*palette-utility' \
                 'stroke.tsx:6.*magic-presentation-prop' 'stroke.tsx:7.*raw-stroke' \
                 'stroke.tsx:8.*magic-presentation-prop' 'stroke.tsx:9.*raw-stroke' \
-                'bad.css:5.*raw-stroke'; do
+                'bad.css:5.*raw-stroke' \
+                'regex.tsx:7.*effect-data' 'regex.tsx:10.*inline-type-declaration'; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$expected"; then
         echo "conformance let an arbitrary value through: $expected" >&2
         printf '%s\n' "$conformance_output" >&2

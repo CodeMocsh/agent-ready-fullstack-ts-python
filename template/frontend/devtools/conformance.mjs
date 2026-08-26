@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
+import { lineOf, withoutStringsAndComments } from "./scan.mjs";
 
 const DEFAULTS = {
   themeFiles: ["src/index.css"],
@@ -12,7 +13,6 @@ const SOURCE = /\.(?:ts|tsx|css)$/;
 const GENERATED = /\.(?:d|test|spec)\.(?:ts|tsx)$/;
 const MARKUP = /\.tsx?$/;
 const STYLESHEET = /\.css$/;
-const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage", ".git"]);
 
 const USAGE = `usage: node devtools/conformance.mjs <paths...> [options]
 
@@ -162,8 +162,6 @@ const RULES = [
   },
 ];
 
-const CHECKS = RULES.length + 2;
-
 const EFFECT = /\buseEffect\s*\(/g;
 const DATA_WORK = /\bawait\b|\.then\s*\(|\bfetch\s*\(/;
 const EFFECT_HINT =
@@ -174,81 +172,12 @@ const INLINE_TYPE = /(?<![\w-])(?:fontFamily|fontSize|lineHeight|letterSpacing)\
 const INLINE_TYPE_HINT =
   "an inline font or size bypasses the theme entirely; use a class from the scale";
 
-function excluded(path, patterns) {
-  return patterns.some((pattern) => {
-    const prefix = pattern.replace(/\/\*\*$/, "");
-    return path === prefix || path.startsWith(`${prefix}/`);
-  });
-}
-
 function measurable(name) {
   return SOURCE.test(name) && !GENERATED.test(name);
 }
 
-function walk(directory, config, found) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    const child = join(directory, entry.name);
-    if (skipped(child, config)) continue;
-    if (entry.isDirectory() && !SKIP_DIRS.has(entry.name)) walk(child, config, found);
-    else if (entry.isFile() && measurable(entry.name)) found.push(child);
-  }
-}
-
 function skipped(path, config) {
   return excluded(path, config.exclude) || config.themeFiles.includes(path);
-}
-
-function sourceFiles(paths, config) {
-  const found = [];
-  for (const path of paths) {
-    if (skipped(path, config)) continue;
-    if (statSync(path).isDirectory()) walk(path, config, found);
-    else if (measurable(path)) found.push(path);
-  }
-  return found;
-}
-
-const REGIONS = [
-  { start: '"', end: '"', escapes: true },
-  { start: "'", end: "'", escapes: true },
-  { start: "`", end: "`", escapes: true },
-  { start: "//", end: "\n", escapes: false },
-  { start: "/*", end: "*/", escapes: false },
-];
-
-function opener(text, index) {
-  return REGIONS.find((region) => text.startsWith(region.start, index)) ?? null;
-}
-
-function regionEnd(text, index, opened) {
-  let cursor = index + opened.start.length;
-  while (cursor < text.length) {
-    if (opened.escapes && text[cursor] === "\\") cursor += 2;
-    else if (text.startsWith(opened.end, cursor)) return cursor + opened.end.length;
-    else cursor++;
-  }
-  return text.length;
-}
-
-function blanked(region) {
-  return region.replace(/[^\n]/g, " ");
-}
-
-function withoutStringsAndComments(text) {
-  const out = [];
-  let index = 0;
-  while (index < text.length) {
-    const opened = opener(text, index);
-    if (opened === null) {
-      out.push(text[index]);
-      index++;
-      continue;
-    }
-    const end = regionEnd(text, index, opened);
-    out.push(blanked(text.slice(index, end)));
-    index = end;
-  }
-  return out.join("");
 }
 
 function balanced(text, open, close) {
@@ -259,10 +188,6 @@ function balanced(text, open, close) {
     else if (text[index] === close && --depth === 0) return text.slice(open, index);
   }
   return text.slice(open);
-}
-
-function lineOf(text, index) {
-  return text.slice(0, index).split("\n").length;
 }
 
 function effectViolations(file, code) {
@@ -299,6 +224,10 @@ function inlineTypeViolations(file, code, allow) {
   return found;
 }
 
+const CODE_CHECKS = [effectViolations, inlineTypeViolations];
+
+const CHECKS = RULES.length + CODE_CHECKS.length;
+
 function matchedText(match) {
   return match.trim().replace(/["']/g, "");
 }
@@ -323,24 +252,11 @@ function check(file, config) {
   );
   if (!MARKUP.test(file)) return found;
   const code = withoutStringsAndComments(text);
-  return [
-    ...found,
-    ...effectViolations(file, code),
-    ...inlineTypeViolations(file, code, config.allow),
-  ];
-}
-
-function fail(message) {
-  process.stderr.write(`error: ${message}\n`);
-  process.exit(2);
+  return [...found, ...CODE_CHECKS.flatMap((run) => run(file, code, config.allow))];
 }
 
 function settings(flags) {
-  const file = "package.json";
-  const configured = existsSync(file)
-    ? (JSON.parse(readFileSync(file, "utf8")).conformance ?? {})
-    : {};
-  const resolved = { ...DEFAULTS, ...configured, ...flags };
+  const resolved = { ...DEFAULTS, ...section("conformance"), ...flags };
   for (const key of Object.keys(DEFAULTS)) {
     if (!Array.isArray(resolved[key])) fail(`${key} must be an array.`);
   }
@@ -370,14 +286,6 @@ function parseArgs(argv) {
   return out;
 }
 
-function count(total, noun) {
-  return `${total} ${noun}${total === 1 ? "" : "s"}`;
-}
-
-function ordering(one, other) {
-  return one.file === other.file ? one.line - other.line : one.file.localeCompare(other.file);
-}
-
 function report(violations) {
   const ordered = [...violations].sort(ordering);
   for (const violation of ordered) {
@@ -403,7 +311,10 @@ function report(violations) {
 function main(argv) {
   const { paths, flags } = parseArgs(argv);
   const config = settings(flags);
-  const files = sourceFiles(paths, config);
+  const files = sourceFiles(paths, {
+    matches: measurable,
+    skipped: (path) => skipped(path, config),
+  });
   if (files.length === 0) fail(`no source files under ${paths.join(", ")}`);
   const violations = files.flatMap((file) => check(file, config));
   if (violations.length > 0) {
