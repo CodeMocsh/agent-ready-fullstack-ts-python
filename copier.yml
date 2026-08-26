@@ -1,6 +1,5 @@
-# Questions asked when generating a project. Six, matching the single-stack siblings:
-# this generates one application, so there is nothing to publish and no module name to
-# choose (the backend package is always `app`).
+# Questions asked when generating a project. This generates one application, so there is
+# nothing to publish and no module name to choose -- the backend package is always `app`.
 #
 # Defaults here must stay behavior-preserving so `copier update --defaults` is a no-op
 # for existing projects.

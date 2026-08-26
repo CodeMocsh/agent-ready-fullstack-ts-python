@@ -155,7 +155,7 @@ test-contract-db:
 # The release step, and the only thing that reads DATABASE_OWNER_URL. The application
 # refuses to start if it can see that variable, so this is the one path that can apply
 # DDL. Wire it into whatever your platform calls a release command -- see the migrate
-# service in deploy/compose.yaml for the shape, and docs/development.md for the mapping.
+# service in deploy/compose.yaml for the shape, and docs/deployment.md for the mapping.
 migrate:
 	cd backend && uv run --no-sync python -m app.migrate
 

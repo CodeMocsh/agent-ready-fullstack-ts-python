@@ -20,7 +20,7 @@ const USAGE = `usage: node devtools/conformance.mjs <paths...> [options]
   --allow <text>        permit one exact match; repeatable
   --theme-file <path>   a file allowed to define the theme; repeatable
 
-See docs/agent-tooling.md for what each check enforces and where it came from.`;
+See AGENTS.md for the rules these checks enforce.`;
 
 const NAMED_COLOURS = [
   "aliceblue|antiquewhite|aqua|aquamarine|azure|beige|bisque|black|blanchedalmond|blue",

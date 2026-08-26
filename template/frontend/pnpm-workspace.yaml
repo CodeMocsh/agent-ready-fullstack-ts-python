@@ -1,5 +1,5 @@
-# Supply-chain policy applied to every install in this project, including CI.
-# See docs/development.md for the reasoning.
+# Supply-chain policy applied to every install in this project. Each setting below
+# carries its own reasoning.
 
 # Cool-off period, in minutes (14 days). A release younger than this is not
 # considered during resolution; most malicious publishes are caught within days.

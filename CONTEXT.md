@@ -43,8 +43,7 @@ _Avoid_: generated types, the schema, spec files
 **Agent-ready layer**:
 The portion of the template that is deliberately stack-independent: the `AGENTS.md`
 *Approach* and *Zero comments* sections, the Entire session-tracking hooks, the agent
-guard, and the one-check-script contract the pre-commit hook calls. It is the only thing
-kept in step with the two siblings.
+guard, and the one-check-script contract the pre-commit hook calls.
 _Avoid_: agent tooling, agent setup, the Claude layer
 
 **Vendored code**:

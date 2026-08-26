@@ -24,7 +24,7 @@ holds that reasoning and the options it rejected, including why the refusals thi
 issues are absent from `openapi.json`.
 
 **Run it behind something that terminates TLS rather than as the public edge.** How, and the
-one mistake that is easiest to make here, are in `docs/development.md` under *Deploying*.
+one mistake that is easiest to make here, are in `docs/deployment.md`.
 """
 
 from collections.abc import AsyncGenerator, Awaitable, Callable, MutableMapping
