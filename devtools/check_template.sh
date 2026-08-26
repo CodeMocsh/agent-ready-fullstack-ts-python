@@ -396,7 +396,7 @@ PY
 # project from piling every file at the top of tests/, and it is what the tier targets
 # select on. test_gate.py stays at the top because it covers no source: it reads this
 # Makefile, the hook and the workflow.
-for folder in devtools integration routes serve store; do
+for folder in devtools identity integration routes serve store; do
     need "backend/tests/$folder/__init__.py"
 done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and

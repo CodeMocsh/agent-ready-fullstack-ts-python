@@ -27,13 +27,24 @@ def database_of(request: Request) -> Database:
     return database
 
 
-def get_store(request: Request) -> TaskStore:
+TenantDep = Annotated[str, Depends(tenant_for)]
+"""The tenant this request resolved to, reached through `Depends` rather than called.
+
+Two things follow from that and neither is cosmetic. FastAPI caches a dependency's result for
+the life of a request and does not cache a plain call, so a resolver that verifies a signature
+is paid for once however many stores a route asks for. And an override reaches *here* — a test
+that substitutes the seam substitutes it everywhere it is read, rather than everywhere somebody
+remembered to route through.
+"""
+
+
+def get_store(request: Request, tenant: TenantDep) -> TaskStore:
     """The store this request may use, already scoped to its tenant.
 
     Resolving the tenant here rather than in each route is what makes it impossible for a
     route to forget: there is no unscoped store to obtain.
     """
-    return database_of(request).store(tenant_for(request))
+    return database_of(request).store(tenant)
 
 
 StoreDep = Annotated[TaskStore, Depends(get_store)]

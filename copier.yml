@@ -84,6 +84,12 @@ _message_after_copy: |
 
       make lint test      # both halves, then the contract suite across both
 
+  The backend authenticates nothing yet. Every request resolves to the tenant `default`,
+  which is what lets this run with no issuer and no key -- and it means anyone who can
+  reach the process can read and write everything it holds. Replace `tenant_for()` in
+  `backend/app/identity.py` before it is reachable by anyone you do not trust. Until you
+  do, every startup says so; `UNAUTHENTICATED_IS_INTENTIONAL=1` records that you meant it.
+
   The agent-ready layer is opt-in. To use it, install Entire and enable it:
 
       curl -fsSL https://entire.io/install.sh | bash && entire enable

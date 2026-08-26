@@ -65,7 +65,7 @@ any instance of the *previous* version that restarts will not come back up. Alre
 instances are fine. If that window matters, make the migration and the rollout one step — scale
 down, migrate, scale up — and plan a rollback as a schema rollback.
 
-## Two ways to ship something broken
+## Three ways to ship something broken
 
 **Never ship mock mode.** A production build must leave `VITE_ENABLE_MSW` unset, which is why
 there is no `.env.production` to set it in.
@@ -74,3 +74,12 @@ there is no `.env.production` to set it in.
 and nothing complains: the app comes up, serves, and loses the data. It logs which substrate it
 came up on — grep your deploy logs for `serving on the … substrate`, or assert
 `app.state.database.name` from a smoke test.
+
+**Replace `tenant_for()` in `app/identity.py`, or you are serving everybody.** It ships as a
+stub: every request resolves to the tenant `default`, so anyone who reaches the process reads
+and writes everything it holds. This one does complain — grep for `identity:` and read the
+level. `WARNING` means nobody has replaced it. Serving everybody is a real thing to do for a
+while, behind an authenticating proxy or on an internal tool; set
+`UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
+level and nothing else. [adr/0008](adr/0008-a-route-cannot-escape-the-identity-seam.md) says
+what a replacement owes.
