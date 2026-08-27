@@ -61,7 +61,7 @@ jobs:
           pin node 's/.*"node": ">=\([^"]*\)".*/\1/p' "$manifest"
           pin uv 's/.*required-version = ">=\([^"]*\)".*/\1/p' template/backend/pyproject.toml.jinja
 
-      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
           # There is no package.json at this root and there never will be. The template is
           # inert, so the version has to be handed over rather than discovered.
