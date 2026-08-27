@@ -423,6 +423,134 @@ need .github/workflows/ci.yml
 need_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
 
+# test_gate.py decides what runs by reading files as text, and a text check can be
+# satisfied by a string that means nothing: `"e2e" in playwright.config.ts` was true of a
+# config pointing at a directory holding none of the tier's specs, so the assertion passed
+# while `make test-e2e` ran nothing. That shipped, and the downstream project found it.
+#
+# So each of these is asserted in the failing direction, which is the only direction that
+# distinguishes a working check from a green one. Break what the check exists to catch,
+# require it to fail, put the file back. The passing direction is the line above it.
+echo "==> assert the gate's own checks fail on what they are for"
+python3 - <<'PY' || fail "a check in test_gate.py did not refuse what it is written to refuse"
+import pathlib
+import shutil
+import sys
+
+sys.path.insert(0, "backend")
+try:
+    from tests import test_gate
+except ImportError as error:
+    print(f"check: test_gate.py could not be imported, which is not the same as passing: {error}",
+          file=sys.stderr)
+    sys.exit(1)
+
+failures = []
+
+
+def refused(name):
+    try:
+        getattr(test_gate, name)()
+    except AssertionError:
+        return True
+    return False
+
+
+def mutated(name, originals, before, after, describes, where):
+    if not any(before in text for text in originals.values()):
+        failures.append(f"nothing in {where} says {before!r}, so this mutation tests nothing")
+        return
+    try:
+        for file, text in originals.items():
+            file.write_text(text.replace(before, after), encoding="utf-8")
+        if not refused(name):
+            failures.append(f"{name} passed {describes}")
+    finally:
+        for file, text in originals.items():
+            file.write_text(text, encoding="utf-8")
+
+
+def mutation(name, path, before, after, describes):
+    file = pathlib.Path(path)
+    mutated(name, {file: file.read_text(encoding="utf-8")}, before, after, describes, path)
+
+
+def emptied_tier(name, root, holds, declares, describes):
+    """A tier stops holding tests file by file, and the check passes while one is left, so
+    every file in the folder has to lose its declaration at once."""
+    files = sorted(pathlib.Path(root).rglob(holds))
+    if not files:
+        failures.append(f"no {holds} under {root}, so this mutation tests nothing")
+        return
+    originals = {file: file.read_text(encoding="utf-8") for file in files}
+    mutated(name, originals, declares, declares.replace("test", "check"), describes, root)
+
+
+for name in ("test_every_tier_is_selected_by_a_file_that_still_names_it",
+             "test_every_tier_still_holds_tests",
+             "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
+    if refused(name):
+        failures.append(f"{name} fails on the tree as rendered, before any mutation")
+
+mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
+         "frontend/playwright.config.ts", 'testDir: "./e2e"', 'testDir: "./specs-e2e"',
+         "a Playwright config pointed at a directory holding none of the tier's specs")
+
+mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
+         "Makefile", "DB_TEST_SUITE = tests/integration", "DB_TEST_SUITE = tests/db",
+         "a Makefile that selects a folder the tier does not live in")
+
+# Both spellings of `declares`, because a tier is emptied by its own runner's idea of what a
+# test looks like: `def test_` for pytest, `test(` for Playwright. A file that still exists
+# and declares nothing is the case a glob cannot see -- the folder is there, the runner
+# collects none of it, and the tier is gone while the target still exits 0.
+emptied_tier("test_every_tier_still_holds_tests", "backend/tests/integration", "test_*.py",
+             "def test_", "a Python tier whose files declare no test pytest would collect")
+
+emptied_tier("test_every_tier_still_holds_tests", "frontend/e2e", "*.spec.ts",
+             "test(", "an e2e tier whose specs declare no test Playwright would collect")
+
+planted = pathlib.Path(".github/workflows/planted.yml")
+had_github = pathlib.Path(".github").exists()
+planted.parent.mkdir(parents=True, exist_ok=True)
+planted.write_text("jobs:\n  gate:\n    steps:\n      - run: sh devtools/check_template.sh\n",
+                   encoding="utf-8")
+try:
+    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
+        failures.append("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it passed a "
+                        "workflow that runs check_template.sh, which is a script in the "
+                        "generator repository and not a file a generated project holds")
+finally:
+    planted.unlink()
+    if not had_github:
+        shutil.rmtree(".github")
+
+for problem in failures:
+    print(f"check: {problem}", file=sys.stderr)
+sys.exit(1 if failures else 0)
+PY
+
+# An exclude or a theme file naming a path that is not there is the quiet half of the same
+# failure: the entry matches nothing today and exempts whatever lands there tomorrow. The
+# backend's is worse still -- `rglob` on a missing directory answers an empty list, so a
+# renamed source folder made the comment gate report clean over nothing at all.
+if (cd frontend && node devtools/comments.mjs src --exclude src/nowhere) >/dev/null 2>&1; then
+    fail "comments.mjs accepted an exclude naming a path that is not in the tree"
+fi
+if (cd frontend && node devtools/conformance.mjs src --theme-file src/nowhere.css) >/dev/null 2>&1
+then
+    fail "conformance.mjs accepted a theme file that is not in the tree"
+fi
+if (cd backend && python3 devtools/comments.py app nowhere) >/dev/null 2>&1; then
+    fail "comments.py accepted a root that is not in the tree, where rglob reports clean"
+fi
+mkdir -p "$WORK/untokenizable"
+printf 'def f():\n    return (\n' >"$WORK/untokenizable/broken.py"
+if (cd backend && python3 devtools/comments.py "$WORK/untokenizable") >/dev/null 2>&1; then
+    fail "comments.py reported a file it cannot tokenize as carrying no comment"
+fi
+rm -rf "$WORK/untokenizable"
+
 # `make dev` has to stop what it started. Job control puts the backend in a process
 # group of its own, so a Ctrl-C in the terminal reaches only the script -- and the
 # script's cleanup trap is the one thing that then kills the backend. Exec'ing the
@@ -736,6 +864,15 @@ CONF="$WORK/conformance"
 CONFORMANCE="$OUT/frontend/devtools/conformance.mjs"
 mkdir -p "$CONF/bad" "$CONF/good"
 
+# The fixtures run from here rather than from the rendered frontend, so no package.json is
+# in reach and the script falls back to its own defaults -- one of which names a theme file
+# that exists only inside a project. The fixture brings its own and says so, which is also
+# what keeps the project's `allow` list out of a run whose whole purpose is to prove the
+# rules fire: an entry added there would otherwise silence a fixture and nothing would say
+# the rule had stopped being tested.
+: >"$CONF/theme.css"
+conformance() { node "$CONFORMANCE" --theme-file "$CONF/theme.css" "$@"; }
+
 # The comments in these fixtures are the point of them, not an oversight: the
 # scanner has to see through a comment in both directions. A stray ")" in one
 # would end an effect body early and hide the fetch below it; the word "fetch("
@@ -909,7 +1046,7 @@ export function Good({ onResize, fontSize }: Props) {
 }
 GOOD
 
-conformance_output="$(node "$CONFORMANCE" "$CONF/bad" 2>&1 || true)"
+conformance_output="$(conformance "$CONF/bad" 2>&1 || true)"
 for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
             arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
             magic-presentation-prop effect-data; do
@@ -949,9 +1086,9 @@ for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
     fi
 done
 
-if ! node "$CONFORMANCE" "$CONF/good" >/dev/null 2>&1; then
+if ! conformance "$CONF/good" >/dev/null 2>&1; then
     echo "conformance wrongly flagged legitimate code:" >&2
-    node "$CONFORMANCE" "$CONF/good" >&2 || true
+    conformance "$CONF/good" >&2 || true
     exit 1
 fi
 
@@ -959,11 +1096,11 @@ fi
 # that genuinely belongs outside the theme has a reviewable home. If it stops
 # working the only remaining way past a false positive is deleting the check.
 printf 'export const brand = "#5865f2";\n' >"$CONF/good/brand.ts"
-if node "$CONFORMANCE" "$CONF/good" >/dev/null 2>&1; then
+if conformance "$CONF/good" >/dev/null 2>&1; then
     echo "conformance missed a raw colour outside the theme" >&2
     exit 1
 fi
-if ! node "$CONFORMANCE" "$CONF/good" --allow '#5865f2' >/dev/null 2>&1; then
+if ! conformance "$CONF/good" --allow '#5865f2' >/dev/null 2>&1; then
     echo "conformance ignored an allowlisted value" >&2
     exit 1
 fi

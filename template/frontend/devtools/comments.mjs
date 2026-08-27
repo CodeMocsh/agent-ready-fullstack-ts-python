@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
+import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
 import { lineOf, regions } from "./scan.mjs";
 
 const SOURCE = /\.(?:ts|tsx|mts|mjs|js|jsx|css)$/;
@@ -70,6 +70,7 @@ function report(found) {
 
 const { paths, exclude } = parseArgs(process.argv.slice(2));
 const patterns = [...configuredExcludes(), ...exclude];
+assertResolves(patterns, "comments.exclude");
 const files = sourceFiles(paths, {
   matches: (name) => SOURCE.test(name),
   skipped: (path) => excluded(path, patterns),

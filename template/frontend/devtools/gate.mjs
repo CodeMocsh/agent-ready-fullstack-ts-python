@@ -29,6 +29,17 @@ export function section(key) {
   return JSON.parse(readFileSync(file, "utf8"))[key] ?? {};
 }
 
+export function assertResolves(paths, setting) {
+  const missing = paths.filter((pattern) => !existsSync(pattern.replace(/\/\*\*$/, "")));
+  if (missing.length === 0) return;
+  fail(
+    `${setting} names ${missing.join(", ")}, which is not in the tree.\n` +
+      "An entry matching nothing reads as a rule someone considered, and is a hole held\n" +
+      "open for whatever lands at that path next: the file arrives, it is exempt on\n" +
+      "arrival, and no check says so. Correct the path, or drop the entry.",
+  );
+}
+
 function walk(directory, selection, found) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const child = join(directory, entry.name);
