@@ -71,7 +71,7 @@ jobs:
         with:
           node-version: ${{ steps.pins.outputs.node }}
 
-      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ steps.pins.outputs.uv }}
 
