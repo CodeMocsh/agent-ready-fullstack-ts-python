@@ -3,7 +3,8 @@ import { gate } from "./harness";
 
 const OFFENDING_MARKUP = [
   "import { useEffect, useState } from 'react';",
-  "export function Bad() {",
+  "export const load = (id: string): string => id.trim();",
+  "export function Wrong() {",
   "  const [items, setItems] = useState<string[]>([]);",
   "  useEffect(() => {",
   "    fetch('/api/items').then(async (response) => setItems(await response.json()));",
@@ -21,6 +22,8 @@ const OFFENDING_RULES = [
   "arbitrary-spacing",
   "arbitrary-type",
   "effect-data",
+  "exported-function-expression",
+  "filename-export",
   "inline-type-declaration",
   "magic-presentation-prop",
   "named-colour",
@@ -74,6 +77,24 @@ const CLEAN = [
   "}",
 ];
 
+const EXPORTED_ARROWS = [
+  "export const typed = (id: string): string => id;",
+  "export const asynchronous = async (id: string) => id;",
+  "export const generic = <T,>(value: T): T => value;",
+  "export const annotated: (id: string) => string = (id) => id;",
+  "export const expression = function () { return 1; };",
+];
+
+const MULTILINE_ARROW = ["export const wrapped = (", "  id: string,", "): string => id;"];
+
+const NOT_ARROWS = [
+  "export const ICON_STROKE = 1.5;",
+  "export const NAMES = ['a', 'b'];",
+  "export function proper(id: string): string {",
+  "  return id;",
+  "}",
+];
+
 const conformance = gate("conformance.mjs", "conformance");
 
 function scan(name: string, lines: string[]) {
@@ -107,6 +128,26 @@ describe("the conformance gate", () => {
 
   it("reports nothing in markup that only looks like it breaks them", () => {
     const { status, rules } = scan("good.tsx", CLEAN);
+    expect(rules).toEqual([]);
+    expect(status).toBe(0);
+  });
+
+  it("catches every exported arrow form, including typed, async and generic", () => {
+    for (const [index, line] of EXPORTED_ARROWS.entries()) {
+      const { status, rules } = scan(`arrow-${index}.ts`, [line]);
+      expect({ line, rules }).toEqual({ line, rules: ["exported-function-expression"] });
+      expect(status).toBe(1);
+    }
+  });
+
+  it("catches an exported arrow whose parameters span lines", () => {
+    const { status, rules } = scan("wrapped.ts", MULTILINE_ARROW);
+    expect(rules).toEqual(["exported-function-expression"]);
+    expect(status).toBe(1);
+  });
+
+  it("leaves an exported value that is not a function alone", () => {
+    const { status, rules } = scan("values.ts", NOT_ARROWS);
     expect(rules).toEqual([]);
     expect(status).toBe(0);
   });

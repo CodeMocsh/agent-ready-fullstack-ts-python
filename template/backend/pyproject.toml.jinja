@@ -95,6 +95,12 @@ package = false
 line-length = 100
 
 [tool.ruff.lint]
+# Without this, ruff infers a logger only where `logging.error(...)` is called on the root
+# logger directly, and the module-level handle every real project uses is invisible to it.
+# The TRY and LOG rules below would then pass on the one file that actually logs -- a green
+# check that inspected nothing. Name the handle here whenever you add one.
+logger-objects = ["app.main._LOG"]
+
 select = [
     "E", # https://docs.astral.sh/ruff/rules/#error-e
     "F", # https://docs.astral.sh/ruff/rules/#pyflakes-f
@@ -114,6 +120,14 @@ select = [
     # Function volume, which C901 cannot see: a long straight-line function has a
     # complexity of 1.
     "PLR0915", # https://docs.astral.sh/ruff/rules/too-many-statements/
+    # Failure handling, which is *Fail loudly* mechanised. Logging an exception and then
+    # raising it reports one fault twice, and `logging.error` in an except block drops the
+    # traceback. LOG and G gate the call itself: an f-string message is already baked into
+    # the text before a handler sees it, so nothing can group or filter on it.
+    "TRY400", # https://docs.astral.sh/ruff/rules/error-instead-of-exception/
+    "TRY401", # https://docs.astral.sh/ruff/rules/verbose-log-message/
+    "LOG", # https://docs.astral.sh/ruff/rules/#flake8-logging-log
+    "G", # https://docs.astral.sh/ruff/rules/#flake8-logging-format-g
 ]
 ignore = [
     "E501", # https://docs.astral.sh/ruff/rules/line-too-long/

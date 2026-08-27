@@ -15,6 +15,8 @@ fails the build, so the standard holds without anyone remembering it. The aim is
 | **Type and fonts** | size, family, leading and tracking are declared in `@theme` and reached through a utility | `conformance.mjs` |
 | **Icon weight** | one stroke token decides it, never the call site | `conformance.mjs` |
 | **Data fetching** | server state comes from TanStack Query. An effect that fetches is refused; effects that subscribe, listen or touch the DOM are untouched | `conformance.mjs` |
+| **Naming** | a `.tsx` file is named for what it exports, in kebab-case | `conformance.mjs` |
+| **Definitions** | exported functions are declarations, not arrows assigned to a name | `conformance.mjs` |
 | **Types** | strict, plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` | `tsc --noEmit` |
 | **Comments** | none | `comments.mjs` |
 
@@ -36,6 +38,8 @@ with vendored UI excluded, 4.8% to 8.9% over every file. This template earns the
 | Category | What must hold | Enforced by |
 |---|---|---|
 | **Correctness and simplification** | the exact simple form over the verbose one; no commented-out code | ruff `SIM` `RET` `PIE` `C4` `PERF` `ERA` |
+| **Failure handling** | an exception is raised or logged, never both; `logging.exception` keeps the traceback | ruff `TRY400` `TRY401` |
+| **Log messages** | a message is a format string with arguments, not an f-string already collapsed to text | ruff `LOG` `G` |
 | **Types** | strict, no untyped seam | basedpyright |
 | **Prose** | spelling in names, docstrings and messages | codespell |
 | **Comments** | none | `comments.py` |

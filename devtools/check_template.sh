@@ -1046,10 +1046,19 @@ export function Good({ onResize, fontSize }: Props) {
 }
 GOOD
 
+cat >"$CONF/bad/named-wrong.tsx" <<'BAD'
+export const load = (id: string): string => id.trim();
+
+export function SomethingElse() {
+  return <p className="p-4">{load("x")}</p>;
+}
+BAD
+
 conformance_output="$(conformance "$CONF/bad" 2>&1 || true)"
 for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
             arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
-            magic-presentation-prop effect-data; do
+            magic-presentation-prop effect-data exported-function-expression \
+            filename-export; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
         echo "conformance check $rule did not fire" >&2
         printf '%s\n' "$conformance_output" >&2
@@ -1874,8 +1883,19 @@ if (!(density < Number(process.argv[1]))) {
 }
 ' "$INFLATED"
 
-# The backend half of the same drive. Its floor is the one that has to move: the smoke
-# project has fewer callables than a mean is worth gating on.
+# A missing baseline above the floor is a failure, not a notice. This half used to print
+# "no baseline yet" and return 0, so the drift check never turned on in any project where
+# nobody thought to record one -- a check that silently never starts. Asserted here because
+# the shipped baseline means the passing path is the only one anyone would otherwise see.
+mv backend/.complexity-baseline.json "$WORK/baseline.parked"
+if (cd backend && uv run --no-sync python devtools/complexity.py app \
+        --baseline .complexity-baseline.json >/dev/null 2>&1); then
+    fail "backend complexity accepted a missing baseline above min-callables"
+fi
+mv "$WORK/baseline.parked" backend/.complexity-baseline.json
+
+# The backend half of the same drive. Its floor moves so this fixture's own tiny baseline
+# is the thing under test rather than the smoke project's real callable count.
 sed 's/^min-callables = 50$/min-callables = 1/' backend/pyproject.toml >"$WORK/pyproject.floored"
 cp "$WORK/pyproject.floored" backend/pyproject.toml
 need_grep '^min-callables = 1$' backend/pyproject.toml
