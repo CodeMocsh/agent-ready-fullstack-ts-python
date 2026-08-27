@@ -8,9 +8,10 @@ name: release
 # here that reaches users and it must never be cut from a tree the gate has not passed.
 # Both firing on `push: main` would race, and the race publishes.
 #
-# CHANGELOG.md decides the version, and devtools/release_notes.py is the only thing that
-# reads it -- the same script the gate runs on every pull request, so a heading this
-# workflow cannot parse fails while the change is still a pull request.
+# VERSION decides which version, and GitHub writes what changed. `--generate-notes` lists
+# the pull requests merged since the previous tag, which is the list a hand-written
+# changelog carried -- except this one cannot fall out of step with what actually landed,
+# and nobody has to copy it.
 
 on:
   workflow_run:
@@ -28,7 +29,7 @@ concurrency:
 
 jobs:
   release:
-    name: tag and release what the changelog claims
+    name: tag and release what VERSION claims
     # A gate that failed, was cancelled, or timed out must not reach the tag. Dispatch
     # carries no workflow_run and runs on its own authority.
     if: >-
@@ -43,14 +44,26 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
 
-      - name: Read the version and its notes out of the changelog
+      - name: Read the version
         id: claimed
         run: |
           set -eu
-          version="$(python3 devtools/release_notes.py CHANGELOG.md --version)"
-          python3 devtools/release_notes.py CHANGELOG.md --notes >"$RUNNER_TEMP/notes.md"
-          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
-          printf '    claimed %s\n' "$version"
+          if [ ! -f VERSION ]; then
+            echo "release: VERSION does not exist, and it is what decides the version." >&2
+            echo "release: this workflow and that file land together or not at all." >&2
+            exit 1
+          fi
+          number="$(tr -d ' \t\n\r' <VERSION)"
+          # Refused rather than tagged as-is: a tag is permanent, and `vlatest` or an empty
+          # file would become a release nobody can withdraw.
+          case "$number" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "release: VERSION reads '$number', which is not a semantic version." >&2
+              exit 1 ;;
+          esac
+          printf 'version=v%s\n' "$number" >>"$GITHUB_OUTPUT"
+          printf '    claimed v%s\n' "$number"
 
       # The question is whether the *release* exists, not whether the tag does. Tag first
       # and release second is two steps, and a failure between them used to leave a tag
@@ -92,5 +105,4 @@ jobs:
                 tag -a "$VERSION" -m "$VERSION"
             git push origin "refs/tags/$VERSION"
           fi
-          gh release create "$VERSION" --title "$VERSION" \
-            --notes-file "$RUNNER_TEMP/notes.md"
+          gh release create "$VERSION" --title "$VERSION" --generate-notes

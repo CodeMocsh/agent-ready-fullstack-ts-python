@@ -74,23 +74,27 @@ itself. What enforces that lives on GitHub rather than in a file, so it is writt
 
 ## Bumping the version
 
-There is no version string in a manifest here, because nothing at this root is a package. The
-version is a **git tag**, and Copier resolves to the newest one rather than to `main` — so an
-untagged merge reaches nobody, however long it has been on the default branch.
+What users get is a **git tag**, because Copier resolves to the newest one rather than to
+`main` — so an untagged merge reaches nobody, however long it has been on the default branch.
+`VERSION` is not a manifest; nothing at this root is a package. It is one line saying which tag
+should exist.
 
-The tag is not written by hand. `CHANGELOG.md` decides it: the topmost `## vX.Y.Z` heading is
-the version this repo claims to be at, and `devtools/release_notes.py` is the only thing that
-reads it — on every pull request, so a heading nothing can parse fails while it is still a
-pull request. When the gate passes on main and no release answers that claim,
-`.github/workflows/release.yml` creates the tag and cuts the release from that section's own
-text. It runs on a *completed* gate rather than on the push, so a tag is never cut from a tree
-that has not passed.
+The tag is not written by hand. **`VERSION` decides it** — one line, the number this repo
+claims to be at. The gate reads it on every pull request, so a value nothing can tag fails
+while it is still a pull request. When the gate passes on main and no release answers that
+claim, `.github/workflows/release.yml` creates the tag and the release. It runs on a
+*completed* gate rather than on the push, so a tag is never cut from a tree that has not
+passed.
 
-So a release is an edit inside a pull request, reviewed alongside the change it describes:
+GitHub writes what changed, from the pull requests merged since the previous tag. Nothing here
+keeps a hand-written list: one would say what somebody remembered to copy, and this says what
+landed.
 
-1. Add a `## vX.Y.Z — YYYY-MM-DD` heading below `## Unreleased`.
-2. Move the entries that are shipping under it.
-3. Merge. The tag and the GitHub release appear on their own.
+So a release is a one-line edit inside a pull request, reviewed alongside the change it
+describes:
+
+1. Edit `VERSION`.
+2. Merge. The tag and the release appear on their own.
 
 **The number describes what `copier update` does to a project that already exists**, not how
 much the code changed. That is the only question a user of a template can act on:

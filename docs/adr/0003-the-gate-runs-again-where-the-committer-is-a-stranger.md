@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted. Supersedes the position taken when the workflow was deleted, which
-[CHANGELOG.md](../../CHANGELOG.md) records under v0.4.0.
+Accepted. Supersedes the position taken when the workflow was deleted, which shipped in
+v0.4.0.
 
 ## Context
 

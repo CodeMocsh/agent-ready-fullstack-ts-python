@@ -306,8 +306,8 @@ uncommented "$REPO/.github/workflows/check.yml" | grep -q 'make check' \
 if uncommented "$REPO/.github/workflows/check.yml" | grep -q 'check_template.sh'; then
     fail "check.yml calls check_template.sh directly. Name the make target, so the workflow and the hook cannot run different things."
 fi
-uncommented "$REPO/.github/workflows/release.yml" | grep -q 'release_notes.py' \
-    || fail "release.yml no longer reads the changelog through devtools/release_notes.py, so the parse it depends on is checked nowhere before it runs."
+uncommented "$REPO/.github/workflows/release.yml" | grep -q 'VERSION' \
+    || fail "release.yml no longer reads VERSION, so nothing in the repository decides which version it would cut."
 
 # A workflow that lints clean can still be wired wrong, and the wiring is what carries
 # the rules. no-mistakes keeps a test per workflow for this reason; these are the
@@ -333,23 +333,22 @@ for workflow in "$REPO"/.github/workflows/*.yml; do
     fi
 done
 
-# The release workflow's whole contract is that this parses. It runs after a merge, where
-# a refusal is a release that silently did not ship -- so the parse is proved here, on
-# every pull request, while the heading is still something a person can fix.
-echo "==> assert the changelog names a version, and a release could be cut from it"
-python3 "$REPO/devtools/release_notes.py" "$REPO/CHANGELOG.md" --version >/dev/null \
-    || fail "release_notes.py cannot read a version out of CHANGELOG.md, so release.yml would refuse after the merge."
-python3 "$REPO/devtools/release_notes.py" "$REPO/CHANGELOG.md" --notes >/dev/null \
-    || fail "release_notes.py cannot read release notes out of CHANGELOG.md, so release.yml would refuse after the merge."
-# Both directions, because a parser that accepts everything reads a malformed changelog as
-# a version and tags whatever it found.
-printf '# Changelog\n\n## Unreleased\n\n- nothing released yet\n' >"$WORK/changelog-unversioned.md"
-if python3 "$REPO/devtools/release_notes.py" "$WORK/changelog-unversioned.md" --version >/dev/null 2>&1; then
-    fail "release_notes.py read a version out of a changelog that names none."
-fi
-printf '# Changelog\n\n## v9.9.9 - 2026-01-01\n\n## v0.1.0 - 2026-01-01\n\n- older\n' >"$WORK/changelog-empty-section.md"
-if python3 "$REPO/devtools/release_notes.py" "$WORK/changelog-empty-section.md" --notes >/dev/null 2>&1; then
-    fail "release_notes.py accepted an empty section, so a release would ship saying nothing."
+# VERSION is the whole of what the release workflow reads, and it reads it after a merge,
+# where a refusal is a release that silently did not ship. So the value is proved here, on
+# every pull request, while it is still something a person can fix.
+echo "==> assert VERSION names a version a release could be cut from"
+need "$REPO/VERSION"
+CLAIMED="$(tr -d ' \t\n\r' <"$REPO/VERSION")"
+case "$CLAIMED" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) fail "VERSION reads '$CLAIMED', which is not a semantic version, so release.yml would refuse after the merge." ;;
+esac
+# A tag is permanent, so a version already released must never be claimed by a commit that
+# would move it. release.yml refuses that after the merge; this says so before the push.
+if git -C "$REPO" rev-parse -q --verify "refs/tags/v$CLAIMED^{commit}" >/dev/null 2>&1; then
+    if [ "$(git -C "$REPO" rev-parse "refs/tags/v$CLAIMED^{commit}")" != "$(git -C "$REPO" rev-parse HEAD)" ]; then
+        fail "VERSION claims $CLAIMED, and v$CLAIMED already tags a different commit. A released version is never moved: claim a new one."
+    fi
 fi
 
 if [ "$VARIANT" = "default" ]; then
