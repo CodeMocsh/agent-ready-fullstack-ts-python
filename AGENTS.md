@@ -123,12 +123,18 @@ executing.
 **Editing `template/` and running nothing proves nothing: render it and exercise the output.**
 A change that looks obviously right in the diff is a change nobody has run.
 
-## The gate lives before the commit, and nowhere else
+## The gate runs before the commit, and again on the pull request
 
 `devtools/render.sh` renders the template; `devtools/check_template.sh` exercises what it
-rendered. The pre-commit hook runs the check script, `make check` runs it, and no workflow
-ships — so a check that is not in that script runs nowhere, and an unarmed clone commits
-unchecked with nothing anywhere saying so. **`make hooks` is not optional.**
+rendered. The pre-commit hook runs the check script, `make check` runs it, and
+`.github/workflows/check.yml` runs it again on every pull request — so a check that is not in
+that script still runs nowhere. The workflow names the target instead of re-listing the steps,
+because a re-listed copy drifts, always toward checking less.
+
+**`make hooks` is not optional.** The workflow is a second place the gate runs and not a
+replacement for the first, and the hook is the one that answers while the change is still in
+your hands. Why both, and what was rejected, is
+[adr/0003](docs/adr/0003-the-gate-runs-again-where-the-committer-is-a-stranger.md).
 
 The render is from the working tree rather than from a tag, so the gate validates what you are
 about to commit. A full run installs both toolchains, lints and tests both halves, regenerates
@@ -204,4 +210,6 @@ against that path until it says what you meant. The directory is yours to remove
 | [CONTEXT.md](CONTEXT.md) | the vocabulary — use its words, and no synonyms for them |
 | [docs/adr/](docs/adr/) | the decisions, and [when one earns a file](docs/adr/README.md) |
 | [README.md](README.md) | what the template is and the command that runs it |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | what a change owes before it lands, how an outside contributor arms the gate, and how a version is bumped |
+| [docs/repository-settings.md](docs/repository-settings.md) | the GitHub-side configuration the gate depends on and no file can carry |
 | [template/AGENTS.md.jinja](template/AGENTS.md.jinja) | what a generated project tells its own agents — and the rules the code you write into `template/` lives under |

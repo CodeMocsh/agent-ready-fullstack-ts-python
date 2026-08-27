@@ -1,0 +1,92 @@
+name: check
+
+# One job, and it runs `make check` -- the target the pre-commit hook already runs, named
+# rather than re-listed. docs/adr/0003 argues why this exists alongside the hook, and
+# check_template.sh refuses a version of this file that re-lists the steps instead.
+#
+# Every version below is read out of `template/` rather than written here. A pin spelled in
+# two places goes stale in one of them, and nothing fails when it does.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # The floors, the release cool-off and the audit all resolve against a registry that
+  # moves while this repo does not. A tree that passed last month can fail today with no
+  # commit between, and without this the first person to find out is a contributor whose
+  # own pull request goes red for a reason that is not theirs.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The job name is the name a branch ruleset requires, so it is short and stays put.
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    # A full run installs both toolchains twice over and starts servers. The cap is a hang
+    # tripwire with margin, not the expected end of a healthy run.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      # A sed that matches nothing must fail here rather than hand an empty version to the
+      # setup action below, which would install whatever it defaults to and check the wrong
+      # toolchain quietly.
+      - name: Read the toolchain pins out of the template
+        id: pins
+        run: |
+          set -eu
+          pin() {
+            value="$(sed -n "$2" "$3" | head -n1)"
+            if [ -z "$value" ]; then
+              echo "check: found no $1 pin in $3." >&2
+              echo "check: the pin moved and this workflow still expects it there." >&2
+              exit 1
+            fi
+            printf '%s=%s\n' "$1" "$value" >>"$GITHUB_OUTPUT"
+            printf '    %s %s\n' "$1" "$value"
+          }
+          manifest=template/frontend/package.json.jinja
+          pin pnpm 's/.*"packageManager": "pnpm@\([^"]*\)".*/\1/p' "$manifest"
+          pin node 's/.*"node": ">=\([^"]*\)".*/\1/p' "$manifest"
+          pin uv 's/.*required-version = ">=\([^"]*\)".*/\1/p' template/backend/pyproject.toml.jinja
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          # There is no package.json at this root and there never will be. The template is
+          # inert, so the version has to be handed over rather than discovered.
+          version: ${{ steps.pins.outputs.pnpm }}
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ steps.pins.outputs.node }}
+
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+        with:
+          version: ${{ steps.pins.outputs.uv }}
+
+      # A pull request runs the default variant. Anything landing on main, and the weekly
+      # run, take every license variant -- the only place they all run.
+      #
+      # The runner has a Docker daemon, so the Postgres tier runs here. On a laptop without
+      # one the gate prints that it skipped; this is where that tier is not optional.
+      - name: Run the gate
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -eu
+          if [ "$EVENT" = "pull_request" ]; then
+            make check
+          else
+            make check-all
+          fi

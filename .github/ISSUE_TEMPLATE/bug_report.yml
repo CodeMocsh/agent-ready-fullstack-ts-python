@@ -1,0 +1,52 @@
+name: Bug report
+description: Something the template renders, or something the gate does, is wrong.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A vulnerability never goes here. Use private reporting — see `SECURITY.md`.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where it went wrong
+      options:
+        - Generating a project (copier copy or copier update)
+        - A generated project (its code, its gate, or its docs)
+        - Working on the template itself (make check, make render)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Template version
+      description: The `_commit` value in your project's `.copier-answers.yml`, or the commit you have checked out.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: What you did
+      description: The commands, from a clean directory, and the answers you gave the generator.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected instead
+      description: Paste the failure in full. A gate that reports the wrong file is itself the bug.
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and toolchain
+      description: Operating system, and the versions of node, pnpm, python and uv you have.
+    validations:
+      required: true

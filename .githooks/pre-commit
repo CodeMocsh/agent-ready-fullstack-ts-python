@@ -1,6 +1,7 @@
 #!/bin/sh
 # The template is inert until it is rendered, so the only honest check is to render
-# it and exercise the result. That is what this runs, and since no workflow runs it
-# is the only thing that does.
+# it and exercise the result. That is what this runs. The pull request workflow runs
+# the same script against a fresh checkout; this one runs it before the commit exists,
+# which is the only place the answer arrives while the change is still in your hands.
 set -eu
 exec "$(git rev-parse --show-toplevel)/devtools/check_template.sh" default

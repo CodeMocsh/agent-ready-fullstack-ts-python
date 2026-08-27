@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability
+    url: https://github.com/CodeMocsh/agent-ready-fullstack-ts-python/security/advisories/new
+    about: Never in a public issue. This opens a private report to the maintainers.
+  - name: How to work in this repo
+    url: https://github.com/CodeMocsh/agent-ready-fullstack-ts-python/blob/main/CONTRIBUTING.md
+    about: The gate, the rules a change lives under, and what a change owes.

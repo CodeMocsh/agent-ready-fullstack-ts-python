@@ -1,0 +1,29 @@
+version: 2
+
+# This root has no package.json and no pyproject.toml, so the only thing here with a
+# version to bump is the actions the two workflows pin by commit. The second entry reaches
+# the workflow the template ships, which every generated project inherits.
+#
+# The rest of the template is out of reach and stays a person's job: its manifests are
+# `package.json.jinja` and `pyproject.toml.jinja`, which Dependabot cannot parse, and its
+# floors have to clear the release cool-off -- so the newest version is exactly the one that
+# cannot resolve. `docs/constraints.md` carries that rule.
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "Bump"
+    labels: ["dependencies"]
+
+  - package-ecosystem: github-actions
+    directory: /template
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "Bump"
+    labels: ["dependencies", "template"]

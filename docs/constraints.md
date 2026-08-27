@@ -21,8 +21,9 @@ toolchain: the editor stops type-checking it, biome and ruff stop seeing it, and
 template ships stops applying to it. Anything project-specific a source file needs comes from a
 value it reads at runtime, not from a token.
 
-**A workflow file, if one ever returns, is never `.jinja`.** GitHub Actions uses `${{ }}` and so
-does Jinja. Keeping `.github/workflows/*.yml` unrendered means the two syntaxes never meet.
+**A workflow file is never `.jinja`.** GitHub Actions uses `${{ }}` and so does Jinja. Keeping
+`.github/workflows/*.yml` unrendered means the two syntaxes never meet. This binds both trees:
+the workflow the template ships, and the ones this repo runs on itself.
 
 **The backend half is token-free.** Its only `.jinja` is `pyproject.toml.jinja`. Everything in
 `backend/app/` feeds `openapi.json`, a committed artifact sworn never to be hand-edited, so a
@@ -33,6 +34,18 @@ regenerates in the same commit.
 
 **A new question needs a behavior-preserving default**, because `copier update --defaults` has
 to be a no-op for an existing project.
+
+## The gate downloads actionlint, so it needs a network
+
+`check_template.sh` fetches a pinned actionlint and verifies its hash before linting the
+workflows in both trees. A workflow cannot report its own breakage, so the gate is the only
+place that catches a malformed one before it is pushed.
+
+The cost is that the pre-commit hook now fails with no network, where before it only needed one
+for the render and the installs. There is no cache: a hit that could be stale is worse here
+than a download, because the thing being verified is a binary. Bump the version and all four
+platform hashes together -- they are the same release, and a hash that belongs to another one
+fails closed.
 
 ## `openapi-typescript` runs through `pnpm dlx` at an exact pin
 
