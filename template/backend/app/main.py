@@ -8,7 +8,6 @@ from fastapi.responses import JSONResponse
 from app.identity import Unauthenticated, resolved_without_a_credential
 from app.models import ErrorBody
 from app.routes import public_router, router
-from app.store import Database
 from app.wiring import ACKNOWLEDGED_ENV, build, unauthenticated_is_acknowledged
 
 _LOG = logging.getLogger("uvicorn.error")
@@ -72,7 +71,10 @@ async def _say_what_this_deployment_authenticates(substrate: str) -> None:
 
 
 def create_app() -> FastAPI:
-    """The app, assembled. A function so a test can hold two with different substrates."""
+    """The app, assembled. A function so a test can hold two with different substrates.
+
+    `docs/adr/0007` holds the settings below and why each one is off.
+    """
     app = FastAPI(
         title="Tasks API",
         version="0.1.0",
@@ -102,11 +104,3 @@ async def _refuse(_request: Request, refusal: Exception) -> JSONResponse:
 
 
 app = create_app()
-
-
-def database_of(app: FastAPI) -> Database:
-    """The substrate this app is serving from. Raises before the lifespan has run."""
-    database = getattr(app.state, "database", None)
-    if database is None:
-        raise RuntimeError("no database on app.state: the lifespan has not run")
-    return database

@@ -7,6 +7,8 @@ would pass against a schema with no policies at all. Every assertion below is ma
 
 Each test gets its own schema and its own pair of roles, named after it. Roles are
 cluster-wide, so a fixed pair would make this file unable to run beside itself.
+
+`docs/adr/0002` holds the decision these assertions enforce and the options it rejected.
 """
 
 from typing import Any

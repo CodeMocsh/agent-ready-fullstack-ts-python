@@ -154,6 +154,11 @@ reaches to write something down, and both grow one reasonable-looking paragraph 
 A new rule belongs in this file only if it is a principle. Anything with detail in it goes in
 `docs/` and gets a link from the index below.
 
+**A decision record is for a decision, not for an explanation.** The test is the cost of change:
+a choice earns a file when undoing it later would be expensive, and one you could make
+differently next week is an implementation detail. Most changes need neither —
+[what earns a file](docs/adr/README.md).
+
 ## Layout
 
 ```
@@ -167,12 +172,14 @@ devtools/
   render.sh             renders the template and asserts nothing was left unrendered
   check_template.sh     exercises what render.sh produced -- the whole gate
   install-hooks.sh      installs a shim per committed hook
+  links.py              asserts each document a file names exists, and each is named
 docs/                   constraints.md, conformance.md, adr/ -- see the index below
 CONTEXT.md              the vocabulary
 ```
 
 There is no `src/` and no `package.json`. Copier removes the need for generator code, and its
-Jinja handles the license variants directly.
+Jinja handles the license variants directly — argued in
+[adr/0001](docs/adr/0001-copier-over-a-bespoke-cli.md).
 
 ## Commands
 
@@ -195,6 +202,6 @@ against that path until it says what you meant. The directory is yours to remove
 | [docs/constraints.md](docs/constraints.md) | **read this before editing `template/`** — the load-bearing details, the Copier rules, and how each one fails |
 | [docs/conformance.md](docs/conformance.md) | why the template gates what it gates, and the measurements behind every threshold |
 | [CONTEXT.md](CONTEXT.md) | the vocabulary — use its words, and no synonyms for them |
-| [docs/adr/](docs/adr/) | the decisions |
+| [docs/adr/](docs/adr/) | the decisions, and [when one earns a file](docs/adr/README.md) |
 | [README.md](README.md) | what the template is and the command that runs it |
 | [template/AGENTS.md.jinja](template/AGENTS.md.jinja) | what a generated project tells its own agents — and the rules the code you write into `template/` lives under |

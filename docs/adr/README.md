@@ -6,14 +6,21 @@ does live in `template/docs/adr/`, and ship to every project made from it.
 
 ## What belongs here
 
-A decision earns a file when **a reasonable person would undo it** — when the setup looks like
-it could be simpler, and the reason it is not lives outside the file. The highest-value entry
-is something verified against a real system that contradicts the obvious reading: we tried the
-obvious thing and it silently did nothing. A rejected option belongs here too, especially the
-one someone will propose next.
+**The test is the cost of change.** That is the line Grady Booch draws between architecture and
+the rest of design: a decision is significant when reversing it would be expensive. Michael
+Nygard, who introduced this format in 2011, names where the expense shows up — the structure, a
+quality the system is held to, a dependency, an interface, or the way the thing is built. A
+choice that touches none of those is an implementation detail, however hard it was to get right.
 
-Detail an agent can work out from the diff goes in [../constraints.md](../constraints.md)
-instead.
+In practice a decision earns a file when **a reasonable person would undo it** — when the setup
+looks like it could be simpler, and the reason it is not lives outside the file. The
+highest-value entry is something verified against a real system that contradicts the obvious
+reading: we tried the obvious thing and it silently did nothing. A rejected option belongs here
+too, especially the one someone will propose next.
+
+If you could choose differently next week and nothing outside that file would notice, the
+reasoning goes in the commit message. Detail an agent can work out from the diff goes in
+[../constraints.md](../constraints.md) instead.
 
 ## How
 

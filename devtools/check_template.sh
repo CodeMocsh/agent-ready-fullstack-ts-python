@@ -210,6 +210,15 @@ need_exec devtools/install-hooks.sh
 need_exec devtools/dev.sh
 need_exec devtools/contract-test.sh
 
+echo "==> assert every document is named, and names only documents that exist"
+# docs/conformance.md names what this cannot see.
+python3 "$REPO/devtools/links.py" "$REPO" --exclude template \
+    --allow-orphan README.md --allow-orphan CLAUDE.md \
+    || fail "a document names something that does not exist, or nothing names it."
+python3 "$REPO/devtools/links.py" "$OUT" \
+    --allow-orphan README.md --allow-orphan CLAUDE.md \
+    || fail "the generated project names a document that does not exist, or orphans one."
+
 if [ "$VARIANT" = "default" ]; then
     echo "==> assert hostile answers stay data, not syntax"
     # The free-form questions are prose, and some of the files their answers land
@@ -1476,7 +1485,7 @@ echo "==> assert the drift gate is two-sided, on both halves"
 # handling -- a rise is refused, a fall is recorded for you -- and only one of them may
 # rewrite the file, so no single case can show the rule. Hence a table per half.
 #
-# Both run against scratch trees rather than the rendered project: the frontend needs
+# Both run against scratch trees rather than the generated project: the frontend needs
 # real density and enough of it to clear the size guard, and the backend needs an exact
 # mean rather than whatever the smoke project happens to score.
 (
@@ -1614,7 +1623,7 @@ DRIFT_CASES
     fi
 )
 
-# The backend table, in its own unit. Run against the rendered project's interpreter:
+# The backend table, in its own unit. Run against the generated project's interpreter:
 # complexity.py needs tomllib, so unlike the agent guard it is not a stdlib-only script
 # that any python3 on PATH can host.
 CX="$WORK/complexity"
@@ -1667,7 +1676,7 @@ echo "==> assert each half's fixing variant tightens and its checking variant re
 # stale baselines, which is the state this whole check exists to end. So drive both.
 #
 # Last, and not a line earlier. The fixing variants run `biome check --write`,
-# `ruff --fix`, `ruff format` and `codespell --write-changes` across the rendered tree:
+# `ruff --fix`, `ruff format` and `codespell --write-changes` across the generated project:
 # anywhere above this they would repair whatever an earlier step exists to catch, move
 # backend source out from under `make openapi-check`, and hand back a green run on a
 # template that ships unformatted source. Nothing may follow this section.
