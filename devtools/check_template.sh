@@ -211,8 +211,9 @@ need_exec devtools/dev.sh
 need_exec devtools/contract-test.sh
 
 echo "==> assert every document is named, and names only documents that exist"
-# docs/conformance.md names what this cannot see.
-python3 "$REPO/devtools/links.py" "$REPO" --exclude template \
+python3 "$REPO/devtools/links_test.py" \
+    || fail "links.py stopped recognising a citation, so the two sweeps below would prove nothing."
+python3 "$REPO/devtools/links.py" "$REPO" --exclude template --exclude devtools/links_test.py \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     || fail "a document names something that does not exist, or nothing names it."
 python3 "$REPO/devtools/links.py" "$OUT" \
