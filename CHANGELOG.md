@@ -11,6 +11,9 @@ number to the pull request for the reasoning.
 
 ## Unreleased
 
+## v0.5.0 — 2026-08-27
+
+- A repository a stranger can contribute to, and a gate that meets them (#30)
 - A record a reasonable person would not undo is an explanation (#29)
 - A gate that accuses the wrong file is worse than no gate (#28)
 - A check verified only where it passes is a check nobody has seen work (#27)
