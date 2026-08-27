@@ -306,8 +306,8 @@ uncommented "$REPO/.github/workflows/check.yml" | grep -q 'make check' \
 if uncommented "$REPO/.github/workflows/check.yml" | grep -q 'check_template.sh'; then
     fail "check.yml calls check_template.sh directly. Name the make target, so the workflow and the hook cannot run different things."
 fi
-uncommented "$REPO/.github/workflows/release.yml" | grep -q 'VERSION' \
-    || fail "release.yml no longer reads VERSION, so nothing in the repository decides which version it would cut."
+uncommented "$REPO/.github/workflows/release.yml" | grep -q 'devtools/version.sh' \
+    || fail "release.yml no longer reads VERSION through devtools/version.sh, so the validation it depends on is a second copy that can drift from this one."
 
 # A workflow that lints clean can still be wired wrong, and the wiring is what carries
 # the rules. no-mistakes keeps a test per workflow for this reason; these are the
@@ -333,22 +333,40 @@ for workflow in "$REPO"/.github/workflows/*.yml; do
     fi
 done
 
-# VERSION is the whole of what the release workflow reads, and it reads it after a merge,
-# where a refusal is a release that silently did not ship. So the value is proved here, on
-# every pull request, while it is still something a person can fix.
+# devtools/version.sh is the only reader of VERSION, and release.yml runs the same script
+# after a merge -- where a refusal is a release that silently did not ship. So it is proved
+# here, on every pull request, while the value is still something a person can fix.
 echo "==> assert VERSION names a version a release could be cut from"
-need "$REPO/VERSION"
-CLAIMED="$(tr -d ' \t\n\r' <"$REPO/VERSION")"
-case "$CLAIMED" in
-    [0-9]*.[0-9]*.[0-9]*) ;;
-    *) fail "VERSION reads '$CLAIMED', which is not a semantic version, so release.yml would refuse after the merge." ;;
-esac
-# A tag is permanent, so a version already released must never be claimed by a commit that
-# would move it. release.yml refuses that after the merge; this says so before the push.
-if git -C "$REPO" rev-parse -q --verify "refs/tags/v$CLAIMED^{commit}" >/dev/null 2>&1; then
-    if [ "$(git -C "$REPO" rev-parse "refs/tags/v$CLAIMED^{commit}")" != "$(git -C "$REPO" rev-parse HEAD)" ]; then
-        fail "VERSION claims $CLAIMED, and v$CLAIMED already tags a different commit. A released version is never moved: claim a new one."
+CLAIMED="$(sh "$REPO/devtools/version.sh" "$REPO")" \
+    || fail "devtools/version.sh refuses VERSION, so release.yml would refuse it after the merge."
+# Both directions. A validator that accepts everything reads a malformed VERSION as a version
+# and cuts a permanent tag from it, which is the failure the exact pattern exists to prevent.
+for rejected in '0.5.0oops' '0.5.0.1' '1.2' '01.2.3' 'latest' '' 'v0.5.0'; do
+    printf '%s' "$rejected" >"$WORK/VERSION"
+    if sh "$REPO/devtools/version.sh" "$WORK" >/dev/null 2>&1; then
+        fail "devtools/version.sh accepted '$rejected', which is not a semantic version."
     fi
+done
+rm -f "$WORK/VERSION"
+
+# A version never goes backwards. Naming one already released does not move it -- release.yml
+# finds the release and stops -- so the commit that did it would never ship under any version,
+# and nothing would say so. Equal to the newest tag is the ordinary state between releases and
+# passes; lower than it is always a mistake.
+#
+# The tags have to be here for this to mean anything, so check.yml checks out with a depth that
+# carries them. A run that cannot see them says so rather than passing quietly.
+NEWEST_RELEASED="$(git -C "$REPO" tag -l 'v*' | sed 's/^v//' | sort -V | tail -1)"
+if [ -z "$NEWEST_RELEASED" ]; then
+    echo "    tags: NONE VISIBLE -- nothing proves $CLAIMED is not a version already released."
+    echo "    A shallow checkout carries no tags; this repo has them, so a run reporting this is"
+    echo "    a run whose checkout is wrong rather than a repo before its first release."
+else
+    LOWEST="$(printf '%s\n%s\n' "$NEWEST_RELEASED" "$CLAIMED" | sort -V | head -1)"
+    if [ "$CLAIMED" != "$NEWEST_RELEASED" ] && [ "$LOWEST" = "$CLAIMED" ]; then
+        fail "VERSION claims $CLAIMED and v$NEWEST_RELEASED is already released. A version never goes backwards: release.yml would find the release, stop, and ship nothing."
+    fi
+    echo "    version: $CLAIMED, newest released v$NEWEST_RELEASED"
 fi
 
 if [ "$VARIANT" = "default" ]; then

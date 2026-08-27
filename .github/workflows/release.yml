@@ -48,20 +48,7 @@ jobs:
         id: claimed
         run: |
           set -eu
-          if [ ! -f VERSION ]; then
-            echo "release: VERSION does not exist, and it is what decides the version." >&2
-            echo "release: this workflow and that file land together or not at all." >&2
-            exit 1
-          fi
-          number="$(tr -d ' \t\n\r' <VERSION)"
-          # Refused rather than tagged as-is: a tag is permanent, and `vlatest` or an empty
-          # file would become a release nobody can withdraw.
-          case "$number" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *)
-              echo "release: VERSION reads '$number', which is not a semantic version." >&2
-              exit 1 ;;
-          esac
+          number="$(sh devtools/version.sh .)"
           printf 'version=v%s\n' "$number" >>"$GITHUB_OUTPUT"
           printf '    claimed v%s\n' "$number"
 
@@ -69,6 +56,12 @@ jobs:
       # and release second is two steps, and a failure between them used to leave a tag
       # that every later run read as "already done" -- so the release could never be
       # created and nothing said why. Asking about the release makes a retry repair it.
+      #
+      # Where the release does exist, the tag it points at is reported rather than assumed.
+      # Skipping is right -- a commit that does not claim a new version is not a release --
+      # but silence here reads identically to a release that shipped, and the difference
+      # matters to whoever is waiting for one. The gate refuses a VERSION *lower* than the
+      # newest released; this is the case where it is equal and the commit has moved on.
       - name: Decide whether this version is already released
         id: decide
         env:
@@ -76,11 +69,22 @@ jobs:
           VERSION: ${{ steps.claimed.outputs.version }}
         run: |
           set -eu
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "    $VERSION is already released; nothing to do."
-            printf 'needed=no\n' >>"$GITHUB_OUTPUT"
-          else
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
             printf 'needed=yes\n' >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf 'needed=no\n' >>"$GITHUB_OUTPUT"
+          head="$(git rev-parse HEAD)"
+          if ! git rev-parse -q --verify "refs/tags/$VERSION^{commit}" >/dev/null; then
+            echo "    $VERSION is released but its tag is not in this checkout; nothing to do."
+            exit 0
+          fi
+          tagged="$(git rev-parse "refs/tags/$VERSION^{commit}")"
+          if [ "$tagged" = "$head" ]; then
+            echo "    $VERSION is already released, at this commit; nothing to do."
+          else
+            echo "    $VERSION is already released, at $tagged."
+            echo "    This commit is $head, so nothing here ships until VERSION names a new version."
           fi
 
       - name: Tag and release
