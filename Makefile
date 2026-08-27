@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := check
 
-.PHONY: check check-all fast render hooks
+.PHONY: check check-all fast render hooks screenshots
 
 # The default variant, end to end: render, assert, then install and exercise both
 # halves of the generated project.
@@ -31,3 +31,9 @@ render:
 
 hooks:
 	@sh devtools/install-hooks.sh
+
+# Regenerate the README's screenshots from a project rendered on the spot. Not in
+# the gate: it fetches a browser, which every other target here refuses to do, and a
+# picture cannot fail a check. Run it when the screen changes.
+screenshots:
+	@sh devtools/screenshots.sh

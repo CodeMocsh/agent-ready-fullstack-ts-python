@@ -1,5 +1,6 @@
 # agent-ready-fullstack-ts-python
 
+[![check](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python/actions/workflows/check.yml/badge.svg)](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python/actions/workflows/check.yml)
 [![python](https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![node](https://img.shields.io/badge/node-24-blue?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![react](https://img.shields.io/badge/react-61dafb?logo=react&logoColor=white)](https://react.dev/)
@@ -18,6 +19,16 @@ Python installed at all**, answered by a [Mock Service Worker](https://mswjs.io/
 Both are permanent modes, not stages. The mock handlers are what every component test runs
 against, and they are typed against the backend's own OpenAPI spec, so a handler that disagrees
 with the service is a compile error rather than a surprise at runtime.
+
+![The generated app in mock mode](docs/img/mock.png)
+
+![The generated app in live mode](docs/img/live.png)
+
+Those are the same screen. The only difference is the line under the heading saying which half
+answered — mock mode above, the FastAPI backend below. That is the point: no feature behaves
+differently between the modes, so the picture of one is the picture of both. Both are produced
+by `make screenshots`, which renders the template and drives the real app, so neither can drift
+from what the template generates today.
 
 A template that generates one artifact can stop at making it good. This one generates a
 **system**: two halves that have to agree with each other. So it ships a contract, and a test
@@ -111,6 +122,7 @@ make check        # default variant, end to end
 make check-all    # every license variant
 make fast         # render and assert only, skipping install/lint/test/build
 make hooks        # enable the pre-commit hook (once per clone)
+make screenshots  # redraw the two above, from a project rendered on the spot
 ```
 
 A full run installs both toolchains, audits the frontend's production dependencies, lints and
@@ -121,10 +133,25 @@ exercise the output.**
 
 - **`copier.yml`** — the questions a new project is asked, and the post-copy message.
 - **`template/`** — everything rendered into a new project.
-- **`devtools/check_template.sh`** — the whole of the enforcement. No workflow ships, so a
-  check that is not in this script runs nowhere.
+- **`devtools/check_template.sh`** — the whole of the enforcement, run by the pre-commit hook
+  and by the workflow on every pull request. A check that is not in this script runs nowhere.
 - **`docs/`** — [constraints.md](docs/constraints.md) for what is load-bearing, and
   [adr/](docs/adr/) for the decisions.
 
 See [AGENTS.md](AGENTS.md) to start working here and [CONTEXT.md](CONTEXT.md) for the
-vocabulary.
+vocabulary. [CONTRIBUTING.md](CONTRIBUTING.md) says what a change owes before it can land.
+
+## Versions, and reporting
+
+Copier resolves to the newest git tag rather than to `main`, so the version you generate from is
+a release. [CHANGELOG.md](CHANGELOG.md) says what each one changed and what `copier update`
+carries into a project that already exists.
+
+A vulnerability goes through private reporting and never into a public issue —
+[SECURITY.md](SECURITY.md) says how, and names what the template does not do on purpose.
+Conduct is the [Contributor Covenant](CODE_OF_CONDUCT.md).
+
+## License
+
+[MIT](LICENSE). A project you generate chooses its own license when the generator asks, and
+carries no obligation back to this one.

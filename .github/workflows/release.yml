@@ -1,0 +1,96 @@
+name: release
+
+# Copier resolves to the newest git tag rather than to main, so an untagged merge reaches
+# nobody. That makes "remember to tag" a step whose omission is silent and looks exactly
+# like a release that shipped. This removes the step.
+#
+# It runs on a *completed* check rather than on the push, because a tag is the one thing
+# here that reaches users and it must never be cut from a tree the gate has not passed.
+# Both firing on `push: main` would race, and the race publishes.
+#
+# CHANGELOG.md decides the version, and devtools/release_notes.py is the only thing that
+# reads it -- the same script the gate runs on every pull request, so a heading this
+# workflow cannot parse fails while the change is still a pull request.
+
+on:
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: tag and release what the changelog claims
+    # A gate that failed, was cancelled, or timed out must not reach the tag. Dispatch
+    # carries no workflow_run and runs on its own authority.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # The commit the gate actually passed. A workflow_run checkout defaults to the
+          # tip of the default branch, which by now may be a commit nothing has checked.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Read the version and its notes out of the changelog
+        id: claimed
+        run: |
+          set -eu
+          version="$(python3 devtools/release_notes.py CHANGELOG.md --version)"
+          python3 devtools/release_notes.py CHANGELOG.md --notes >"$RUNNER_TEMP/notes.md"
+          printf 'version=%s\n' "$version" >>"$GITHUB_OUTPUT"
+          printf '    claimed %s\n' "$version"
+
+      # The question is whether the *release* exists, not whether the tag does. Tag first
+      # and release second is two steps, and a failure between them used to leave a tag
+      # that every later run read as "already done" -- so the release could never be
+      # created and nothing said why. Asking about the release makes a retry repair it.
+      - name: Decide whether this version is already released
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.claimed.outputs.version }}
+        run: |
+          set -eu
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "    $VERSION is already released; nothing to do."
+            printf 'needed=no\n' >>"$GITHUB_OUTPUT"
+          else
+            printf 'needed=yes\n' >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Tag and release
+        if: steps.decide.outputs.needed == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.claimed.outputs.version }}
+        run: |
+          set -eu
+          target="$(git rev-parse HEAD)"
+          if git rev-parse -q --verify "refs/tags/$VERSION^{commit}" >/dev/null; then
+            tagged="$(git rev-parse "refs/tags/$VERSION^{commit}")"
+            if [ "$tagged" != "$target" ]; then
+              echo "release: $VERSION already tags $tagged and this run is at $target." >&2
+              echo "release: a released version is never moved. Claim a new one." >&2
+              exit 1
+            fi
+            echo "    $VERSION is tagged already; creating the release it never got."
+          else
+            git -c 'user.email=41898282+github-actions[bot]@users.noreply.github.com' \
+                -c 'user.name=github-actions[bot]' \
+                tag -a "$VERSION" -m "$VERSION"
+            git push origin "refs/tags/$VERSION"
+          fi
+          gh release create "$VERSION" --title "$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md"

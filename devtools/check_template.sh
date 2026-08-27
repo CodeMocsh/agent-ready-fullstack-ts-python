@@ -213,12 +213,144 @@ need_exec devtools/contract-test.sh
 echo "==> assert every document is named, and names only documents that exist"
 python3 "$REPO/devtools/links_test.py" \
     || fail "links.py stopped recognising a citation, so the two sweeps below would prove nothing."
+# The three orphans are found by filename rather than by a link: GitHub reads the pull
+# request template, and an agent reads CLAUDE.md, without either being named anywhere.
 python3 "$REPO/devtools/links.py" "$REPO" --exclude template --exclude devtools/links_test.py \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
+    --allow-orphan .github/PULL_REQUEST_TEMPLATE.md \
     || fail "a document names something that does not exist, or nothing names it."
 python3 "$REPO/devtools/links.py" "$OUT" \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     || fail "the generated project names a document that does not exist, or orphans one."
+
+echo "==> assert every workflow is valid, here and in what ships"
+# A workflow cannot report its own breakage. A malformed check.yml does not fail the
+# check -- it fails to start, and the pull request shows nothing where the gate should
+# be, which reads as a repository that has no gate rather than one whose gate is broken.
+# The same is true of the workflow every generated project inherits, and that one breaks
+# in somebody else's repository.
+#
+# Pinned to a version and a hash rather than tracking latest: a linter that changes under
+# you turns an unrelated push red, and this download is the one step in the gate that
+# nobody would think to audit.
+ACTIONLINT_VERSION=1.7.12
+case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64)
+        ACTIONLINT_PLATFORM=darwin_arm64
+        ACTIONLINT_SHA=aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f ;;
+    Darwin/x86_64)
+        ACTIONLINT_PLATFORM=darwin_amd64
+        ACTIONLINT_SHA=5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644 ;;
+    Linux/aarch64 | Linux/arm64)
+        ACTIONLINT_PLATFORM=linux_arm64
+        ACTIONLINT_SHA=325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 ;;
+    Linux/x86_64)
+        ACTIONLINT_PLATFORM=linux_amd64
+        ACTIONLINT_SHA=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 ;;
+    *)
+        fail "no actionlint pin for $(uname -s)/$(uname -m). Add one rather than skipping the workflow lint: a platform that cannot check its workflows is a platform that pushes them unchecked." ;;
+esac
+
+# macOS ships shasum and no sha256sum; most Linux images ship the reverse. A verification
+# step that quietly does nothing when neither is present is worse than no verification.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        fail "neither sha256sum nor shasum is on PATH, so the actionlint download cannot be verified."
+    fi
+}
+
+ACTIONLINT_DIR="$WORK/actionlint"
+mkdir -p "$ACTIONLINT_DIR"
+curl -fsSL -o "$ACTIONLINT_DIR/actionlint.tar.gz" \
+    "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_${ACTIONLINT_PLATFORM}.tar.gz" \
+    || fail "could not download actionlint $ACTIONLINT_VERSION for $ACTIONLINT_PLATFORM."
+ACTIONLINT_GOT="$(sha256_of "$ACTIONLINT_DIR/actionlint.tar.gz")"
+[ "$ACTIONLINT_GOT" = "$ACTIONLINT_SHA" ] \
+    || fail "actionlint $ACTIONLINT_VERSION $ACTIONLINT_PLATFORM hashed $ACTIONLINT_GOT, and the pin says $ACTIONLINT_SHA."
+tar -xzf "$ACTIONLINT_DIR/actionlint.tar.gz" -C "$ACTIONLINT_DIR" actionlint \
+    || fail "the actionlint archive carried no actionlint binary."
+
+# Both trees. A glob that matches nothing expands to itself, and actionlint given a path
+# that is not there exits clean -- which is how this check would come to lint neither
+# tree while still printing. So the directory and the file list are asserted first, and
+# `-exec +` hands the files over without a word-splitting expansion.
+for workflows in "$REPO/.github/workflows" "$OUT/.github/workflows"; do
+    [ -d "$workflows" ] || fail "expected workflows in $workflows, and the directory is absent."
+    find "$workflows" \( -name '*.yml' -o -name '*.yaml' \) -print >"$WORK/workflow-list"
+    [ -s "$WORK/workflow-list" ] || fail "$workflows holds no workflow, so this check checked nothing."
+    xargs "$ACTIONLINT_DIR/actionlint" <"$WORK/workflow-list" \
+        || fail "a workflow in $workflows is invalid, and a broken workflow cannot report its own breakage."
+    # Pinned to a commit, never to a tag. A tag moves, so a pull request that trusts one
+    # runs whatever that tag pointed at this morning -- and the token it runs under can
+    # read this repository.
+    while IFS= read -r workflow; do
+        unpinned="$(grep -nE '^[[:space:]]*-?[[:space:]]*uses:' "$workflow" | grep -vE '@[0-9a-f]{40}' || true)"
+        [ -z "$unpinned" ] || fail "$workflow uses an action that is not pinned to a commit: $unpinned"
+    done <"$WORK/workflow-list"
+done
+
+# The generated project's backend/tests/test_gate.py refuses a workflow that re-lists the
+# gate's steps instead of naming the target. This repo asserts the same of its own, because
+# a rule the template asserts and its own generator ignores is a rule nobody believes.
+#
+# Comments are stripped first. Every reason this file gives for naming the target is
+# written in a comment inside the workflow, so a grep that reads them passes on a workflow
+# whose steps say something else entirely.
+uncommented() { sed 's/#.*//' "$1"; }
+uncommented "$REPO/.github/workflows/check.yml" | grep -q 'make check' \
+    || fail "check.yml no longer runs 'make check' outside a comment. It names the target the hook runs; it does not re-spell the steps."
+if uncommented "$REPO/.github/workflows/check.yml" | grep -q 'check_template.sh'; then
+    fail "check.yml calls check_template.sh directly. Name the make target, so the workflow and the hook cannot run different things."
+fi
+uncommented "$REPO/.github/workflows/release.yml" | grep -q 'release_notes.py' \
+    || fail "release.yml no longer reads the changelog through devtools/release_notes.py, so the parse it depends on is checked nowhere before it runs."
+
+# A workflow that lints clean can still be wired wrong, and the wiring is what carries
+# the rules. no-mistakes keeps a test per workflow for this reason; these are the
+# invariants of ours that nothing else would notice going.
+#
+# The release trigger first. It ran on `push: main` once, which raced the gate and could
+# publish a tag from a tree that had not passed -- the defect is invisible in a diff that
+# only changes two lines of `on:`, and its blast radius is a version users generate from.
+uncommented "$REPO/.github/workflows/release.yml" | grep -q 'workflow_run:' \
+    || fail "release.yml no longer waits on a workflow_run. It must run after the gate, never beside it: a tag cut from an unchecked tree is what this trigger exists to prevent."
+if uncommented "$REPO/.github/workflows/release.yml" | grep -qE '^[[:space:]]*push:'; then
+    fail "release.yml triggers on a push again, which races the gate and can publish before it passes."
+fi
+uncommented "$REPO/.github/workflows/release.yml" | grep -q "conclusion == 'success'" \
+    || fail "release.yml no longer refuses a failed gate, so a red check would still cut a tag."
+
+# Nothing here may merge or approve. That is a decision about who is in charge of this
+# repository rather than a detail, and today it holds only because nobody has added the
+# permission -- which is not the same as it being refused.
+for workflow in "$REPO"/.github/workflows/*.yml; do
+    if uncommented "$workflow" | grep -qE 'pull-requests:[[:space:]]*write|gh pr merge|--auto\b'; then
+        fail "$workflow can act on a pull request. No workflow here merges or approves: the gate says a change may land, and a person decides that it does."
+    fi
+done
+
+# The release workflow's whole contract is that this parses. It runs after a merge, where
+# a refusal is a release that silently did not ship -- so the parse is proved here, on
+# every pull request, while the heading is still something a person can fix.
+echo "==> assert the changelog names a version, and a release could be cut from it"
+python3 "$REPO/devtools/release_notes.py" "$REPO/CHANGELOG.md" --version >/dev/null \
+    || fail "release_notes.py cannot read a version out of CHANGELOG.md, so release.yml would refuse after the merge."
+python3 "$REPO/devtools/release_notes.py" "$REPO/CHANGELOG.md" --notes >/dev/null \
+    || fail "release_notes.py cannot read release notes out of CHANGELOG.md, so release.yml would refuse after the merge."
+# Both directions, because a parser that accepts everything reads a malformed changelog as
+# a version and tags whatever it found.
+printf '# Changelog\n\n## Unreleased\n\n- nothing released yet\n' >"$WORK/changelog-unversioned.md"
+if python3 "$REPO/devtools/release_notes.py" "$WORK/changelog-unversioned.md" --version >/dev/null 2>&1; then
+    fail "release_notes.py read a version out of a changelog that names none."
+fi
+printf '# Changelog\n\n## v9.9.9 - 2026-01-01\n\n## v0.1.0 - 2026-01-01\n\n- older\n' >"$WORK/changelog-empty-section.md"
+if python3 "$REPO/devtools/release_notes.py" "$WORK/changelog-empty-section.md" --notes >/dev/null 2>&1; then
+    fail "release_notes.py accepted an empty section, so a release would ship saying nothing."
+fi
 
 if [ "$VARIANT" = "default" ]; then
     echo "==> assert hostile answers stay data, not syntax"

@@ -1,0 +1,43 @@
+name: Change proposal
+description: Propose something the template should do, or stop doing.
+labels: ["proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every generated project pays for what this template ships. A proposal earns its place
+        by naming what it costs as well as what it adds.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What goes wrong today, in a real project. Not the solution yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What the template should do instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: cost
+    attributes:
+      label: What it costs
+      description: >-
+        A new dependency, a new question, a slower gate, or a rule every project now lives
+        under. Say which. Say too whether an existing project can take it through
+        `copier update` without its answers changing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: rejected
+    attributes:
+      label: What you considered and rejected
+      description: Especially the option somebody will propose next.
+    validations:
+      required: false
