@@ -154,17 +154,26 @@ the failure it catches otherwise looks like working software.
 | **One-origin serving** | the built bundle answers deep links and refuses a stale hashed asset | `test_serve.py`, and the gate against a real build |
 | **Test discipline** | no test switches itself off; the tiers stay out of the gate | `test_gate.py`, `tiers.py`; `adr/0005` for why |
 | **Gate discipline** | the hook runs the gate, says when it ran only part, and offers no way off | `test_gate.py` |
-| **Document reachability** | every document a file names exists, and every document is named by another file | `links.py`, over this repository and over a generated project |
+| **Document reachability** | every document a file names exists, and every document is named by another file | `links.py`, over this repository and over a generated project; `links_test.py` holds it to each citation spelling |
 
 Both directions of document reachability matter, and the second is the quiet one. A deleted
 document leaves its readers naming nothing, which is noisy; it also takes the only pointers to
 whatever it linked with it, and an unfindable decision gets made again instead of read.
 
-That check cannot see everything, so do not read a green run as more than it is. An anchor goes
-unchecked, so a heading can move. A path built from a shell variable goes unchecked. A file that
-is not UTF-8 text is reported and scanned no further. And a name in this repository can be
-answered by a file that exists only under `template/`, because a gate script here legitimately
-names paths that exist only once a project is generated.
+A sweep that recognises nothing finds nothing, reports nothing and exits green, so `links_test.py`
+runs first and fails the gate when a citation spelling stops being recognised. Each of its cases
+was written by breaking the thing it covers and watching the case fail.
+
+The fixture file is the one thing the sweep skips, because the paths in it are inputs: every dead
+link it names is one it exists to prove gets caught.
+
+That check still cannot see everything, so do not read a green run as more than it is. An anchor
+goes unchecked, so a heading can move. A path built from a shell variable goes unchecked. A file
+holding a null byte is reported and read for no names at all, while a file that is malformed
+UTF-8 is reported and read with the bad bytes replaced — so a name that ran through one of them
+is missed. And a name in this repository can be answered by a file that exists only under
+`template/`, because a gate script here legitimately names paths that exist only once a project
+is generated.
 
 Mock mode is why several of these exist. A frontend that runs with no backend is worth having, and
 it is also the fastest way to build an application that only works against a fiction: the

@@ -173,6 +173,7 @@ devtools/
   check_template.sh     exercises what render.sh produced -- the whole gate
   install-hooks.sh      installs a shim per committed hook
   links.py              asserts each document a file names exists, and each is named
+  links_test.py         holds links.py to that -- every spelling caught, every non-path ignored
 docs/                   constraints.md, conformance.md, adr/ -- see the index below
 CONTEXT.md              the vocabulary
 ```
