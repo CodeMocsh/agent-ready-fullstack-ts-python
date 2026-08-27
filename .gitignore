@@ -3,6 +3,7 @@
 tmp/
 trash/
 attic/
+__pycache__/
 
 .DS_Store
 .idea/

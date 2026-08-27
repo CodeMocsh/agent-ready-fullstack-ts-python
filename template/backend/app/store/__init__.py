@@ -15,6 +15,7 @@ substrate runs all of them -- memory in `tests/store/test_store_contract.py`, Po
 `tests/integration/test_store_contract.py` -- which is what makes this a contract rather than
 a claim, and it is the same pattern the repository already runs one layer up:
 `frontend/tests/api/contract.test.ts` against the mock handlers and against this service.
+`docs/adr/0001` holds that reasoning and the options it rejected.
 
 `app.store.pg` is **not** re-exported here. Importing it is what pulls in the driver, and the
 in-memory substrate and every hermetic test run without one. Reach for it as

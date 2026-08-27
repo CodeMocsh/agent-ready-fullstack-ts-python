@@ -115,7 +115,8 @@ depend on application code being correct.
 | **The application role can do nothing but DML** | no `BYPASSRLS`, no `CREATE`, no writing the ledger, and no `SECURITY DEFINER` function to borrow rights from | `test_isolation.py` |
 | **Ownership stays with the owner role** | an object owned by anyone else escapes the policy set | `test_isolation.py` |
 | **Every index leads with `tenant_id`** | otherwise the policy predicate cannot be satisfied and Postgres scans — right answers, quietly slower | `test_schema.py` |
-| **One door to a store** | `Database.store(tenant_id)` is called in exactly one place, so no route can hold an unscoped store or ask for another tenant's | `test_tenant_scoping.py` |
+| **One door to a store, and one to the substrate** | `Database.store(tenant_id)` is called in exactly one place, and the substrate is taken off the app in exactly one place, so no route can hold an unscoped store or ask for another tenant's | `test_tenant_scoping.py` |
+| **No route escapes the identity seam** | every route the app declares resolves a tenant before its handler runs, and the exempt ones are named in a list checked in both directions | `test_guarantee.py`, which reads the routes off the app and drives each one against a seam that refuses; `adr/0008` for why |
 | **The application never holds owner rights** | it refuses to start if it can see `DATABASE_OWNER_URL` | `wiring.py`, at boot |
 
 Two things carry the design. `Database.store(tenant_id)` is the only way to obtain a store and
@@ -125,6 +126,13 @@ authenticates nothing and returns the sentinel tenant, under one rule that outli
 **an unresolvable credential is a refusal, never an anonymous principal.** A missing, expired or
 malformed credential that quietly falls back to the sentinel hands one tenant's data to anybody
 who failed to log in.
+
+That rule is wired rather than asked for. Every route reaches the seam through one dependency,
+so replacing the stub is a change in one place instead of an audit of every handler, and a
+refusal raised there answers `401` with `WWW-Authenticate` even if the replacement registered no
+handler of its own. Until the stub is replaced, every boot states that the deployment
+authenticates nothing, and `UNAUTHENTICATED_IS_INTENTIONAL` is how a deployment that means it
+records so and reads that line as `INFO` instead.
 
 A superuser bypasses every policy whatever `FORCE` says, which is why the application connects
 as a least-privilege role and the suites do too — a test wired to the admin connection would
@@ -146,6 +154,17 @@ the failure it catches otherwise looks like working software.
 | **One-origin serving** | the built bundle answers deep links and refuses a stale hashed asset | `test_serve.py`, and the gate against a real build |
 | **Test discipline** | no test switches itself off; the tiers stay out of the gate | `test_gate.py`, `tiers.py`; `adr/0005` for why |
 | **Gate discipline** | the hook runs the gate, says when it ran only part, and offers no way off | `test_gate.py` |
+| **Document reachability** | every document a file names exists, and every document is named by another file | `links.py`, over this repository and over a generated project |
+
+Both directions of document reachability matter, and the second is the quiet one. A deleted
+document leaves its readers naming nothing, which is noisy; it also takes the only pointers to
+whatever it linked with it, and an unfindable decision gets made again instead of read.
+
+That check cannot see everything, so do not read a green run as more than it is. An anchor goes
+unchecked, so a heading can move. A path built from a shell variable goes unchecked. A file that
+is not UTF-8 text is reported and scanned no further. And a name in this repository can be
+answered by a file that exists only under `template/`, because a gate script here legitimately
+names paths that exist only once a project is generated.
 
 Mock mode is why several of these exist. A frontend that runs with no backend is worth having, and
 it is also the fastest way to build an application that only works against a fiction: the

@@ -79,3 +79,11 @@ That layout advertises a many-package workspace with shared `packages/*`, which 
 and pnpm's workspace machinery cannot span into Python anyway. `frontend/` and `backend/` are
 toolchain boundaries, not workspace members. There is no root `package.json`, and
 `pnpm-workspace.yaml` stays inside `frontend/` as a settings carrier.
+
+## The backend half is an application, and the library shape was rejected
+
+No `[build-system]`, no dynamic version, no `py.typed` and no `src/` layout, so a
+`pyproject.toml` ported from a library template does not apply here — and the two look alike
+enough to tempt the copy. `package = false` installs nothing, which is why pytest sets
+`pythonpath` and `devtools/export_openapi.py` adjusts `sys.path`. Both read as workarounds and
+both are load-bearing. Argued in [adr/0003](adr/0003-the-backend-is-an-application.md).
