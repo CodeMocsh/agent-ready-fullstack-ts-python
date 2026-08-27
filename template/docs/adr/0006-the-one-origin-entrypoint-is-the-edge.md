@@ -61,15 +61,6 @@ OAuth flow completes, closes, and never hands its result back. Redirect flows ar
 and are the ones to prefer; a project that needs the popup drops this line and loses the
 cross-window isolation with it.
 
-## Why the body cap reads framing rather than the method
-
-A body may ride any method. Keying the requirement on `POST`/`PUT`/`PATCH` let a chunked
-`DELETE` of any size through — an actual defect, not a hypothetical one. What makes a body
-unmeasurable is the absence of a length, so that is what is checked: a `transfer-encoding`
-with no `content-length` is refused whatever the verb, and so is any request on a transport
-that does not make framing headers compulsory. Under HTTP/1.1 a request with neither header
-has no body at all, which is the only reason the remaining method list is safe.
-
 ## Considered options
 
 - **Headers in `app.main`, so every topology gets them.** Rejected above: two policies

@@ -59,7 +59,7 @@ migrates and then serves must drop the credential in between:
 `env -u DATABASE_OWNER_URL uvicorn ...`.
 
 **The schema version must match the build exactly**, in both directions
-([adr/0004](adr/0004-the-schema-and-the-binary-must-match.md)). The cost, worth knowing before
+([adr/0003](adr/0003-the-application-never-applies-ddl.md)). The cost, worth knowing before
 your first rolling deploy: between the release step and the last old instance being replaced,
 any instance of the *previous* version that restarts will not come back up. Already-running
 instances are fine. If that window matters, make the migration and the rollout one step — scale

@@ -61,5 +61,10 @@ untrue, and the cost lands on the other half as an un-mockable response.
 ## Consequences
 
 `openapi.json` contains `422` responses and validation schemas that look like clutter and are
-not. Changing any of the three settings changes the committed contract artifacts, so
+not. Two of the three settings change the committed contract artifacts when they change, so
 `make openapi-check` fails until they are regenerated — which is the intended way to find out.
+
+`redirect_slashes` is the exception, and it is the one that needed a test of its own. It
+changes no byte of the spec, so the contract flow cannot see it go and every gate stays green
+without it. `tests/routes/test_tasks.py::test_a_trailing_slash_is_a_404_and_never_a_redirect`
+is what refuses that, by failing on the 307 rather than on anything the artifacts would show.

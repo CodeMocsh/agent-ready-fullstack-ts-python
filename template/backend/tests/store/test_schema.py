@@ -243,7 +243,7 @@ async def test_check_refuses_a_database_ahead_of_this_build() -> None:
 
     Tolerating `ahead` would be a compatibility judgement made at startup by a process with no
     way to verify it, and the failure it lets through -- an older build writing rows to a
-    shape it does not know about -- is silent. `docs/adr/0004` records what refusing costs.
+    shape it does not know about -- is silent. `docs/adr/0003` records what refusing costs.
     """
     conn = FakeConn(version="9999_from_the_future")
 

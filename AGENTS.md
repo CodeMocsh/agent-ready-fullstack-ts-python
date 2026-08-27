@@ -128,8 +128,7 @@ A change that looks obviously right in the diff is a change nobody has run.
 `devtools/render.sh` renders the template; `devtools/check_template.sh` exercises what it
 rendered. The pre-commit hook runs the check script, `make check` runs it, and no workflow
 ships — so a check that is not in that script runs nowhere, and an unarmed clone commits
-unchecked with nothing anywhere saying so. **`make hooks` is not optional.** The cost of that
-arrangement is recorded in [docs/adr/0004](docs/adr/0004-no-workflow-runs-the-gate.md).
+unchecked with nothing anywhere saying so. **`make hooks` is not optional.**
 
 The render is from the working tree rather than from a tag, so the gate validates what you are
 about to commit. A full run installs both toolchains, lints and tests both halves, regenerates

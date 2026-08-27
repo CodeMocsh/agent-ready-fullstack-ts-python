@@ -67,6 +67,18 @@ def test_deletes_a_task(client: TestClient) -> None:
     assert len(client.get("/tasks").json()) == 2
 
 
+def test_a_trailing_slash_is_a_404_and_never_a_redirect(client: TestClient) -> None:
+    """`redirect_slashes = False` in `create_app`, and nothing else would catch it going.
+
+    The spec is byte-identical either way, so `make openapi-check` cannot see this one.
+    `docs/adr/0007` holds why the redirect is refused.
+    """
+    response = client.get("/tasks/", follow_redirects=False)
+
+    assert response.status_code == 404
+    assert "location" not in response.headers
+
+
 def test_two_apps_do_not_share_a_store(monkeypatch: pytest.MonkeyPatch) -> None:
     """The other half of dropping `reset()`. Two apps in one process, because that is the
     property the fixture relies on and the only way to assert it without depending on the
