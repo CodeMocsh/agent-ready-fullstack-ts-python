@@ -162,6 +162,15 @@ const RULES = [
   },
 ];
 
+const EXPORTED_ARROW =
+  /^export\s+(?:const|let)\s+\w+[^=\n]*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=;{\n]*)?=>|[^;\n]*=>)/gm;
+const EXPORTED_ARROW_HINT =
+  "an exported arrow names itself only by assignment and reads as a value rather than a definition; use `export function`";
+
+const EXPORTED_NAME = /^export\s+(?:default\s+)?function\s+([A-Z]\w*)|^export\s*\{([^}]*)\}/gm;
+const FILENAME_HINT =
+  "the file name is how anything finds a component without reading it; name the file for what it exports, in kebab-case";
+
 const EFFECT = /\buseEffect\s*\(/g;
 const DATA_WORK = /\bawait\b|\.then\s*\(|\bfetch\s*\(/;
 const EFFECT_HINT =
@@ -224,7 +233,61 @@ function inlineTypeViolations(file, code, allow) {
   return found;
 }
 
-const CODE_CHECKS = [effectViolations, inlineTypeViolations];
+function expectedExport(file) {
+  const stem = file.replace(/^.*[/\\]/, "").replace(/\.tsx$/, "");
+  return stem
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
+}
+
+function exportedNames(code) {
+  const found = [];
+  for (const match of code.matchAll(EXPORTED_NAME)) {
+    if (match[1] === undefined) {
+      for (const listed of match[2].split(",")) {
+        const name = listed.split(" as ").pop().trim();
+        if (/^[A-Z]\w*$/.test(name)) found.push({ name, index: match.index });
+      }
+    } else {
+      found.push({ name: match[1], index: match.index });
+    }
+  }
+  return found;
+}
+
+function filenameExportViolations(file, code) {
+  if (!/\.tsx$/.test(file)) return [];
+  const exported = exportedNames(code);
+  const wanted = expectedExport(file);
+  if (exported.length === 0 || exported.some((entry) => entry.name === wanted)) return [];
+  return [
+    {
+      file,
+      line: lineOf(code, exported[0].index),
+      rule: "filename-export",
+      text: exported[0].name,
+      hint: FILENAME_HINT,
+    },
+  ];
+}
+
+function exportedArrowViolations(file, code) {
+  return [...code.matchAll(EXPORTED_ARROW)].map((match) => ({
+    file,
+    line: lineOf(code, match.index),
+    rule: "exported-function-expression",
+    text: match[0].split("=")[0].trim(),
+    hint: EXPORTED_ARROW_HINT,
+  }));
+}
+
+const CODE_CHECKS = [
+  effectViolations,
+  inlineTypeViolations,
+  filenameExportViolations,
+  exportedArrowViolations,
+];
 
 const CHECKS = RULES.length + CODE_CHECKS.length;
 

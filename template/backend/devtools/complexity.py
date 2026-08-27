@@ -89,8 +89,14 @@ def write_baseline(baseline: Path, now: dict[str, float]) -> None:
 
 def check_drift(now: dict[str, float], baseline: Path, tolerance: float, tighten: bool) -> int:
     if not baseline.exists():
-        print(f"no baseline yet; create one with --update-baseline ({baseline})")
-        return 0
+        print(
+            f"\nFAIL: no baseline at {baseline}, and this codebase is now large enough\n"
+            "for the drift check to mean something. Record the current level:\n"
+            "  uv run python devtools/complexity.py app --baseline .complexity-baseline.json "
+            "--update-baseline\n",
+            file=sys.stderr,
+        )
+        return 1
 
     was = float(json.loads(baseline.read_text())["mean"])
     drift = now["mean"] - was

@@ -202,6 +202,10 @@ Each of these is something a reasonable edit undoes without anything failing unt
   and the router basepath all derive from `import.meta.env.BASE_URL`.
 - **Do not delete `src/mocks/`** when the backend feels real enough. It is the fixture
   layer every component test runs against.
+- **A component file is named for what it exports**, in kebab-case: `task-list.tsx` exports
+  `TaskList`. The file name is how anything finds a component without reading it.
+- **Export a function, not an arrow.** `export function load()`, never
+  `export const load = () => …` — a declaration names itself; an assignment does not.
 - Use the `@/` alias for anything under `src/`. TypeScript is `strict`, plus
   `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
 - **There is no `.env.production`, on purpose.** Production mode loads no env file, so mock
