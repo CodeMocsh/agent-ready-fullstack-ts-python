@@ -144,9 +144,9 @@ vocabulary. [CONTRIBUTING.md](CONTRIBUTING.md) says what a change owes before it
 ## Versions, and reporting
 
 Copier resolves to the newest git tag rather than to `main`, so the version you generate from is
-a release. `VERSION` says which one this repo claims to be at, and the releases page says what
-each one changed — GitHub writes that from the pull requests, so it cannot drift from what
-landed.
+a release. `VERSION` says which one this repo claims to be at, and each release says what it
+changed. GitHub writes that list from the pull requests merged since the previous tag, so it
+cannot drift from what landed.
 
 A vulnerability goes through private reporting and never into a public issue —
 [SECURITY.md](SECURITY.md) says how, and names what the template does not do on purpose.
