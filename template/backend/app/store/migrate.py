@@ -92,7 +92,7 @@ async def check(conn: Conn, schema: str | None = None) -> str:
     write what it knows about — and this deliberately does not. "Probably compatible" is a
     judgement call made at startup by a process with no way to check it, and the failure it
     would let through is silent. The cost is stated in
-    `docs/adr/0004-the-schema-and-the-binary-must-match.md`: a rolling deploy has a window in
+    `docs/adr/0003-the-application-never-applies-ddl.md`: a rolling deploy has a window in
     which a restarting instance of the previous release will not come back up.
     """
     target = known_version(schema)

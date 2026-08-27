@@ -86,4 +86,15 @@ No `[build-system]`, no dynamic version, no `py.typed` and no `src/` layout, so 
 `pyproject.toml` ported from a library template does not apply here — and the two look alike
 enough to tempt the copy. `package = false` installs nothing, which is why pytest sets
 `pythonpath` and `devtools/export_openapi.py` adjusts `sys.path`. Both read as workarounds and
-both are load-bearing. Argued in [adr/0003](adr/0003-the-backend-is-an-application.md).
+both are load-bearing.
+
+**`backend/.python-version` is load-bearing too, and deleting it does not fail loudly.** A
+`requires-python` floor with no pin does not mean "supports many versions". uv resolves the
+environment to whatever the machine happens to offer, which on one machine was 3.14.7. The pin
+is the number uv, the gate and every laptop agree on.
+
+**The package is named `app` in every generated project, and the name is fixed.** That is what
+makes `uvicorn app.main:app` — the invocation in every piece of FastAPI documentation — work
+unedited, and it is one question the generator does not have to ask. Renaming it moves the
+pytest setting, the exporter's `sys.path` insert, and every import in `app/` and `tests/`
+together, so it is the wrong template for anyone running several services in one repository.

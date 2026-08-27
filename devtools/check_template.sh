@@ -417,8 +417,7 @@ need_grep '^SHELL := /bin/bash' Makefile
 # two cannot drift. The hook checks the machine that commits; the workflow checks a fresh
 # checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
 # well as in test_gate.py because that test walks the workflows it finds, and a directory
-# that stopped existing is a walk over nothing. docs/adr/0004 records why this repository
-# still ships none of its own.
+# that stopped existing is a walk over nothing.
 need .github/workflows/ci.yml
 need_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
@@ -680,7 +679,6 @@ need backend/tests/store/test_schema.py
 need backend/tests/integration/test_postgres.py
 need backend/tests/integration/test_isolation.py
 need backend/tests/integration/conftest.py
-need docs/adr/0001-two-substrates-behind-one-contract.md
 need_absent backend/app/store.py
 # The generated schema, committed the way openapi.json is. backend/tests/store/test_schema.py
 # fails when it drifts, and that test is in the fast tier, so the gate catches it.
@@ -689,10 +687,16 @@ need deploy/roles.sql
 need deploy/compose.yaml
 need_exec deploy/credentials.sh
 need CONTEXT.md
-for adr in 0002-tenant-isolation-is-forced-and-always-on \
+# Every decision that ships, named in full. links.py proves each is reachable and that no
+# citation dangles, which a record deleted together with everything naming it still passes.
+# This is the half that notices such a record left.
+for adr in 0001-two-substrates-behind-one-contract \
+           0002-tenant-isolation-is-forced-and-always-on \
            0003-the-application-never-applies-ddl \
-           0004-the-schema-and-the-binary-must-match \
-           0005-a-test-never-decides-whether-to-run; do
+           0005-a-test-never-decides-whether-to-run \
+           0006-the-one-origin-entrypoint-is-the-edge \
+           0007-the-spec-describes-what-the-service-actually-does \
+           0008-a-route-cannot-escape-the-identity-seam; do
     need "docs/adr/$adr.md"
 done
 
