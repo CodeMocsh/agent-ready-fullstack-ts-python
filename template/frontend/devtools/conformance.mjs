@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
+import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
 import { lineOf, withoutStringsAndComments } from "./scan.mjs";
 
 const DEFAULTS = {
@@ -260,6 +260,8 @@ function settings(flags) {
   for (const key of Object.keys(DEFAULTS)) {
     if (!Array.isArray(resolved[key])) fail(`${key} must be an array.`);
   }
+  assertResolves(resolved.exclude, "conformance.exclude");
+  assertResolves(resolved.themeFiles, "conformance.themeFiles");
   return resolved;
 }
 

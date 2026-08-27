@@ -10,6 +10,8 @@ sample below is a string literal, and `make lint` reads this file too.
 
 from pathlib import Path
 
+import pytest
+
 from devtools.comments import offenders
 
 BANNED = [
@@ -64,7 +66,20 @@ def test_a_shebang_is_allowed_on_the_first_line_and_nowhere_else(tmp_path: Path)
     assert found == [(2, "#!/usr/bin/env python")]
 
 
-def test_a_file_that_cannot_be_tokenized_reports_nothing(tmp_path: Path) -> None:
-    """Half-written source is a syntax error somebody is already looking at. The gate stays
-    quiet rather than adding a tokenizer traceback to it -- ruff is what reports that file."""
-    assert reported(tmp_path, ["def broken(", "# and a comment below it"]) == []
+def test_a_file_that_cannot_be_tokenized_is_refused_rather_than_reported_clean(
+    tmp_path: Path,
+) -> None:
+    """A file this cannot parse is a file it cannot clear, and there is a comment in the
+    sample below to prove what quiet would have cost.
+
+    It used to return nothing here, on the reasoning that a syntax error is already somebody's
+    problem and ruff is what names it. That holds inside `make lint`, where ruff runs first --
+    and nowhere else. `devtools/comments.py` is dependency-free so that it can run before
+    either half is installed, which is exactly the run where no ruff exists to report anything,
+    and a scan that answers "no comments" over a file it never read is the failure this whole
+    module is written against. It names the file and exits; the traceback the old reasoning
+    wanted to avoid is not what it produces."""
+    with pytest.raises(SystemExit) as refusal:
+        reported(tmp_path, ["def broken(", "# and a comment below it"])
+
+    assert refusal.value.code == 2

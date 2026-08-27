@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { excluded, fail, section, sourceFiles } from "./gate.mjs";
+import { assertResolves, excluded, fail, section, sourceFiles } from "./gate.mjs";
 
 const DEFAULTS = {
   cap: 15,
@@ -140,6 +140,7 @@ function settings(flags) {
     }
   }
   if (!Array.isArray(resolved.exclude)) fail("exclude must be an array of path patterns.");
+  assertResolves(resolved.exclude, "complexity.exclude");
   return resolved;
 }
 

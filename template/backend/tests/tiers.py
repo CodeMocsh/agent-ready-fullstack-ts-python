@@ -7,11 +7,11 @@ exits 0 and reads exactly like a test that passed, while a tier that was not sel
 reported as not run. `docs/adr/0005` holds that reasoning and the options it rejected.
 
 **Each one is named for what it needs, not for who starts it.** `tests/integration` needs a
-server; `e2e` needs a browser. Who types the command is the least stable thing about a
-tier -- `devtools/check_template.sh` already runs `make db-test` unattended wherever Docker
-answers, and any of these becomes a nightly workflow the day someone writes one -- so a name
-like `manual` would be false by the time anybody read it. It is also taken: in testing
-vocabulary a manual test is one a person performs by hand, and every test here is automated.
+server; `e2e` needs a browser. Who types the command is the least stable thing about a tier --
+`make db-test` is fully automated, and any of these becomes a nightly workflow the day someone
+writes one -- so a name like `manual` would be false by the time anybody read it. It is also
+taken: in testing vocabulary a manual test is one a person performs by hand, and every test
+here is automated.
 
 One declaration, four readers: `conftest.py` prints what a run left out, `test_gate.py`
 checks that the folder still holds tests and that nothing here creeps into the gate,
@@ -45,6 +45,16 @@ class Tier:
     selected_by: str
     """The file that points `runs` at `path`: a Makefile recipe, or a runner's config."""
 
+    names: str
+    """How `selected_by` spells `path`, exactly, so the check for it cannot pass by accident.
+
+    The bare folder name will not do. Both e2e tiers end in `e2e`, and `e2e` occurs in every
+    file that selects one -- in a target name, in a comment, in a sibling tier's config -- so
+    `"e2e" in text` is true of a config pointing somewhere else entirely. This is the whole
+    string a reader would grep for: `tests/integration` in a recipe, `testDir: "./e2e"` in a
+    Playwright config.
+    """
+
     needs: str
     """Why it is not in the gate. This is the sentence the tier is named after."""
 
@@ -62,9 +72,19 @@ class Tier:
 
     @property
     def folder(self) -> str:
-        """Its name under `tests/`, which is what `norecursedirs` carries. Empty for a tier
-        pytest never looks at."""
-        return self.path.removeprefix(f"{PYTEST_ROOT}/") if self.run_by_pytest else ""
+        """Its name under `tests/`, which is what `norecursedirs` carries.
+
+        A tier pytest never looks at has no such name, and asking for one raises rather than
+        answering `""`. Empty is the worst available answer: `norecursedirs` would accept it,
+        `folder in path.parts` would quietly be false, and a frontend tier would report itself
+        as a Python one nothing collects. Every caller reaches this through `python_tiers()`,
+        so the raise is unreachable until somebody stops doing that."""
+        if not self.run_by_pytest:
+            raise ValueError(
+                f"{self.runs} runs {self.path}, which pytest never collects, so it has no "
+                f"folder under {PYTEST_ROOT}. Reach for it through python_tiers()."
+            )
+        return self.path.removeprefix(f"{PYTEST_ROOT}/")
 
     @property
     def run_by_pytest(self) -> bool:
@@ -93,6 +113,7 @@ TIERS = (
         holds="test_*.py",
         declares="def test_",
         selected_by="Makefile",
+        names="tests/integration",
         needs="a Postgres daemon",
     ),
     Tier(
@@ -101,6 +122,7 @@ TIERS = (
         holds="*.spec.ts",
         declares="test(",
         selected_by="frontend/playwright.config.ts",
+        names='testDir: "./e2e"',
         needs="a browser binary",
         excludes="*.live.spec.ts",
     ),
@@ -110,6 +132,7 @@ TIERS = (
         holds="*.live.spec.ts",
         declares="test(",
         selected_by="frontend/playwright.live.config.ts",
+        names='testDir: "./e2e"',
         needs="a browser binary, and `make dev` in another terminal",
     ),
 )

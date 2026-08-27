@@ -39,7 +39,8 @@ started first, the gate runs on every commit, so nothing here may be in it."""
 
 
 def prerequisites_of(target: str) -> list[str]:
-    found = re.search(rf"^{re.escape(target)}:(.*)$", MAKEFILE.read_text(), re.MULTILINE)
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    found = re.search(rf"^{re.escape(target)}:(.*)$", makefile, re.MULTILINE)
     assert found is not None, f"no `{target}:` target in the Makefile"
     return found.group(1).split()
 
@@ -51,7 +52,7 @@ with none it starts a container."""
 
 
 def recipe_of(target: str) -> list[str]:
-    lines = MAKEFILE.read_text().splitlines()
+    lines = MAKEFILE.read_text(encoding="utf-8").splitlines()
     start = next((n for n, line in enumerate(lines) if line.startswith(f"{target}:")), None)
     if start is None:
         return []
@@ -80,15 +81,29 @@ def test_every_member_of_the_gate_actually_runs_a_command():
         assert runs_something(target), f"`{target}` reaches no recipe, so the gate is a no-op"
 
 
+COMMENT_OPENERS = ("#", "//")
+"""Every way a line in one of the files read here begins a comment: `#` in a Makefile, a
+workflow and a pyproject, `//` in a Playwright config. A whole-line opener is all that is
+needed, because what these checks look for is a path or a target sitting on a line of its
+own."""
+
+
 def without_comments(text: str) -> str:
-    return "\n".join(line for line in text.splitlines() if not line.strip().startswith("#"))
+    """The text a check may believe, with anything a reader would recognise as prose removed.
+
+    A file that only *mentions* what a check looks for satisfies a substring match without
+    doing it: the Makefile describes `tests/integration` in a comment above the recipe that
+    selects it, so the check for the recipe passed with the recipe pointed anywhere."""
+    return "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith(COMMENT_OPENERS)
+    )
 
 
 def workflows() -> list[tuple[Path, str]]:
     """Every workflow this project ships, with its comment lines stripped. A workflow that
     named the gate in a comment and ran `true` would satisfy a plain substring check."""
     found = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
-    return [(path, without_comments(path.read_text())) for path in found]
+    return [(path, without_comments(path.read_text(encoding="utf-8"))) for path in found]
 
 
 def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
@@ -98,7 +113,9 @@ def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
     part a target too.
 
     The body is read with comments stripped, so a workflow naming the target in a comment and
-    running `true` does not satisfy this."""
+    running `true` does not satisfy this. Neither does naming `check_template.sh`, which an
+    earlier version accepted: that is a script in the generator repository and not a file this
+    project contains, so it could never be the right answer here and only bought a pass."""
     shipped = workflows()
 
     assert shipped, (
@@ -109,7 +126,7 @@ def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
     )
 
     for path, body in shipped:
-        assert "make pre-commit" in body or "check_template.sh" in body, (
+        assert "make pre-commit" in body, (
             f"{path.relative_to(ROOT)} does not run `make pre-commit`. A workflow that "
             f"re-lists the gate's steps is a second copy of the gate, and the copy is what "
             f"goes stale -- point it at the target, or add a target for the part it runs."
@@ -145,12 +162,19 @@ def test_every_tier_still_holds_tests():
 def test_every_tier_is_selected_by_a_file_that_still_names_it():
     """The Makefile points `db-test` at its folder; a Playwright config points each e2e target
     at its own. Rename the folder and the command still exists, still exits 0 on some other
-    day's argument, and runs none of these tests."""
+    day's argument, and runs none of these tests.
+
+    It matches `names` rather than the folder's own name, because both e2e tiers end in `e2e`
+    and every file that selects one says `e2e` somewhere else as well -- in a target, in a
+    comment, in a sibling's config. `"e2e" in text` was therefore true of a config pointing at
+    another directory entirely, which is the one thing this test exists to catch. Comments go
+    for the same reason: every one of these folders is described in prose somewhere above the
+    line that selects it."""
     for tier in TIERS:
-        selects = (ROOT / tier.selected_by).read_text()
-        assert tier.path.rsplit("/", 1)[-1] in selects, (
-            f"{tier.selected_by} no longer names {tier.path}, so `{tier.runs}` does not "
-            f"select the tier it is supposed to run"
+        selects = without_comments((ROOT / tier.selected_by).read_text(encoding="utf-8"))
+        assert tier.names in selects, (
+            f"{tier.selected_by} no longer says `{tier.names}`, so `{tier.runs}` does not "
+            f"select {tier.path}, the tier it is supposed to run"
         )
         assert not tier.excludes or tier.excludes in selects, (
             f"{tier.selected_by} no longer ignores {tier.excludes}, so `{tier.runs}` runs "
@@ -165,7 +189,7 @@ def test_every_python_tier_is_out_of_the_default_run():
     their runner is a different program, pointed at its own folder."""
     import tomllib
 
-    settings = tomllib.loads(PYPROJECT.read_text())["tool"]["pytest"]["ini_options"]
+    settings = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["tool"]["pytest"]["ini_options"]
     declared = sorted({tier.folder for tier in python_tiers()})
     assert sorted(settings["norecursedirs"]) == declared, (
         f"norecursedirs is {settings['norecursedirs']} and the Python tiers are {declared}. "
@@ -250,12 +274,22 @@ VARIABLE = re.compile(r"\$\((\w+)\)")
 
 def expanded(line: str) -> str:
     """`$(NAME)` replaced by what the Makefile assigns it, so a recipe that reaches its tier
-    through a variable reads the same as one that spells the path out."""
-    makefile = MAKEFILE.read_text()
+    through a variable reads the same as one that spells the path out.
+
+    An unassigned name raises rather than passing through as literal text. Make expands one to
+    the empty string, so the recipe this reads would run `pytest` with no path at all -- and
+    leaving `$(NAME)` in place would fail the caller's `endswith` for a reason that names the
+    wrong problem."""
+    makefile = MAKEFILE.read_text(encoding="utf-8")
 
     def assigned(found: re.Match[str]) -> str:
         value = re.search(rf"^{found.group(1)} *[:?]?= *(.*)$", makefile, re.MULTILINE)
-        return value.group(1).strip() if value else found.group(0)
+        if value is None:
+            raise AssertionError(
+                f"the Makefile reads {found.group(0)} and assigns it nowhere. Make expands "
+                f"that to nothing, so the recipe runs without the path it means to select."
+            )
+        return value.group(1).strip()
 
     return VARIABLE.sub(assigned, line)
 
@@ -277,18 +311,18 @@ def test_the_python_tier_is_selected_whole_and_not_by_a_list():
 
 
 def test_the_hook_runs_the_gate():
-    assert "make -s pre-commit" in HOOK.read_text()
+    assert "make -s pre-commit" in HOOK.read_text(encoding="utf-8")
 
 
 def test_the_hook_says_so_when_it_could_not_run_the_whole_gate():
-    assert "PARTIAL RUN" in HOOK.read_text()
+    assert "PARTIAL RUN" in HOOK.read_text(encoding="utf-8")
 
 
 OPT_OUT = re.compile(r"--no-verify|\$\{?(?:SKIP|NO_?VERIFY|DISABLE|BYPASS|CI)\b")
 
 
 def test_the_hook_offers_no_way_to_switch_itself_off():
-    found = OPT_OUT.search(HOOK.read_text())
+    found = OPT_OUT.search(HOOK.read_text(encoding="utf-8"))
     assert found is None, (
         f"the hook reads {found.group(0)!r}, and a gate with a documented way past it "
         f"is a suggestion. A check that is not worth running every time belongs "
