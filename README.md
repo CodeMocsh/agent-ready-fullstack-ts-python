@@ -108,8 +108,11 @@ generated file belongs in git is [adr/0002](docs/adr/0002-code-first-contract-wi
   both halves, pnpm's `trustPolicy: no-downgrade`, and runtime dependencies bounded
   above as well as below.
 - **[Entire](https://entire.io) session-tracking hooks** that checkpoint agent coding sessions
-  alongside git history. They no-op until the `entire` CLI is installed, and `.claude/` and
-  `.entire/` can be deleted to drop the feature.
+  alongside git history. They no-op until the `entire` CLI is installed. Once it is, a
+  pre-push hook sends each session — transcript and prompts — to the remote as `refs/entire/*`,
+  which the GitHub interface never shows and any reader can fetch: right for a repo only you
+  read, wrong for a public one. `enabled: false` in `.entire/settings.json` turns it off, and
+  deleting `.claude/` and `.entire/` drops the feature.
 
 ## Working on the template
 
