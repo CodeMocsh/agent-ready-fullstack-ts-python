@@ -33,6 +33,7 @@ SCRIPT = "export const built = 1;\n"
 HASHED = f"{ASSETS}/index-abc123.js"
 SECRET = "the private key nobody asked this process for"
 BESIDE = "secret.txt"
+UNROUTED = "/api/no-route-answers-this"
 
 
 @pytest.fixture
@@ -177,10 +178,13 @@ def test_the_transport_policy_does_not_claim_subdomains(client: TestClient) -> N
 
 def test_a_body_over_the_cap_is_refused_before_the_route_sees_it(client: TestClient) -> None:
     """Nothing else in this process bounds a request body, and the process has to survive the
-    refusal: a cap that took the server down with it would be the denial it exists to stop."""
-    answered = client.post("/api/tasks", json={"title": "x" * (MAX_BODY_BYTES + 1)})
+    refusal: a cap that took the server down with it would be the denial it exists to stop.
+
+    This test uses a path no route claims. A 413 from that path cannot come from a route.
+    """
+    answered = client.post(UNROUTED, json={"title": "x" * (MAX_BODY_BYTES + 1)})
     assert answered.status_code == 413
-    assert client.get("/api/tasks").status_code == 200
+    assert client.get("/").status_code == 200
 
 
 def test_a_body_within_the_cap_reaches_the_route(client: TestClient) -> None:
@@ -193,7 +197,7 @@ def test_a_body_within_the_cap_reaches_the_route(client: TestClient) -> None:
 def test_a_bodied_request_that_will_not_say_its_length_is_refused(client: TestClient) -> None:
     """A cap read from `content-length` is only a cap if the header is required: chunked with no
     length is otherwise the way around it."""
-    answered = client.post("/api/tasks", content=iter([b'{"title": "smuggled"}']))
+    answered = client.post(UNROUTED, content=iter([b'{"title": "smuggled"}']))
     assert answered.status_code == 411
 
 
@@ -242,7 +246,7 @@ def test_a_length_that_is_not_a_number_is_refused_rather_than_crashed_on(
 ) -> None:
     """A length this cannot parse is a refusal, not an exception on the way to one."""
     for value in ("1.5", " 12", "-1", "", "12abc"):
-        unparsable = client.build_request("POST", "/api/tasks", json={"title": "x"})
+        unparsable = client.build_request("POST", UNROUTED, json={"title": "x"})
         unparsable.headers["content-length"] = value
         assert client.send(unparsable).status_code == 400, f"{value!r} was not refused"
 
@@ -256,9 +260,7 @@ async def test_a_length_that_is_a_digit_but_not_a_number_is_refused(bundle: Path
     bytes that decode back as something no predicate calls a digit — a test that goes through a
     client passes here against either spelling, for the wrong reason.
     """
-    started = await drive(
-        create_server(bundle), "POST", "/api/tasks", [(b"content-length", b"\xb2")]
-    )
+    started = await drive(create_server(bundle), "POST", UNROUTED, [(b"content-length", b"\xb2")])
     assert started["status"] == 400
 
 
@@ -268,7 +270,7 @@ async def test_a_body_on_a_transport_that_frames_it_without_headers_is_refused(
     """HTTP/2 makes both framing headers optional, so on it a bodied `DELETE` can announce
     nothing at all — and a rule keyed on the verb waves it through exactly as the chunked one
     was waved through."""
-    started = await drive(create_server(bundle), "DELETE", "/api/tasks/1", [], version="2")
+    started = await drive(create_server(bundle), "DELETE", UNROUTED, [], version="2")
 
     assert started["status"] == 411
     named = {name.lower() for name, _ in started["headers"]}
@@ -283,7 +285,7 @@ def test_a_bodied_method_declaring_nothing_at_all_is_refused(client: TestClient)
     It is the backstop for a transport that makes neither compulsory — HTTP/2 frames a body with
     neither — and it has to be built by hand because httpx will always supply a length.
     """
-    unframed = client.build_request("POST", "/api/tasks", json={"title": "unframed"})
+    unframed = client.build_request("POST", UNROUTED, json={"title": "unframed"})
     del unframed.headers["content-length"]
     assert "transfer-encoding" not in unframed.headers
 
@@ -295,7 +297,7 @@ def test_a_chunked_body_is_refused_whatever_the_method(client: TestClient) -> No
     which method carries it. Asking only the methods that usually have a body left `DELETE` and
     `GET` free to stream one straight past — a chunked `DELETE` of any size was answered."""
     for method in ("DELETE", "GET", "POST", "PATCH"):
-        answered = client.request(method, "/api/tasks", content=iter([b"A" * 64]))
+        answered = client.request(method, UNROUTED, content=iter([b"A" * 64]))
         assert answered.status_code == 411, f"{method} was not refused: {answered.status_code}"
 
 
@@ -309,7 +311,7 @@ def test_a_bodiless_request_needs_no_length(client: TestClient) -> None:
 def test_a_refusal_still_carries_the_headers(client: TestClient) -> None:
     """A response this module writes itself is still a response the browser applies a policy
     to, so the refusals must not be the ones that go out bare."""
-    answered = client.post("/api/tasks", json={"title": "x" * (MAX_BODY_BYTES + 1)})
+    answered = client.post(UNROUTED, json={"title": "x" * (MAX_BODY_BYTES + 1)})
     assert answered.status_code == 413
     assert "content-security-policy" in answered.headers
 

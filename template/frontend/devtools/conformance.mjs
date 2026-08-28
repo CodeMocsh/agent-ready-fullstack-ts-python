@@ -162,8 +162,15 @@ const RULES = [
   },
 ];
 
-const EXPORTED_ARROW =
-  /^export\s+(?:const|let)\s+\w+[^=\n]*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=;{\n]*)?=>|[^;\n]*=>)/gm;
+const ANNOTATION = "(?:[^=\\n]|=>)*";
+const TYPE_PARAMETERS = "(?:<[^(\\n]*>\\s*)?";
+const PARAMETERS = "\\([^)]*\\)";
+const RETURN_TYPE = "(?::[^=;{\\n]*)?";
+const EXPORTED_ARROW = new RegExp(
+  `^export\\s+(?:const|let)\\s+\\w+${ANNOTATION}=\\s*(?:async\\s*)?` +
+    `(?:function\\b|${TYPE_PARAMETERS}${PARAMETERS}\\s*${RETURN_TYPE}=>|\\w+\\s*=>)`,
+  "gm",
+);
 const EXPORTED_ARROW_HINT =
   "an exported arrow names itself only by assignment and reads as a value rather than a definition; use `export function`";
 
