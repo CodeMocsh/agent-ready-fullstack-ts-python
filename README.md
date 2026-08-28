@@ -20,14 +20,10 @@ Both are permanent modes, not stages. The mock handlers are what every component
 against, and they are typed against the backend's own OpenAPI spec, so a handler that disagrees
 with the service is a compile error rather than a surprise at runtime.
 
-![The generated app in mock mode](docs/img/mock.png)
+![The generated app, running with no backend](docs/img/mock.png)
 
-![The generated app in live mode](docs/img/live.png)
-
-Those are the same screen. The only difference is the line under the heading saying which half
-answered — mock mode above, the FastAPI backend below. That is the point: no feature behaves
-differently between the modes, so the picture of one is the picture of both. Both are produced
-by `make screenshots`, which renders the template and drives the real app, so neither can drift
+That is mock mode. Live mode is the same screen — only the line under the heading changes — so
+one picture is both. `make screenshots` produces it from a rendered project, so it cannot drift
 from what the template generates today.
 
 A template that generates one artifact can stop at making it good. This one generates a
