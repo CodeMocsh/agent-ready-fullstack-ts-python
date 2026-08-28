@@ -44,6 +44,12 @@ are in scope:
   wrong, raise or throw.
 - No warning where the code cannot correctly proceed.
 
+**The first ban is mechanised on the backend half**: ruff's `BLE` refuses `except Exception`,
+and the one place a blind catch is right carries a line in `pyproject.toml` under
+`per-file-ignores` rather than a suppression at the point of pain. The other three bans, and
+the frontend half, are prose. A rule nothing enforces does not hold, so those are the ones
+that rot first.
+
 Not crashing is legitimate only when all three of these hold: the design plans for the
 condition, the contract names it, and the code reports it. Fewer than three, and it
 raises.
