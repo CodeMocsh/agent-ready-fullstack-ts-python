@@ -45,11 +45,10 @@ PREFIX: Final = "/api"
 MAX_BODY_BYTES: Final = 1_048_576
 """What a request body may weigh before this process refuses to read it.
 
-One megabyte, because the largest thing this API accepts is a task title. Nothing else here
-bounds a body — Starlette reads what the transport hands it — so without this the cheapest
-request that can hurt this process is the one nobody wrote a route for. Raise it deliberately
-for an endpoint that takes an upload, and prefer streaming that endpoint to raising this for
-every other one.
+One megabyte, because no route here takes an upload. Nothing else here bounds a body —
+Starlette reads what the transport hands it — so without this the cheapest request that can
+hurt this process is the one nobody wrote a route for. Raise it deliberately for an endpoint that takes an upload, and prefer streaming that
+endpoint to raising this for every other one.
 """
 
 CARRY_BODIES: Final = frozenset({"POST", "PUT", "PATCH"})

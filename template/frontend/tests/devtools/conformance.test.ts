@@ -81,7 +81,9 @@ const EXPORTED_ARROWS = [
   "export const typed = (id: string): string => id;",
   "export const asynchronous = async (id: string) => id;",
   "export const generic = <T,>(value: T): T => value;",
+  "export const nested = <T extends Record<string, unknown>>(value: T): T => value;",
   "export const annotated: (id: string) => string = (id) => id;",
+  "export const bare = id => id;",
   "export const expression = function () { return 1; };",
 ];
 
@@ -90,6 +92,7 @@ const MULTILINE_ARROW = ["export const wrapped = (", "  id: string,", "): string
 const NOT_ARROWS = [
   "export const ICON_STROKE = 1.5;",
   "export const NAMES = ['a', 'b'];",
+  "export const LABELS = NAMES.map((name) => name.toUpperCase());",
   "export function proper(id: string): string {",
   "  return id;",
   "}",
