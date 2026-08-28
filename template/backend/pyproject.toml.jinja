@@ -128,6 +128,12 @@ select = [
     "TRY401", # https://docs.astral.sh/ruff/rules/verbose-log-message/
     "LOG", # https://docs.astral.sh/ruff/rules/#flake8-logging-log
     "G", # https://docs.astral.sh/ruff/rules/#flake8-logging-format-g
+    # `except Exception` is the first ban in *Fail loudly*, and prose was the whole of its
+    # enforcement -- in a project whose argument is that a rule nothing enforces does not
+    # hold. This is that rule mechanised. Where a blind except is genuinely right the escape
+    # is per-file-ignores below, which is a line somebody reviews rather than a decision
+    # taken silently at the point of pain.
+    "BLE", # https://docs.astral.sh/ruff/rules/#flake8-blind-except-ble
 ]
 ignore = [
     "E501", # https://docs.astral.sh/ruff/rules/line-too-long/
@@ -138,6 +144,14 @@ ignore = [
     "Q000", "Q001", "Q002", "Q003",
     "COM812", "COM819", "ISC002",
 ]
+
+# `resolved_without_a_credential` asks one question -- does this resolver hand out a tenant to
+# a request carrying nothing? -- and every way of failing is the same answer: it did not. The
+# probe reports through its return value, which `wiring.py` reads to decide whether to warn, so
+# nothing is swallowed. Narrowing the except would mean naming the exceptions somebody else's
+# replacement resolver might raise, which is not knowable from here.
+[tool.ruff.lint.per-file-ignores]
+"app/identity.py" = ["BLE001"]
 
 [tool.ruff.lint.mccabe]
 # The per-function hard gate. Measured across httpx and flask, p95 complexity is
