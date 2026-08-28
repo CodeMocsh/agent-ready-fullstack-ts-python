@@ -94,4 +94,11 @@ _message_after_copy: |
 
       curl -fsSL https://entire.io/install.sh | bash && entire enable
 
+  Enabling it means a pre-push hook sends each agent session -- the transcript, and the
+  prompts in it -- to your remote as `refs/entire/*`. Those refs do not appear anywhere in
+  the GitHub interface, and anyone who can read the repository can fetch them. That is
+  what you want for a repository only you read, and not what you want for a public one or
+  one with outside collaborators. `enabled: false` in `.entire/settings.json` turns it off
+  for every clone.
+
   Or delete `.claude/` and `.entire/` to opt out entirely.

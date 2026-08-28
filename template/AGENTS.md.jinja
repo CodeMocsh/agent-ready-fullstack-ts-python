@@ -284,5 +284,7 @@ This project was generated from
 [agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python)
 and can receive its later changes — see `docs/installation.md`. It ships
 [Entire](https://entire.io) session hooks and an agent guard in `.claude/`; both are
-optional; the guard says why it refused, in the refusal.
+optional; the guard says why it refused, in the refusal. Entire pushes each session to the
+remote as `refs/entire/*` once its CLI is installed, so `enabled: false` in
+`.entire/settings.json` is what a repository with readers you do not choose wants.
 
