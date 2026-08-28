@@ -64,10 +64,10 @@ fail to handle it without a type error.
 
 ## Zero comments
 
-No explanatory comments, no docblocks, no TODO/FIXME notes, no lint or type suppression
-directives (`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`),
-no commented-out code. Shebangs and TypeScript `///` directives are executable
-directives, not comments.
+No explanatory comments, no TODO/FIXME notes, no lint or type suppression directives
+(`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`), no
+commented-out code. Shebangs and TypeScript `///` directives are executable directives,
+not comments.
 
 Express intent through names, structure, types, and tests. Rationale goes in the commit
 message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
@@ -78,11 +78,15 @@ explanation.
 the rule, the invariant — and let the reader grep. A section number points into one
 revision of one document, and an ADR outlives the document whose structure it borrowed.
 
-One carve-out: a published public API. Where a package is consumed outside this repo its
-exported surface carries JSDoc or a docstring, because that text is shipped documentation,
-not an explanation aimed at a reader of the source. Everything internal stays bare. Such a
-doc states contracts, not reasoning: behaviour, failure, timing, ownership, safe use. Link
-the rationale; don't restate it.
+**A Python docstring is not a comment, and the gates already say so.** `comments.py`
+refuses comment tokens, and a docstring is a string bound to the symbol -- reachable
+through `help()`, part of the interface rather than an aside about the line below. A
+module, class or function may carry one. TypeScript has no equivalent: `/** */` is a
+comment token and `comments.mjs` refuses it, JSDoc included.
+
+What a docstring may say is the constraint. Contracts, not reasoning: behaviour, failure,
+timing, ownership, safe use. Link the rationale; don't restate it. One that walks through
+the body is the banned comment wearing a different quote character.
 
 Scope: source, tests, scripts. Config files may carry comments where the format offers no
 other way to explain a rule, and that includes `frontend/*.config.ts`, which is
