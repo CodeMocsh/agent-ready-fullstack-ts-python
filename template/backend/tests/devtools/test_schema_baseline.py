@@ -27,10 +27,15 @@ def test_a_key_already_recorded_keeps_the_hash_it_was_recorded_with() -> None:
     }
 
 
-def test_an_entry_that_no_longer_exists_leaves_the_baseline() -> None:
+def test_removing_a_recorded_entry_is_refused() -> None:
+    """Deleting or renaming a shipped entry is the mirror of editing one, and worse: every
+    database that applied that key reports one this build does not carry, so `check` refuses
+    to serve all of them. Dropping it from the baseline would let `make schema` wave it
+    through at the one moment a person is looking."""
     previous = {"0010_tasks": "kept", "0090_deleted": "gone"}
 
-    assert schema.merged_baseline(previous, {"0010_tasks": "kept"}) == {"0010_tasks": "kept"}
+    with pytest.raises(schema.RecordedEntryRemoved, match="0090_deleted"):
+        schema.merged_baseline(previous, {"0010_tasks": "kept"})
 
 
 def test_make_schema_does_not_re_record_a_body_that_changed(

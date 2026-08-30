@@ -358,9 +358,17 @@ def test_no_shipped_entry_body_has_changed() -> None:
     shipped = json.loads(SCHEMA_BASELINE.read_text())
     current = entry_hashes(DEFAULT_SCHEMA)
 
-    assert set(shipped) == set(current), (
-        ".schema-baseline.json does not list the same keys as app/store/ddl.py. Run "
-        "`make schema` and commit the result."
+    added = sorted(set(current) - set(shipped))
+    assert not added, (
+        f"{added} is in app/store/ddl.py and not in .schema-baseline.json. Run `make schema` "
+        f"and commit the result."
+    )
+    removed = sorted(set(shipped) - set(current))
+    assert not removed, (
+        f"{removed} is recorded in .schema-baseline.json and gone from app/store/ddl.py. Every "
+        f"database that applied it reports a key this build does not carry, and `check` refuses "
+        f"to serve them. Restore the entry, or -- only if it never reached a database -- delete "
+        f"its line from .schema-baseline.json in the same commit."
     )
     edited = sorted(key for key, was in shipped.items() if current[key] != was)
     assert not edited, (

@@ -130,21 +130,16 @@ as rolling forward to a fixed build.
 expand-and-contract change possible across two releases, and what keeps a half-finished deploy
 from leaving the database in a shape nothing can read.
 
-**Editing an entry that already shipped is refused by the gate, not by the database.** Comparing
-the set of applied keys removes the mis-banded entry. It cannot see the other half of the same
-mistake: a column added inside a `CREATE TABLE IF NOT EXISTS` that some database already ran.
-That statement skips, every key still matches on both sides, the application starts, and every
-query naming the column fails. `backend/.schema-baseline.json` records a hash of each entry body
-and `test_no_shipped_entry_body_has_changed` refuses the edit in the pre-commit hook, before a
-database exists to be wrong.
+**Editing or removing a shipped entry is refused by the gate, not at deploy.** Comparing the
+set of applied keys cannot see either: an edited body leaves every key matching, and a deleted
+key is only visible once a database that ran it is in front of you. `backend/.schema-baseline.json`
+records a hash per entry and refuses both in the pre-commit hook, on `.complexity-baseline.json`'s
+terms — regenerating cannot quiet it, so the only way past is a line in a diff somebody reads.
 
-**`make schema` never re-records a body that changed.** A key keeps the hash it was first
-written with, so regenerating cannot quiet the gate; the only way past is to edit the line, which puts
-the decision in a diff somebody reads. That is `.complexity-baseline.json`'s bargain applied to
-the schema. The cost is that a cosmetic edit — a reformat, a comment — also stops a deploy, and
-that is accepted: nothing can tell a reformat from a column, and the failure being prevented is
-silent. A runtime check was built first and rejected, because the mistake is visible at commit
-time and a check at deploy time is the latest moment it can be caught rather than the earliest.
+A cosmetic edit stops a deploy too, and that is accepted: nothing can tell a reformat from a
+column, and the failure being prevented is silent. **A runtime check was built first and
+rejected** — the mistake is visible at commit time, so checking at deploy time is the latest
+moment it can be caught rather than the earliest.
 
 **The migration issues `SET ROLE <schema>_owner`, guarded on two questions.** Does the role
 exist — roles are cluster-wide, so its existence says nothing about *this* database — and are
