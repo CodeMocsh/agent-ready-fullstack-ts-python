@@ -11,7 +11,7 @@ ECS, the `migrate` service in `deploy/compose.yaml` here. It is idempotent, it s
 an advisory lock so two releases cannot race, and it exits 0 when the database is already
 current, which is what makes it safe to wire into a hook that may fire more than once.
 
-Skip it and the new version refuses to start, naming both schema versions. That refusal is the
+Skip it and the new version refuses to start, naming the entries it needs. That refusal is the
 enforcement: a release step nobody wired up fails the deploy instead of quietly serving
 queries against columns that are not there.
 """

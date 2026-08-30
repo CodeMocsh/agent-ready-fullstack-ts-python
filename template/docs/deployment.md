@@ -53,12 +53,12 @@ calls a release command: Fly's `[deploy] release_command`, a release or pre-depl
 Heroku, Railway and Render, a `Job` with `helm.sh/hook: pre-upgrade` on Kubernetes, a one-off
 task on ECS, or the `migrate` service in `deploy/compose.yaml`.
 
-It is idempotent, serialises on an advisory lock, and exits 0 when already current. The
+It is idempotent, serialises on an advisory lock, and re-runs every entry on every call. The
 application refuses to start if it can see `DATABASE_OWNER_URL`, so a single container that
 migrates and then serves must drop the credential in between:
 `env -u DATABASE_OWNER_URL uvicorn ...`.
 
-**The schema version must match the build exactly**, in both directions
+**The database must have applied exactly the entries the build carries**, in both directions
 ([adr/0003](adr/0003-the-application-never-applies-ddl.md)). The cost, worth knowing before
 your first rolling deploy: between the release step and the last old instance being replaced,
 any instance of the *previous* version that restarts will not come back up. Already-running

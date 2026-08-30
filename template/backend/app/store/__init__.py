@@ -73,7 +73,7 @@ class Database(Protocol):
         ...
 
     async def check(self) -> str:
-        """Verify the schema is the one this build expects. Returns the version marker.
+        """Verify the schema is the one this build expects. Returns the last entry key.
 
         Never applies anything. This process holds no rights to, by design: DDL is a release
         step (`make migrate`), and the refusal here is what makes a release that skipped it
@@ -82,7 +82,7 @@ class Database(Protocol):
         ...
 
     async def schema_version(self) -> str | None:
-        """The applied version marker, or `None` on a substrate that was never migrated."""
+        """The last entry key applied, or `None` on a substrate that was never migrated."""
         ...
 
     async def close(self) -> None: ...

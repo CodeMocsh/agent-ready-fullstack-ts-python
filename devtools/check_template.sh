@@ -922,6 +922,9 @@ need_absent backend/app/store.py
 # fails when it drifts, and that test is in the fast tier, so the gate catches it.
 need deploy/schema.sql
 need deploy/roles.sql
+# The entry lock. Without it `make schema` re-locks an edited body and the gate that refuses
+# an edited shipped entry stops refusing anything.
+need backend/.schema-entries.json
 need deploy/compose.yaml
 need_exec deploy/credentials.sh
 need CONTEXT.md

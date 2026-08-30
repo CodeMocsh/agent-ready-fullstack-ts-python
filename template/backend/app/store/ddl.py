@@ -2,10 +2,10 @@
 
 One statement per entry, so the schema is assertable without a Postgres to apply it to and
 `make schema` is a `join`. Keys are four-digit and banded by table — `0010_tasks` and its
-indexes, repairs at `0200_` — so a new entry sorts where it belongs and `max(key)` is the
-version marker.
+indexes, repairs at `0200_` — so a new entry sorts where it belongs. `apply` runs every entry
+in key order on every release step, so the key decides *when* an entry runs and never *whether*.
 
-Three rules, and each one exists because breaking it fails somewhere far from the edit:
+Two rules, and each one exists because breaking it fails somewhere far from the edit:
 
 - **Additive and idempotent.** Every entry carries `IF NOT EXISTS`, or is a catalog-guarded
   `DO` block, which is how a statement with no such spelling is made re-runnable at all.
@@ -15,12 +15,9 @@ Three rules, and each one exists because breaking it fails somewhere far from th
   database that already had it. A column therefore lands **twice**: in its table's `CREATE`,
   which stays the whole truth about that table, and as an `ALTER TABLE … ADD COLUMN IF NOT
   EXISTS` repair entry in the `0200_` band, never beside its table. Both statements are
-  idempotent, so each is a no-op for the case the other covers, and
-  `test_a_column_added_by_an_alter_is_also_in_its_create` holds the pair together.
-
-- **The repair band sorts above everything.** `migrate()` compares `max(key)` and returns
-  early when the database is not behind, so a repair that sorted under an existing entry
-  would never run in either mode.
+  idempotent, so each is a no-op for the case the other covers.
+  `test_a_column_added_by_an_alter_is_also_in_its_create` holds the pair together, and
+  `test_no_shipped_entry_body_has_changed` refuses the edit that skips the repair.
 
 Statements are written **unqualified**; `conn.search_path_sql` selects the schema.
 `0001_schema` is the one entry that names it, because the search path cannot select a schema
@@ -33,7 +30,8 @@ SCHEMA_ENTRY_KEY = "0001_schema"
 """The one entry that names the schema, and the one that has to run first."""
 
 REPAIR_BAND = "0200_"
-"""Where an `ALTER TABLE … ADD COLUMN` goes. Above every other band, deliberately."""
+"""Where an `ALTER TABLE … ADD COLUMN` goes. Above the table it repairs, so the table exists
+by the time it runs, and grouped so a reader sees every repair in one place."""
 
 APPLIED_ONCE_DDL = """CREATE TABLE IF NOT EXISTS applied_once (
   key         text PRIMARY KEY,
@@ -76,9 +74,9 @@ SCHEMA: list[tuple[str, str]] = [
 ]
 """Idempotent, additive, one statement each.
 
-Applied in order whenever the database is behind, and *all* of them are -- `apply_schema`
-does not filter against the ledger, it leans on every entry being idempotent. `migrate()`
-returns early when `max(key)` has not moved, so a database that is current runs none."""
+All of them run in key order on every release step. `apply` does not filter against the ledger,
+it leans on every entry being idempotent, so a database that is already current is unchanged by
+the run."""
 
 
 def statements(schema: str | None = None) -> list[tuple[str, str]]:

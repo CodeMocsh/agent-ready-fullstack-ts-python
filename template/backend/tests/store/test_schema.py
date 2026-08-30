@@ -7,6 +7,7 @@ in the fast tier. `tests/integration/test_postgres.py` covers only what needs a 
 whole reason it is two methods.
 """
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ from app.store.migrate import (
     apply,
     check,
     emit_sql,
+    entry_hashes,
     known_keys,
     known_version,
 )
@@ -34,18 +36,26 @@ from app.store.roles import app_role, emit_roles_sql, owner_role
 
 SCHEMA_SQL = Path(__file__).resolve().parents[3] / "deploy" / "schema.sql"
 ROLES_SQL = Path(__file__).resolve().parents[3] / "deploy" / "roles.sql"
+ENTRY_LOCK = Path(__file__).resolve().parents[2] / ".schema-entries.json"
 
 ADD_COLUMN = "ADD COLUMN IF NOT EXISTS"
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS"
 
 
-class FakeConn:
-    """`Conn` with no database behind it. Records what it was asked to run."""
+NEVER_MIGRATED: list[str] = []
+"""What the ledger holds on a database nothing has applied. The `applied` default is every key
+this build carries, so a test that wants a current database says nothing."""
 
-    def __init__(self, version: str | None = None, *, may_set_role: bool = False) -> None:
+
+class FakeConn:
+    """`Conn` with no database behind it. Records what it was asked to run.
+
+    `applied` is what the ledger holds, and it drives every answer this fake gives."""
+
+    def __init__(self, applied: list[str] | None = None, *, may_set_role: bool = False) -> None:
         self.executed: list[str] = []
         self.recorded: list[str] = []
-        self._version: str | None = version
+        self._applied: list[str] = known_keys("app") if applied is None else applied
         self._may_set_role: bool = may_set_role
 
     async def execute(self, query: str, *args: Any) -> str:
@@ -56,9 +66,9 @@ class FakeConn:
 
     async def fetchval(self, query: str, *_args: Any) -> Any:
         if "to_regclass" in query:
-            return None if self._version is None else 12345
-        if "max(key" in query:
-            return self._version
+            return None if not self._applied else 12345
+        if "string_agg" in query:
+            return "\n".join(sorted(self._applied)) or None
         if "pg_has_role" in query:
             return self._may_set_role
         raise AssertionError(f"the fake was asked something it does not answer: {query}")
@@ -117,22 +127,17 @@ def test_every_entry_is_exactly_one_statement() -> None:
         )
 
 
-def test_the_repair_band_sorts_above_every_other_band() -> None:
-    repairs = [key for key in known_keys() if key.startswith(ddl.REPAIR_BAND)]
-    others = [key for key in known_keys() if not key.startswith(ddl.REPAIR_BAND)]
-    for repair in repairs:
-        assert all(repair > other for other in others), (
-            f"{repair} does not sort above every other entry. `migrate()` compares max(key) "
-            f"and returns early when the database is not behind, so a repair below an "
-            f"existing entry never runs at all."
-        )
-
-
 def test_a_column_added_by_an_alter_is_also_in_its_create() -> None:
+    """A repair and the `CREATE` it repairs, held together and in the right order.
+
+    The order is the half a reader forgets: entries run sorted by key, so a repair keyed below
+    its table's `CREATE` runs against a table that does not exist yet. That fails loudly at
+    `make migrate`, which is why nothing else guards it, but it fails on somebody's deploy.
+    """
     entries = ddl.statements()
     creates = {
-        body.split(CREATE_TABLE, 1)[1].split()[0]: body
-        for _, body in entries
+        body.split(CREATE_TABLE, 1)[1].split()[0]: (key, body)
+        for key, body in entries
         if CREATE_TABLE in body
     }
     assert creates, "there is no CREATE TABLE in the schema at all"
@@ -142,11 +147,16 @@ def test_a_column_added_by_an_alter_is_also_in_its_create() -> None:
         table = sql.split("ALTER TABLE", 1)[1].split()[0]
         column = sql.split(ADD_COLUMN, 1)[1].split()[0]
         assert table in creates, f"{key} alters {table}, which has no CREATE entry"
-        assert column in creates[table], (
+        created_by, create = creates[table]
+        assert column in create, (
             f"{key} adds {table}.{column} and the CREATE for {table} does not mention it. "
             f"A column has to land twice: `CREATE TABLE IF NOT EXISTS` skips entirely once "
             f"the table exists, so the CREATE alone reaches no existing database and the "
             f"ALTER alone leaves the CREATE lying about the table."
+        )
+        assert key > created_by, (
+            f"{key} repairs {table}, which {created_by} creates, and sorts below it. Entries "
+            f"run in key order, so this one runs against a table that does not exist yet."
         )
 
 
@@ -172,7 +182,7 @@ def test_the_migration_lock_is_stable_and_differs_per_schema() -> None:
 
 
 async def test_apply_runs_every_entry_against_an_empty_database() -> None:
-    conn = FakeConn(version=None)
+    conn = FakeConn(NEVER_MIGRATED)
 
     assert await apply(conn, "app") == known_version()
 
@@ -189,31 +199,50 @@ async def test_apply_becomes_the_owner_where_it_may_and_carries_on_where_it_may_
     application is refused at query time rather than here. Where the role does not exist at
     all -- a developer's own Postgres -- carrying on is the bootstrap, and `FORCE` keeps those
     objects policy-bound whoever owns them."""
-    permitted = FakeConn(version=None, may_set_role=True)
+    permitted = FakeConn(NEVER_MIGRATED, may_set_role=True)
     await apply(permitted, "app")
     assert 'SET ROLE "app_owner"' in permitted.executed
 
-    bootstrap = FakeConn(version=None, may_set_role=False)
+    bootstrap = FakeConn(NEVER_MIGRATED, may_set_role=False)
     await apply(bootstrap, "app")
     assert not any(query.startswith("SET ROLE") for query in bootstrap.executed)
     assert bootstrap.recorded == known_keys()
 
 
-async def test_apply_applies_nothing_when_the_database_is_current() -> None:
-    conn = FakeConn(version=known_version())
+async def test_apply_runs_every_entry_again_on_a_database_that_is_already_current() -> None:
+    """No early return, and that is the point.
+
+    Every entry is idempotent, so the second run changes nothing. Skipping on a version
+    comparison is what would make an entry keyed below an existing one invisible for ever.
+    """
+    conn = FakeConn()
 
     assert await apply(conn, "app") == known_version()
 
-    assert conn.recorded == []
-    assert not any("pg_advisory_lock" in query for query in conn.executed)
+    assert conn.recorded == known_keys()
+    assert any("pg_advisory_lock" in query for query in conn.executed)
 
 
-async def test_apply_revokes_the_ledger_even_when_the_database_is_current() -> None:
-    """The bootstrap order is migrate first, provision roles second -- so the run that creates
-    the tables is usually the one with no role to revoke from yet. If the revoke only happened
-    on the applying path, that database would keep an application role able to write its own
-    version marker, and `check` could be handed an answer it forged."""
-    conn = FakeConn(version=known_version())
+async def test_apply_lands_an_entry_keyed_below_the_ones_already_applied() -> None:
+    """The failure a `max(key)` comparison could not see, and now cannot happen.
+
+    A repair banded under an existing entry leaves the highest applied key exactly where it
+    was. Nothing here reads the highest key, so the entry runs like any other.
+    """
+    keys = known_keys("app")
+    conn = FakeConn([*keys[:1], *keys[2:]])
+
+    await apply(conn, "app")
+
+    assert keys[1] in conn.recorded
+
+
+async def test_apply_revokes_the_ledger_on_every_run() -> None:
+    """The bootstrap order is migrate first, provision roles second, so the run that creates
+    the tables is usually the one with no role to revoke from yet. Every run revokes, so the
+    next one catches up. Otherwise that database keeps an application role able to write its
+    own ledger, and `check` could be handed an answer it forged."""
+    conn = FakeConn()
 
     await apply(conn, "app")
 
@@ -222,15 +251,15 @@ async def test_apply_revokes_the_ledger_even_when_the_database_is_current() -> N
 
 async def test_check_never_writes_anything() -> None:
     """The property that lets a role holding no `CREATE` run it: it only ever reads."""
-    conn = FakeConn(version=known_version())
+    conn = FakeConn()
 
     assert await check(conn, "app") == known_version()
 
     assert conn.executed == []
 
 
-async def test_check_refuses_a_database_behind_this_build_and_names_the_fix() -> None:
-    conn = FakeConn(version=None)
+async def test_check_refuses_a_database_missing_any_entry_and_names_the_fix() -> None:
+    conn = FakeConn(NEVER_MIGRATED)
 
     with pytest.raises(SchemaBehindError, match="make migrate"):
         await check(conn, "app")
@@ -238,14 +267,22 @@ async def test_check_refuses_a_database_behind_this_build_and_names_the_fix() ->
     assert conn.executed == []
 
 
-async def test_check_refuses_a_database_ahead_of_this_build() -> None:
-    """The version must match exactly, in both directions.
+async def test_check_refuses_a_database_missing_only_an_entry_below_the_highest_key() -> None:
+    """The highest applied key is unchanged here, so a marker comparison serves this database.
+    It is missing whatever that entry creates, and every query naming it fails."""
+    keys = known_keys("app")
+    conn = FakeConn([*keys[:1], *keys[2:]])
 
-    Tolerating `ahead` would be a compatibility judgement made at startup by a process with no
+    with pytest.raises(SchemaBehindError, match=keys[1]):
+        await check(conn, "app")
+
+
+async def test_check_refuses_a_database_carrying_an_entry_this_build_does_not() -> None:
+    """Tolerating it would be a compatibility judgement made at startup by a process with no
     way to verify it, and the failure it lets through -- an older build writing rows to a
     shape it does not know about -- is silent. `docs/adr/0003` records what refusing costs.
     """
-    conn = FakeConn(version="9999_from_the_future")
+    conn = FakeConn([*known_keys("app"), "9999_from_the_future"])
 
     with pytest.raises(SchemaTooNewError, match="newer release"):
         await check(conn, "app")
@@ -253,10 +290,10 @@ async def test_check_refuses_a_database_ahead_of_this_build() -> None:
     assert conn.executed == []
 
 
-async def test_apply_refuses_a_database_ahead_of_this_build() -> None:
+async def test_apply_refuses_a_database_carrying_an_entry_this_build_does_not() -> None:
     """The asymmetry with `check`: an old migrator pointed at a new database is a deploy-order
     mistake, where an old binary *serving* a new schema is a rolling deploy working."""
-    conn = FakeConn(version="9999_from_the_future")
+    conn = FakeConn([*known_keys("app"), "9999_from_the_future"])
 
     with pytest.raises(SchemaTooNewError):
         await apply(conn, "app")
@@ -269,6 +306,30 @@ def test_the_committed_schema_sql_is_what_the_generator_emits() -> None:
     assert SCHEMA_SQL.read_text() == emit_sql(DEFAULT_SCHEMA), (
         "deploy/schema.sql does not match app/store/ddl.py. Run `make schema` and commit "
         "the result, the same way openapi.json follows the models."
+    )
+
+
+def test_no_shipped_entry_body_has_changed() -> None:
+    """The rule `ddl.py` states, mechanised: never edit an entry that already shipped.
+
+    Fires in the pre-commit hook, before a database exists to be wrong. Why the lock is a
+    baseline a person updates rather than a file `make schema` rewrites is in
+    `docs/adr/0003-the-application-never-applies-ddl.md`.
+    """
+    assert ENTRY_LOCK.exists(), f"{ENTRY_LOCK} is missing; run `make schema`"
+    shipped = json.loads(ENTRY_LOCK.read_text())
+    current = entry_hashes(DEFAULT_SCHEMA)
+
+    assert set(shipped) == set(current), (
+        ".schema-entries.json does not list the same keys as app/store/ddl.py. Run "
+        "`make schema` and commit the result."
+    )
+    edited = sorted(key for key, was in shipped.items() if current[key] != was)
+    assert not edited, (
+        f"{edited} shipped, and the body has changed since. A database that already ran it "
+        f"never gets the change: `CREATE TABLE IF NOT EXISTS` skips, every key still matches, "
+        f"and every query naming what you added fails. Restore the entry and add the change as "
+        f"a {ddl.REPAIR_BAND} repair, or hand-edit .schema-entries.json if the edit is cosmetic."
     )
 
 
