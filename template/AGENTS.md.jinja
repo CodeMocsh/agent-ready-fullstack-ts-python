@@ -243,7 +243,7 @@ Each of these is something a reasonable edit undoes without anything failing unt
 - **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key, and
   `make migrate` runs all of them every time. Never edit a shipped entry: a column added
   later lands twice, once in its table's `CREATE` and once in the `0200_` repair band.
-  `.schema-entries.json` locks each body and `make test` refuses the edit. Run
+  `.schema-baseline.json` records each body and `make test` refuses the edit. Run
   `make schema` and commit both files.
 - **The application must never see `DATABASE_OWNER_URL`.** It refuses to start if it can.
 - **Do not delete `MemoryDatabase`** when Postgres feels real enough. The gate runs on it

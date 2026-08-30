@@ -33,10 +33,10 @@ from app.store.migrate import (
     known_version,
 )
 from app.store.roles import app_role, emit_roles_sql, owner_role
+from devtools.schema import SCHEMA_BASELINE
 
 SCHEMA_SQL = Path(__file__).resolve().parents[3] / "deploy" / "schema.sql"
 ROLES_SQL = Path(__file__).resolve().parents[3] / "deploy" / "roles.sql"
-ENTRY_LOCK = Path(__file__).resolve().parents[2] / ".schema-entries.json"
 
 ADD_COLUMN = "ADD COLUMN IF NOT EXISTS"
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS"
@@ -127,37 +127,75 @@ def test_every_entry_is_exactly_one_statement() -> None:
         )
 
 
-def test_a_column_added_by_an_alter_is_also_in_its_create() -> None:
-    """A repair and the `CREATE` it repairs, held together and in the right order.
+def repairs_out_of_step(entries: list[tuple[str, str]]) -> list[str]:
+    """Every way a repair entry and the `CREATE` it repairs can disagree.
 
-    The order is the half a reader forgets: entries run sorted by key, so a repair keyed below
-    its table's `CREATE` runs against a table that does not exist yet. That fails loudly at
-    `make migrate`, which is why nothing else guards it, but it fails on somebody's deploy.
+    A column lands twice: in its table's `CREATE`, which stays the whole truth about the table,
+    and as an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` keyed above it. The `CREATE` alone
+    reaches no database that already has the table, the `ALTER` alone leaves the `CREATE` lying
+    about it, and an `ALTER` keyed below its `CREATE` runs before the table exists.
+
+    Taken as an argument rather than read from `ddl.SCHEMA`, because the template ships no
+    repair yet: driven only by the live schema every assertion here would be vacuous.
     """
-    entries = ddl.statements()
     creates = {
         body.split(CREATE_TABLE, 1)[1].split()[0]: (key, body)
         for key, body in entries
         if CREATE_TABLE in body
     }
-    assert creates, "there is no CREATE TABLE in the schema at all"
+    found: list[str] = []
     for key, sql in entries:
         if ADD_COLUMN not in sql:
             continue
         table = sql.split("ALTER TABLE", 1)[1].split()[0]
         column = sql.split(ADD_COLUMN, 1)[1].split()[0]
-        assert table in creates, f"{key} alters {table}, which has no CREATE entry"
+        if table not in creates:
+            found.append(f"{key} alters {table}, which has no CREATE entry")
+            continue
         created_by, create = creates[table]
-        assert column in create, (
-            f"{key} adds {table}.{column} and the CREATE for {table} does not mention it. "
-            f"A column has to land twice: `CREATE TABLE IF NOT EXISTS` skips entirely once "
-            f"the table exists, so the CREATE alone reaches no existing database and the "
-            f"ALTER alone leaves the CREATE lying about the table."
-        )
-        assert key > created_by, (
-            f"{key} repairs {table}, which {created_by} creates, and sorts below it. Entries "
-            f"run in key order, so this one runs against a table that does not exist yet."
-        )
+        if column not in create:
+            found.append(f"{key} adds {table}.{column} and the CREATE for {table} does not name it")
+        if key < created_by:
+            found.append(f"{key} repairs {table} and sorts below {created_by}, which creates it")
+    return found
+
+
+A_TASKS_CREATE = ("0010_tasks", f"{CREATE_TABLE} tasks (\n  id uuid PRIMARY KEY,\n  note text\n)")
+A_TASKS_REPAIR = ("0200_tasks_note", f"ALTER TABLE tasks {ADD_COLUMN} note text")
+
+
+def test_every_repair_is_in_step_with_its_create() -> None:
+    assert ddl.statements(), "there are no entries at all"
+    assert repairs_out_of_step(ddl.statements()) == []
+
+
+def test_a_repair_keyed_below_its_create_is_reported() -> None:
+    """Entries run in key order, so this one runs against a table that does not exist yet."""
+    early = ("0005_tasks_note", A_TASKS_REPAIR[1])
+
+    assert repairs_out_of_step([early, A_TASKS_CREATE]) == [
+        "0005_tasks_note repairs tasks and sorts below 0010_tasks, which creates it"
+    ]
+
+
+def test_a_repair_whose_column_is_missing_from_its_create_is_reported() -> None:
+    """The `CREATE` stays the whole truth about the table, or a fresh database and an existing
+    one end up with different columns."""
+    bare = ("0010_tasks", f"{CREATE_TABLE} tasks (\n  id uuid PRIMARY KEY\n)")
+
+    assert repairs_out_of_step([bare, A_TASKS_REPAIR]) == [
+        "0200_tasks_note adds tasks.note and the CREATE for tasks does not name it"
+    ]
+
+
+def test_a_repair_for_a_table_nothing_creates_is_reported() -> None:
+    assert repairs_out_of_step([A_TASKS_REPAIR]) == [
+        "0200_tasks_note alters tasks, which has no CREATE entry"
+    ]
+
+
+def test_a_repair_in_step_with_its_create_is_not_reported() -> None:
+    assert repairs_out_of_step([A_TASKS_CREATE, A_TASKS_REPAIR]) == []
 
 
 def test_known_version_is_the_last_key() -> None:
@@ -312,16 +350,16 @@ def test_the_committed_schema_sql_is_what_the_generator_emits() -> None:
 def test_no_shipped_entry_body_has_changed() -> None:
     """The rule `ddl.py` states, mechanised: never edit an entry that already shipped.
 
-    Fires in the pre-commit hook, before a database exists to be wrong. Why the lock is a
-    baseline a person updates rather than a file `make schema` rewrites is in
+    Fires in the pre-commit hook, before a database exists to be wrong. Why the baseline is
+    something a person updates rather than a file `make schema` rewrites is in
     `docs/adr/0003-the-application-never-applies-ddl.md`.
     """
-    assert ENTRY_LOCK.exists(), f"{ENTRY_LOCK} is missing; run `make schema`"
-    shipped = json.loads(ENTRY_LOCK.read_text())
+    assert SCHEMA_BASELINE.exists(), f"{SCHEMA_BASELINE} is missing; run `make schema`"
+    shipped = json.loads(SCHEMA_BASELINE.read_text())
     current = entry_hashes(DEFAULT_SCHEMA)
 
     assert set(shipped) == set(current), (
-        ".schema-entries.json does not list the same keys as app/store/ddl.py. Run "
+        ".schema-baseline.json does not list the same keys as app/store/ddl.py. Run "
         "`make schema` and commit the result."
     )
     edited = sorted(key for key, was in shipped.items() if current[key] != was)
@@ -329,7 +367,7 @@ def test_no_shipped_entry_body_has_changed() -> None:
         f"{edited} shipped, and the body has changed since. A database that already ran it "
         f"never gets the change: `CREATE TABLE IF NOT EXISTS` skips, every key still matches, "
         f"and every query naming what you added fails. Restore the entry and add the change as "
-        f"a {ddl.REPAIR_BAND} repair, or hand-edit .schema-entries.json if the edit is cosmetic."
+        f"a {ddl.REPAIR_BAND} repair, or hand-edit .schema-baseline.json if the edit is cosmetic."
     )
 
 

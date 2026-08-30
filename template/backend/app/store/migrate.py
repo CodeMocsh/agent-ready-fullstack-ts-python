@@ -70,7 +70,7 @@ def known_version(schema: str | None = None) -> str:
 def entry_hashes(schema: str | None = None) -> dict[str, str]:
     """A hash of every entry's body, keyed by its key. Read by the gate, never at run time.
 
-    `.schema-entries.json` locks these and `test_no_shipped_entry_body_has_changed` compares
+    `.schema-baseline.json` records these and `test_no_shipped_entry_body_has_changed` compares
     against them.
     """
     return {key: hashlib.sha256(sql.encode()).hexdigest() for key, sql in statements(schema)}
@@ -81,13 +81,10 @@ def _ledger(schema: str | None) -> str:
 
 
 async def applied_keys(conn: Conn, schema: str | None = None) -> set[str]:
-    """Every entry key the ledger holds. Empty on a database that was never migrated.
+    """Every entry key the ledger holds, and empty where it holds none or does not exist.
 
-    Qualified rather than relying on the search path, because this runs *before* the search
-    path is set, on a database where the schema may not exist yet.
-
-    Aggregated with `string_agg` through `fetchval` so that `Conn` stays two methods, which is
-    what lets a fake with no database behind it drive the whole migration path.
+    Qualified rather than relying on the search path: this runs before the search path is set,
+    on a database whose schema may not exist yet.
     """
     ledger = _ledger(schema)
     if await conn.fetchval("SELECT to_regclass($1)", ledger) is None:
@@ -99,12 +96,8 @@ async def applied_keys(conn: Conn, schema: str | None = None) -> set[str]:
 async def schema_version(conn: Conn, schema: str | None = None) -> str | None:
     """The last key the ledger holds, or `None` on a database that was never migrated.
 
-    Reported, never compared. `Database.schema_version()` surfaces it and `make migrate` prints
-    it, so it is a string a person reads.
-
-    Taken in Python from `applied_keys` rather than as `max(key)` in SQL, which would need
-    `COLLATE "C"` to agree with `known_version()` and would report a version this build never
-    emits if anyone dropped it.
+    Reported, never compared. `Database.schema_version()` surfaces it and `make migrate`
+    prints it, so it is a string a person reads.
     """
     return max(await applied_keys(conn, schema), default=None)
 
@@ -126,7 +119,7 @@ async def check(conn: Conn, schema: str | None = None) -> str:
     """
     applied = await applied_keys(conn, schema)
     known = known_keys(schema)
-    unknown = _unknown_keys(applied, schema)
+    unknown = _unknown_keys(applied, known)
     if unknown:
         raise SchemaTooNewError(
             f"the database has applied {unknown!r}, which this build does not carry. "
@@ -151,7 +144,7 @@ async def apply(conn: Conn, schema: str | None = None) -> str:
     pass over the entries. Nothing here compares a version and decides to skip: that is what
     makes an entry sorting below an existing key run at all.
     """
-    unknown = _unknown_keys(await applied_keys(conn, schema), schema)
+    unknown = _unknown_keys(await applied_keys(conn, schema), known_keys(schema))
     if unknown:
         raise SchemaTooNewError(
             f"the database has applied {unknown!r}, which this migrator does not carry; "
@@ -161,9 +154,9 @@ async def apply(conn: Conn, schema: str | None = None) -> str:
     return await _apply_all(conn, schema)
 
 
-def _unknown_keys(applied: set[str], schema: str | None) -> list[str]:
+def _unknown_keys(applied: set[str], known: list[str]) -> list[str]:
     """Keys the ledger holds that this build does not carry, sorted for the message."""
-    return sorted(applied - set(known_keys(schema)))
+    return sorted(applied - set(known))
 
 
 async def _become_owner(conn: Conn, schema: str | None) -> None:

@@ -5,7 +5,7 @@ One statement per entry, so the schema is assertable without a Postgres to apply
 indexes, repairs at `0200_` — so a new entry sorts where it belongs. `apply` runs every entry
 in key order on every release step, so the key decides *when* an entry runs and never *whether*.
 
-Two rules, and each one exists because breaking it fails somewhere far from the edit:
+Each rule below exists because breaking it fails somewhere far from the edit:
 
 - **Additive and idempotent.** Every entry carries `IF NOT EXISTS`, or is a catalog-guarded
   `DO` block, which is how a statement with no such spelling is made re-runnable at all.
@@ -16,7 +16,7 @@ Two rules, and each one exists because breaking it fails somewhere far from the 
   which stays the whole truth about that table, and as an `ALTER TABLE … ADD COLUMN IF NOT
   EXISTS` repair entry in the `0200_` band, never beside its table. Both statements are
   idempotent, so each is a no-op for the case the other covers.
-  `test_a_column_added_by_an_alter_is_also_in_its_create` holds the pair together, and
+  `test_every_repair_is_in_step_with_its_create` holds the pair together, and
   `test_no_shipped_entry_body_has_changed` refuses the edit that skips the repair.
 
 Statements are written **unqualified**; `conn.search_path_sql` selects the schema.

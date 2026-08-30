@@ -4,10 +4,14 @@
 of its own until the two were merged. Neither claim was decided differently; the rejected
 options and the costs of both are below, and the title now states both halves.
 
-**Amended 2026-08-30.** *The match is exact, in both directions* below said the comparison was
-the version marker, `max(key)`. It is now the set of applied keys, and what forced the change is
-recorded in that section. The claim it makes is unchanged and slightly stronger. The version
-marker still exists, and nothing decides on it.
+**Amended 2026-08-30.** *The match is exact, in both directions* below said the comparison
+was the version marker, `max(key)`. It is now the set of applied keys, and what forced the
+change is recorded in that section. The claim it makes is unchanged and slightly stronger. The
+version marker still exists, and nothing decides on it.
+
+Three consequences moved with it. `make migrate` no longer "exits 0 when already current"; it
+re-runs every entry. The refusal names the entries the database has not applied rather than two
+version strings. And two consequences are new: the schema baseline, and what it costs.
 
 The running application holds no rights to change the schema and no credential that could. It
 verifies at startup and refuses to serve unless the entries applied to the database are exactly
@@ -130,12 +134,12 @@ from leaving the database in a shape nothing can read.
 the set of applied keys removes the mis-banded entry. It cannot see the other half of the same
 mistake: a column added inside a `CREATE TABLE IF NOT EXISTS` that some database already ran.
 That statement skips, every key still matches on both sides, the application starts, and every
-query naming the column fails. `backend/.schema-entries.json` locks a hash of each entry body
+query naming the column fails. `backend/.schema-baseline.json` records a hash of each entry body
 and `test_no_shipped_entry_body_has_changed` refuses the edit in the pre-commit hook, before a
 database exists to be wrong.
 
-**`make schema` never re-locks a body that changed.** A key keeps the hash it was first written
-with, so regenerating cannot quiet the gate; the only way past is to edit the line, which puts
+**`make schema` never re-records a body that changed.** A key keeps the hash it was first
+written with, so regenerating cannot quiet the gate; the only way past is to edit the line, which puts
 the decision in a diff somebody reads. That is `.complexity-baseline.json`'s bargain applied to
 the schema. The cost is that a cosmetic edit — a reformat, a comment — also stops a deploy, and
 that is accepted: nothing can tell a reformat from a column, and the failure being prevented is
