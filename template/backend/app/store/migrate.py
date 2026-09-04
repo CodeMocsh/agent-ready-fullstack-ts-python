@@ -68,7 +68,7 @@ def known_version(schema: str | None = None) -> str:
 
 
 def entry_hashes(schema: str | None = None) -> dict[str, str]:
-    """A hash of every entry's body, keyed by its key. Read by the gate, never at run time.
+    """A hash of each entry body, by key. Read by the gate, never at run time.
 
     `.schema-baseline.json` records these and `test_no_shipped_entry_body_has_changed` compares
     against them.

@@ -50,13 +50,25 @@ this build carries, so a test that wants a current database says nothing."""
 class FakeConn:
     """`Conn` with no database behind it. Records what it was asked to run.
 
-    `applied` is what the ledger holds, and it drives every answer this fake gives."""
+    `applied` is what the ledger holds, and it drives every answer this fake gives.
 
-    def __init__(self, applied: list[str] | None = None, *, may_set_role: bool = False) -> None:
+    `ledger_exists` separates a database with no ledger from one whose ledger holds no rows.
+    They answer the same thing and reach `applied_keys` by different branches, so the fake has
+    to be able to say which.
+    """
+
+    def __init__(
+        self,
+        applied: list[str] | None = None,
+        *,
+        may_set_role: bool = False,
+        ledger_exists: bool | None = None,
+    ) -> None:
         self.executed: list[str] = []
         self.recorded: list[str] = []
         self._applied: list[str] = known_keys("app") if applied is None else applied
         self._may_set_role: bool = may_set_role
+        self._ledger_exists: bool = bool(self._applied) if ledger_exists is None else ledger_exists
 
     async def execute(self, query: str, *args: Any) -> str:
         self.executed.append(query)
@@ -66,7 +78,7 @@ class FakeConn:
 
     async def fetchval(self, query: str, *_args: Any) -> Any:
         if "to_regclass" in query:
-            return None if not self._applied else 12345
+            return 12345 if self._ledger_exists else None
         if "string_agg" in query:
             return "\n".join(sorted(self._applied)) or None
         if "pg_has_role" in query:
@@ -296,6 +308,16 @@ async def test_check_never_writes_anything() -> None:
     assert conn.executed == []
 
 
+async def test_check_refuses_a_database_whose_ledger_exists_and_holds_nothing() -> None:
+    """A truncated ledger and a database that was never migrated answer the same thing, and
+    reach it by different branches: `to_regclass` finds the table, then `string_agg` over no
+    rows answers NULL. Both mean nothing has been applied."""
+    conn = FakeConn(NEVER_MIGRATED, ledger_exists=True)
+
+    with pytest.raises(SchemaBehindError):
+        await check(conn, "app")
+
+
 async def test_check_refuses_a_database_missing_any_entry_and_names_the_fix() -> None:
     conn = FakeConn(NEVER_MIGRATED)
 
@@ -365,10 +387,8 @@ def test_no_shipped_entry_body_has_changed() -> None:
     )
     removed = sorted(set(shipped) - set(current))
     assert not removed, (
-        f"{removed} is recorded in .schema-baseline.json and gone from app/store/ddl.py. Every "
-        f"database that applied it reports a key this build does not carry, and `check` refuses "
-        f"to serve them. Restore the entry, or -- only if it never reached a database -- delete "
-        f"its line from .schema-baseline.json in the same commit."
+        f"{removed} is recorded in .schema-baseline.json and gone from app/store/ddl.py. "
+        f"`make schema` refuses this too, and says what to do about it."
     )
     edited = sorted(key for key, was in shipped.items() if current[key] != was)
     assert not edited, (

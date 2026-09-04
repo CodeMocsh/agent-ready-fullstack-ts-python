@@ -9,9 +9,9 @@ was the version marker, `max(key)`. It is now the set of applied keys, and what 
 change is recorded in that section. The claim it makes is unchanged and slightly stronger. The
 version marker still exists, and nothing decides on it.
 
-Three consequences moved with it. `make migrate` no longer "exits 0 when already current"; it
-re-runs every entry. The refusal names the entries the database has not applied rather than two
-version strings. And two consequences are new: the schema baseline, and what it costs.
+Consequences moved with it. `make migrate` no longer "exits 0 when already current"; it re-runs
+every entry. The refusal names the entries the database has not applied rather than two version
+strings. The schema baseline and what it costs are new.
 
 The running application holds no rights to change the schema and no credential that could. It
 verifies at startup and refuses to serve unless the entries applied to the database are exactly
@@ -146,7 +146,8 @@ mistake is visible at commit time, so a check at deploy is the latest moment it 
 rather than the earliest, and putting it in `applied_once` would mean reshaping the one table
 the first migration creates. The cost of deviating is that the gate only sees a working tree: a
 build that bypassed it is not caught later. Alembic makes neither choice and hashes nothing, so
-it does not catch this at all — `docs/schema.md` says what that means for anyone leaving.
+it does not catch this at all — [docs/schema.md](../schema.md) says what that means for anyone
+leaving.
 
 **The migration issues `SET ROLE <schema>_owner`, guarded on two questions.** Does the role
 exist — roles are cluster-wide, so its existence says nothing about *this* database — and are

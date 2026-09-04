@@ -5,21 +5,21 @@ is, what it deliberately will not do, and how to leave when you outgrow it.
 
 ## What it is
 
-`backend/app/store/ddl.py` holds the schema as **data**: a list of `(key, statement)` pairs, one
-SQL statement each, every one of them idempotent and additive.
+`backend/app/store/ddl.py` holds the schema as **data**: a list of entries, each one a key and
+a single SQL statement, every one idempotent and additive.
 
-- **`make migrate`** applies every statement, in key order, on every run, under one advisory
-  lock. There is no "already current" shortcut, so a statement keyed anywhere runs.
-- **`applied_once`** records the key of each statement that ran. The application role holds
-  `SELECT` on it and nothing else, so the process that verifies the schema cannot forge its own
-  answer.
+- **`make migrate`** applies every entry, in key order, on every run, under one advisory lock.
+  There is no "already current" shortcut, so an entry keyed anywhere runs.
+- **`applied_once`** records the key of each entry that ran. Once the release step has run
+  against a database that has its roles, the application role holds `SELECT` on that table and
+  nothing else, so the process that verifies the schema cannot forge its own answer.
 - **The application never applies DDL.** It compares the keys in `applied_once` against the keys
   it carries, and refuses to serve when they differ in either direction —
   [adr/0003](adr/0003-the-application-never-applies-ddl.md).
 - **`deploy/schema.sql`** is the same statements as a script, for a deployment whose own tooling
   owns the DDL. Regenerate with `make schema`.
-- **`backend/.schema-baseline.json`** records a hash of each statement body. Editing or removing
-  a statement that already shipped fails `make test`, in the pre-commit hook.
+- **`backend/.schema-baseline.json`** records a hash of each entry body. Editing or removing an
+  entry that already shipped fails `make test`, in the pre-commit hook.
 
 ## What it deliberately does not do
 
@@ -28,25 +28,22 @@ SQL statement each, every one of them idempotent and additive.
   resolve it the way they resolve any other conflict in a list.
 - **No data migrations.** A backfill is a script you write and run once. Nothing tracks it.
 - **No autogenerate.** There is no ORM here, so nothing can diff models against a database. You
-  write the statement.
-- **No checksum in the database.** Flyway and Liquibase store a hash per applied migration and
-  validate it at deploy. This project checks the same thing at commit time instead, in
+  write the SQL.
+- **No hash in the database.** Flyway and Liquibase store one per applied migration and validate
+  it at deploy. This project checks the same thing at commit time instead, in
   `.schema-baseline.json`, which fires earlier and needs no database — and which only sees your
   working tree. That trade is recorded in
   [adr/0003](adr/0003-the-application-never-applies-ddl.md).
 
 ## Why it is this small
 
-Because the schema is data, these run in the fast tier in milliseconds with no Postgres:
+Because the schema is data, the fast tier asserts properties of it directly, in milliseconds,
+with no Postgres anywhere. That a tenant table cannot arrive without a policy. That an index on
+one leads with `tenant_id`, or the policy cannot use it. That the column and the `CHECK` an unset
+tenant relies on are both there. That no entry is destructive, so an older instance keeps serving
+through a rollout. Read `backend/tests/store/test_schema.py` for what is asserted today.
 
-- every index on a tenant table leads with `tenant_id`, or the policy cannot use it;
-- every table is in `TENANT_TABLES` or named in the isolation exemption, so a new table cannot
-  arrive without a policy;
-- every name in `TENANT_TABLES` has a table behind it;
-- every tenant table carries `tenant_id` and the `CHECK` that refuses an empty one;
-- every statement is additive, so an older instance can keep serving during a rollout.
-
-Those assertions are what make "tenant isolation is forced and always on"
+Those are what make "tenant isolation is forced and always on"
 ([adr/0002](adr/0002-tenant-isolation-is-forced-and-always-on.md)) a mechanism rather than a
 claim. They are cheap because a list is cheap to read.
 
@@ -64,9 +61,9 @@ graph, so a migration edited after it ran is applied to no database and reported
 That is the failure `.schema-baseline.json` exists to refuse. Flyway and Liquibase do hash, and
 are the alternatives to weigh if that guarantee matters to you.
 
-The five assertions above go with it, too. A schema spread across `versions/*.py` cannot be read
-as a list, so those checks either move to the integration tier, which needs a running Postgres
-and does not run by default, or they stop being made.
+The assertions above go with it, too. A schema spread across `versions/*.py` cannot be read as a
+list, so those checks either move to the integration tier, which needs a running Postgres and
+does not run by default, or they stop being made.
 
 ## How to leave
 
@@ -75,9 +72,11 @@ and does not run by default, or they stop being made.
 2. Make one initial revision whose `upgrade()` runs the statements in `deploy/schema.sql`.
 3. On every database that already exists, `alembic stamp head` so the revision is recorded
    without re-applying it.
-4. Delete `app/store/migrate.py`, `app/migrate.py`, `backend/.schema-baseline.json` and the
-   `migrate` and `schema` targets in the `Makefile`. Keep `app/store/roles.py`: the two roles
-   are independent of who applies the DDL.
-5. Replace `Database.check()` with a read of `alembic_version`, or drop the startup check and
-   accept that a deploy-order mistake surfaces as a query error.
-6. Decide, out loud, what happens to the five assertions.
+4. Delete `app/migrate.py`, `backend/.schema-baseline.json` and the `migrate` and `schema`
+   targets in the `Makefile`. Keep `app/store/roles.py`: the two roles are independent of who
+   applies the DDL.
+5. Rewrite `app/store/migrate.py` down to whatever `Database.check()` and `MemoryDatabase` still
+   need. Both import from it today, so deleting the module outright breaks the memory substrate.
+   `check` becomes a read of `alembic_version`, or goes, and a deploy-order mistake then surfaces
+   as a query error.
+6. Decide, out loud, what happens to the assertions above.
