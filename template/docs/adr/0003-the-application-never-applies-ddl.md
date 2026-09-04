@@ -137,9 +137,16 @@ records a hash per entry and refuses both in the pre-commit hook, on `.complexit
 terms — regenerating cannot quiet it, so the only way past is a line in a diff somebody reads.
 
 A cosmetic edit stops a deploy too, and that is accepted: nothing can tell a reformat from a
-column, and the failure being prevented is silent. **A runtime check was built first and
-rejected** — the mistake is visible at commit time, so checking at deploy time is the latest
-moment it can be caught rather than the earliest.
+column, and the failure being prevented is silent.
+
+**Flyway and Liquibase do the same check in the database, and this one deviates on purpose.**
+Both store a hash per applied migration and validate it at deploy; Flyway's `repair` is the
+escape hatch our hand-edited line is. A runtime version was built here first and rejected. The
+mistake is visible at commit time, so a check at deploy is the latest moment it can be caught
+rather than the earliest, and putting it in `applied_once` would mean reshaping the one table
+the first migration creates. The cost of deviating is that the gate only sees a working tree: a
+build that bypassed it is not caught later. Alembic makes neither choice and hashes nothing, so
+it does not catch this at all — `docs/schema.md` says what that means for anyone leaving.
 
 **The migration issues `SET ROLE <schema>_owner`, guarded on two questions.** Does the role
 exist — roles are cluster-wide, so its existence says nothing about *this* database — and are
