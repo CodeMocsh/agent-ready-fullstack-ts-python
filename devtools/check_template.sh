@@ -37,12 +37,13 @@ need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
 
 # AGENTS.md tells an agent to keep the principle sections word-for-word in step with
 # template/AGENTS.md.jinja, and the same file argues that a rule nothing enforces does not
-# hold. This is that enforcement. The range ends at the first heading each file owns, so
-# everything below the shared block is free to differ. `sed -E` is load-bearing: BSD sed has
-# no \| alternation in a basic regex, so the range would never find its end and the check
-# would compare whole files, reporting every local section as drift.
+# hold. This is that enforcement. The range covers all four principle sections and ends at the
+# first heading each file owns, so everything below the shared block is free to differ. Both
+# alternatives are load-bearing: an end pattern only one file carries would run the range to
+# the end of the other file and report every local section as drift. `sed -E` is load-bearing
+# too, because BSD sed has no \| alternation in a basic regex.
 shared_prose() {
-    sed -E -n "/^## Approach/,/^## (Simplified technical English|Layout|The template is inert)/p" "$1" |
+    sed -E -n "/^## Approach/,/^## (Layout|The template is inert)/p" "$1" |
         sed '$d'
 }
 PROSE_ROOT="$(mktemp)"
@@ -55,8 +56,12 @@ if ! diff -q "$PROSE_ROOT" "$PROSE_TEMPLATE" >/dev/null; then
     rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
     fail "keep Approach, Fail loudly, Zero comments and Simplified technical English identical."
 fi
-# An empty range means the headings moved and the check silently compared nothing.
-[ -s "$PROSE_ROOT" ] || fail "the shared prose range in check_template.sh matched no lines"
+# A range that stops early compares less than the failure message above claims, and passes
+# green over the drift it stopped short of. Every section the message names has to be in it.
+for heading in Approach 'Fail loudly' 'Zero comments' 'Simplified technical English'; do
+    grep -q "^## $heading\$" "$PROSE_ROOT" && grep -q "^## $heading\$" "$PROSE_TEMPLATE" ||
+        fail "the shared prose range in check_template.sh does not reach '## $heading'"
+done
 rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
 
 # One pin, many copies. devtools/render.sh owns it -- it is the script that runs copier

@@ -5,11 +5,11 @@ Copier template. Follows the [AGENTS.md](https://agents.md) convention.
 
 This file is the principles, the map, and the index.
 
-The three sections that follow — *Approach*, *Fail loudly*, *Zero comments* — are the rules a
-generated project lives under, and this repo lives under them too. A rule the template asserts
-and its own generator ignores is a rule nobody believes. **Keep them word-for-word in step with
-[template/AGENTS.md.jinja](template/AGENTS.md.jinja)**; everything below them is this repo's
-own and is expected to differ. Where an example names a route or a mock handler, it names the
+The four sections that follow — *Approach*, *Fail loudly*, *Zero comments*, *Simplified technical
+English* — are the rules a generated project lives under, and this repo lives under them too. A
+rule the template asserts and its own generator ignores is a rule nobody believes. **Keep them
+word-for-word in step with [template/AGENTS.md.jinja](template/AGENTS.md.jinja)**; everything
+below them is this repo's own and is expected to differ. Where an example names a route or a mock handler, it names the
 code you write into `template/`.
 
 ## Approach
@@ -109,10 +109,10 @@ of pain into either a fix in the code or a reviewable line in `biome.json`,
 
 ## Simplified technical English
 
-Every word a human reads is written the way ASD-STE100 says to write a maintenance manual: one
-idea per sentence, active voice, and one meaning per term. That covers prose and code alike —
-docs, commit messages, decisions, identifiers, test names, log lines, and the message a failure
-carries.
+Every word a human or an agent reads is written the way ASD-STE100 says to write a maintenance
+manual: one idea per sentence, active voice, and one meaning per term. That covers prose and code
+alike — docs, commit messages, decisions, identifiers, test names, log lines, and the message a
+failure carries.
 
 **Take the rules, not the dictionary.** ASD-STE100 ships a controlled vocabulary chosen for
 aircraft maintenance, and this repo has its own nouns. `CONTEXT.md` is the word list that binds
@@ -121,6 +121,8 @@ symbol name, in the text of an error.
 
 This is what makes *Zero comments* affordable. With no comment to fall back on, the name and the
 failure message are the whole explanation, so they are worth the care the code gets.
+
+**When you report, be extremely concise.** Sacrifice grammar for concision.
 
 ## The template is inert
 
