@@ -172,13 +172,90 @@ WORK="$(mktemp -d)"
 # process that has already gone returns non-zero, and an inline handler would skip the
 # `rm -rf` after it and leak a temp tree holding a node_modules and a venv. Steps that
 # start something long-lived set `serve_pid` and leave the stopping to this.
+#
+# Removing a directory is housekeeping and is not the verdict, so the status is read
+# first and handed back last. As the handler's final command the `rm` decided the exit
+# status of the whole script, and a run that printed "==> OK" reported a failure that
+# named a temp path. A signal carries its own status for the same reason: `$?` on the
+# way into an interrupt is whatever last succeeded, which reports Ctrl-C as a pass.
+#
+# What is worth failing for is the cause. A server that outlives its step rewrites the
+# tree while this removes it, so name it, stop it, and fail on that instead.
 cleanup() {
+    status="${1:-$?}"
+    if [ -n "${cleaned:-}" ]; then
+        exit "$status"
+    fi
+    cleaned=yes
+
+    # Waited on, not just signalled. Scanning before the reap reports the server this
+    # handler is itself in the middle of stopping, which names the wrong culprit on
+    # every failure path that leaves one running.
     if [ -n "${serve_pid:-}" ]; then
         kill "$serve_pid" 2>/dev/null || true
+        wait "$serve_pid" 2>/dev/null || true
     fi
-    rm -rf "$WORK"
+
+    leaked="$(processes_under_work)"
+    if [ -n "$leaked" ]; then
+        echo "check: a process outlived the step that started it:" >&2
+        printf '%s\n' "$leaked" >&2
+        echo "check: stop it where it is started. A server still holding this tree rewrites it" >&2
+        echo "       while this removes it, and it holds its port after the run." >&2
+        printf '%s\n' "$leaked" | while read -r pid _; do
+            kill -KILL "$pid" 2>/dev/null || true
+        done
+        if [ "$status" -eq 0 ]; then
+            status=1
+        fi
+    fi
+
+    if ! rm -rf "$WORK" 2>/dev/null; then
+        echo "check: $WORK could not be removed and is left behind." >&2
+    fi
+    exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'cleanup 130' INT
+trap 'cleanup 143' TERM
+
+# Matched on the argument list rather than with lsof, which is not everywhere and is
+# slow over a node_modules. Every server started here carries $WORK in its argv, because
+# that is where its interpreter and its entry point live.
+#
+# Listed first, matched second. The two halves of `ps | grep` run at the same time, so
+# `ps` lists the `grep` beside it, and that grep carries $WORK on its own command line.
+# Piping one into the other reports a leak on every call, including the calls where
+# nothing leaked.
+#
+# Both inputs are refused rather than defaulted, and that is the whole of it: `grep -F
+# ""` matches every line, so an empty $WORK would answer "everything is a leak" and the
+# caller would `kill -KILL` the machine. A `ps` that fails answers "nothing is a leak",
+# which is a check that cannot fail.
+processes_under_work() {
+    if [ -z "${WORK:-}" ]; then
+        echo "check: WORK is unset, so nothing can be matched against it." >&2
+        exit 1
+    fi
+    if ! running="$(ps -eo pid=,args=)"; then
+        echo "check: ps failed, so no leaked process can be found or ruled out." >&2
+        exit 1
+    fi
+    printf '%s\n' "$running" | grep -F "$WORK" || true
+}
+
+# The same question the handler asks, asked at the step that can still answer it. A half
+# that outlives its own step is invisible to every assertion here: the ports come free,
+# the suite passes, and the tree is still on disk to be read. It surfaces minutes later
+# as a directory that will not delete, naming a temp path rather than a step.
+need_nothing_outlived() {
+    still="$(processes_under_work)"
+    if [ -n "$still" ]; then
+        echo "check: $1 left a process running:" >&2
+        printf '%s\n' "$still" >&2
+        exit 1
+    fi
+}
 
 echo "==> render ($VARIANT)"
 echo "    ports: backend :$BACKEND_PORT, frontend :$FRONTEND_PORT"
@@ -708,6 +785,18 @@ rm -rf "$WORK/untokenizable"
 need_no_grep 'exec pnpm' devtools/dev.sh
 need_grep 'trap cleanup' devtools/dev.sh
 need_grep 'set -m' devtools/dev.sh
+
+# Both halves of both scripts stop by process group, and both spellings that make that
+# work are one edit away from silently not working -- argued in docs/constraints.md.
+# `need_nothing_outlived` catches the leak when it happens, and only where it happens:
+# the `--` spelling is refused by dash and accepted by the bash that is /bin/sh on a
+# mac, so a laptop run stays green while every CI run leaks. These three refuse the edit
+# itself, on either platform.
+for stopper in devtools/dev.sh devtools/contract-test.sh; do
+    need_grep 'own_group' "$stopper"
+    need_no_grep 'kill .*-- -' "$stopper"
+    need_no_grep '|| kill' "$stopper"
+done
 # The ports are read from the environment in all three places rather than hard-coded in
 # each, so two checkouts can run at once and the proxy still points at the backend the
 # script started. Hard-coding meant a second worktree's `make dev` took the first one's
@@ -1533,6 +1622,7 @@ run "contract suite (mocks)" pnpm -C frontend test:contract
 # contract-test.sh's own allocator -- the thing that keeps the gate green when another
 # checkout is already serving :8000 -- never ran here at all.
 run "contract suite (live backend)" env -u BACKEND_PORT -u FRONTEND_PORT make test-contract
+need_nothing_outlived "the contract suite"
 
 echo "==> the store, against a real Postgres"
 # The opt-in tier, exercised here when a daemon is available. Gated rather than required,
@@ -1659,6 +1749,10 @@ if not until(lambda: not serving(BACKEND) and not serving(PROXY), 15):
     held = " and ".join(n for n, u in PORTS if serving(u))
     die(f"dev.sh exited but {held} still answering")
 PY
+# A port that stopped answering is not a process that stopped, and the difference is
+# the whole failure: a half killed by the wrong signal closes its socket long before
+# anything reaps it, if anything ever does.
+need_nothing_outlived "the dev loop"
 
 echo "==> the built bundle, answered by app.serve on one origin"
 # The one arrangement nothing else in this file reaches. `make test-e2e` builds the bundle

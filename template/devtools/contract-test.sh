@@ -7,11 +7,26 @@
 # can see. Both halves are started here and stopped on the way out.
 set -eu
 
-# Job control, so each half becomes its own process group and can be killed as one.
-# `uv run` and `pnpm` both exec through a launcher that spawns the real server as a
-# child: killing the pid we started leaves that child holding the port, and the next
-# run dies on --strictPort.
-set -m
+# Each half in a process group of its own, so one kill stops all of it. `uv run` and
+# `pnpm` both exec a launcher that spawns the real server as a child: killing the pid
+# this script holds reaches the launcher and leaves the server on its port, and the next
+# run dies on --strictPort. setsid needs no terminal, and it makes the leader the pid
+# this script already holds. `set -m` is the usual spelling and cannot do it: dash turns
+# job control off when it has no controlling terminal, and reports that rather than
+# failing, so the group is never made and the kill below aims at nothing.
+# setsid refuses with EPERM when the caller is already a process group leader. This
+# script sets no job control so that does not happen here, but it costs one line to stay
+# true if it ever does, and the assertion is what keeps the except from being a swallow.
+own_group() {
+    exec python3 -c 'import os, sys
+try:
+    os.setsid()
+except PermissionError:
+    pass
+if os.getpgrp() != os.getpid():
+    raise SystemExit("own_group: not a process group leader, so a kill cannot stop this")
+os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+}
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -46,9 +61,12 @@ backend_pid=""
 frontend_pid=""
 log="$(mktemp)"
 
+# The group, and only the group, and no `--` before it: dash's kill builtin refuses the
+# separator and sends nothing at all. A single-pid fallback behind this kill reaches the
+# launcher and leaves the server, which is the bug both spellings used to hide.
 signal_halves() {
     for pid in $frontend_pid $backend_pid; do
-        kill -"$1" -- -"$pid" 2>/dev/null || kill -"$1" "$pid" 2>/dev/null || true
+        kill -"$1" "-$pid" 2>/dev/null || true
     done
 }
 
@@ -73,11 +91,11 @@ fail() {
     exit 1
 }
 
-(cd "$here/backend" && exec uv run uvicorn app.main:app --port "$BACKEND_PORT" --log-level warning) \
+(cd "$here/backend" && own_group uv run uvicorn app.main:app --port "$BACKEND_PORT" --log-level warning) \
     >>"$log" 2>&1 &
 backend_pid=$!
 
-(cd "$here/frontend" && exec pnpm dev:live --port "$FRONTEND_PORT" --strictPort) >>"$log" 2>&1 &
+(cd "$here/frontend" && own_group pnpm dev:live --port "$FRONTEND_PORT" --strictPort) >>"$log" 2>&1 &
 frontend_pid=$!
 
 # `--max-time` bounds a probe that can otherwise wait forever: a half that is

@@ -47,6 +47,39 @@ than a download, because the thing being verified is a binary. Bump the version 
 platform hashes together -- they are the same release, and a hash that belongs to another one
 fails closed.
 
+## Stopping a half means stopping a process group, and `/bin/sh` fights you twice
+
+`uv run` and `pnpm` both exec a launcher that spawns the real server as a child. Killing the
+pid the script holds reaches the launcher and leaves the server. So `dev.sh` and
+`contract-test.sh` stop a process group instead. Two things break that, both silently, and
+both only where `/bin/sh` is dash — which is Debian, Ubuntu, and therefore CI.
+
+`set -m` does not make the group. dash turns job control off when it has no controlling
+terminal, writes one line to stderr, and carries on. Both scripts call `own_group` instead — a
+four-line shell function that execs `python3`, calls `os.setsid()`, and execs the server. It
+needs no terminal, and the group leader is the pid the script already holds. **That makes
+`python3` on `PATH` a requirement of `make dev` and `make test-contract`**, which is why
+`docs/installation.md` names it; `uv`'s own Python does not satisfy it.
+
+`dev.sh` still sets `set -m`, and not for the backend — `own_group` covers that. It is there so
+vite runs as a foreground job of its own. `contract-test.sh` runs neither half in the
+foreground and sets nothing.
+
+`kill` does not take `--`. `kill -TERM -- -123` is the POSIX spelling, and dash's builtin
+answers `Illegal number: -` and sends no signal at all. Write `kill -TERM -123`. A negative pid
+needs no separator anywhere.
+
+Neither failure is visible where it happens: the ports come free, the suite passes, and the
+orphan surfaces minutes later as a temp directory that will not delete. So the gate asserts it
+rather than trusting it — `need_nothing_outlived` runs after the contract suite and after the
+dev loop, and names the process and the step.
+
+That assertion only fires on the platform that leaks, and `/bin/sh` on a mac is bash, which
+takes both spellings. A laptop run would stay green while every CI run leaked, so the gate also
+greps both scripts for `own_group` and against both broken spellings. **Do not add a single-pid
+fallback behind either kill** — that fallback is what hid both of these for as long as they
+existed, and the grep refuses it.
+
 ## `openapi-typescript` runs through `pnpm dlx` at an exact pin
 
 It must not become a devDependency. It declares `peerDependencies: { typescript: "^5.x" }` and
