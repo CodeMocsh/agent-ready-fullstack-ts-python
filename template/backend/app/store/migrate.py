@@ -178,9 +178,11 @@ async def _revoke_ledger(conn: Conn, schema: str | None) -> None:
 
     The role that runs `check` must not be able to forge its own answer. It lives here rather
     than in `roles.sql` because the ledger does not exist until the first migration has run.
-    The ordinary bootstrap is to migrate first and provision roles afterwards, so the run that
-    creates the tables is usually the one with no role to revoke from yet. Every `apply` runs
-    it, and every `apply` runs every entry, so the second run is the one that catches up.
+
+    Every `apply` runs it. `deploy/roles.sql` is applied before the first migration, so on a
+    provisioned database the run that creates the ledger is also the run that revokes on it. A
+    developer pointing at their own Postgres has no roles at all, and there the revoke does
+    nothing until they provision some; the next `apply` is what catches that database up.
 
     Qualified rather than trusting the search path. `to_regclass` answers NULL for a missing
     table rather than raising, so `AND` is safe here in a way it is not for `pg_has_role`.

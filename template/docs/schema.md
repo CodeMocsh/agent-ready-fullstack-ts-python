@@ -19,7 +19,9 @@ a single SQL statement, every one idempotent and additive.
 - **`deploy/schema.sql`** is the same statements as a script, for a deployment whose own tooling
   owns the DDL. Regenerate with `make schema`.
 - **`backend/.schema-baseline.json`** records a hash of each entry body. Editing or removing an
-  entry that already shipped fails `make test`, in the pre-commit hook.
+  entry that already shipped fails `make test`, in the pre-commit hook. It is generated from
+  your `ddl.py`, so a template update needs `make schema` afterwards —
+  [docs/installation.md](installation.md).
 
 ## What it deliberately does not do
 
