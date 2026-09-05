@@ -12,10 +12,30 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 export BACKEND_PORT FRONTEND_PORT
 
-# Job control, so the backend becomes its own process group. `uv run` execs a
-# launcher that spawns uvicorn as a child, and killing only the pid we started
-# leaves that child holding the backend port after this script exits.
+# Job control, so vite runs as a foreground job of its own and keeps the terminal. It is
+# not what groups the backend: dash turns job control off when it has no controlling
+# terminal, so `set -m` alone leaves a `make dev` that was not started from a terminal
+# with no group to kill. own_group below is what the backend's group comes from.
 set -m
+
+# The backend in a process group of its own, so one kill stops all of it. `uv run` execs
+# a launcher that spawns uvicorn as a child, and killing the pid this script holds
+# reaches the launcher and leaves uvicorn on the port. setsid needs no terminal, and it
+# makes the leader the pid this script already holds.
+# setsid refuses with EPERM when the caller is already a process group leader, which is
+# what `set -m` above has just made this subshell. That is the state being asked for, so
+# the refusal is not a failure -- but only the assertion after it says so. Without that,
+# the except would be the swallow that hands back an ungrouped process.
+own_group() {
+    exec python3 -c 'import os, sys
+try:
+    os.setsid()
+except PermissionError:
+    pass
+if os.getpgrp() != os.getpid():
+    raise SystemExit("own_group: not a process group leader, so a kill cannot stop this")
+os.execvp(sys.argv[1], sys.argv[1:])' "$@"
+}
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 backend_pid=""
@@ -28,15 +48,19 @@ cleanup() {
     # escalation is unconditional because polling for "are you gone yet" cannot tell
     # a live process from an unreaped one. A dev server has nothing to flush, and a
     # second is generous.
-    kill -- -"$backend_pid" 2>/dev/null || kill "$backend_pid" 2>/dev/null || true
+    #
+    # The group, and only the group, and no `--` before it: dash's kill builtin refuses
+    # the separator and sends nothing at all. A single-pid fallback behind either kill
+    # reaches the launcher and leaves uvicorn, which is the bug both spellings hid.
+    kill "-$backend_pid" 2>/dev/null || true
     sleep 1
-    kill -KILL -- -"$backend_pid" 2>/dev/null || kill -KILL "$backend_pid" 2>/dev/null || true
+    kill -KILL "-$backend_pid" 2>/dev/null || true
     wait "$backend_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
 echo "==> backend  http://localhost:$BACKEND_PORT"
-(cd "$here/backend" && exec uv run uvicorn app.main:app --reload --port "$BACKEND_PORT") &
+(cd "$here/backend" && own_group uv run uvicorn app.main:app --reload --port "$BACKEND_PORT") &
 backend_pid=$!
 
 # Fail loudly here rather than letting vite start and serve proxy errors that look

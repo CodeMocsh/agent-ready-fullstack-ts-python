@@ -11,15 +11,18 @@ brew install node                                     # macOS
 corepack enable && corepack prepare pnpm@latest --activate
 ```
 
-**uv**, for the backend half. It installs Python itself, so you do not need a system Python of
-any particular version:
+**uv**, for the backend half. It installs the Python the application runs on, so you do not
+need a system Python of any particular version:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-`make` and `git` complete the set; both ship with the Xcode command line tools on macOS and
-with build-essential on Debian and Ubuntu.
+`make`, `git` and `python3` complete the set; all three ship with the Xcode command line tools
+on macOS and with build-essential and the base system on Debian and Ubuntu. `python3` is not
+the application's Python — the one uv installs is. `devtools/dev.sh` and
+`devtools/contract-test.sh` use it to put each half in a process group of its own, which is the
+only way they can stop what they started.
 
 ## Install
 
