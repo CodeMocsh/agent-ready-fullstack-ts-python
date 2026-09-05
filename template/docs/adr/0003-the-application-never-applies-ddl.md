@@ -4,9 +4,19 @@
 of its own until the two were merged. Neither claim was decided differently; the rejected
 options and the costs of both are below, and the title now states both halves.
 
+**Amended 2026-08-30.** *The match is exact, in both directions* below said the comparison
+was the version marker, `max(key)`. It is now the set of applied keys, and what forced the
+change is recorded in that section. The claim it makes is unchanged and slightly stronger. The
+version marker still exists, and nothing decides on it.
+
+Consequences moved with it. `make migrate` no longer "exits 0 when already current"; it re-runs
+every entry. The refusal names the entries the database has not applied rather than two version
+strings. The schema baseline and what it costs are new.
+
 The running application holds no rights to change the schema and no credential that could. It
-verifies at startup and refuses to serve unless the version marker matches this build exactly.
-Applying it is `make migrate` — a release step, run by something that is not the web process.
+verifies at startup and refuses to serve unless the entries applied to the database are exactly
+the entries this build carries. Applying them is `make migrate` — a release step, run by
+something that is not the web process.
 
 Two database roles carry this. `<schema>_owner` owns the schema and every table and is
 `NOLOGIN`, so nothing serves traffic as it. `<schema>_app` is what the application connects
@@ -27,27 +37,36 @@ separation.
 
 ## The match is exact, in both directions
 
-`check` refuses a database that is **behind** this build and one that is **ahead**. `apply`
-refuses ahead too.
+`check` refuses a database **missing** any entry this build carries, and one **carrying** an
+entry this build does not. `apply` refuses the second too.
 
-Behind is the obvious half: the columns this build names may not exist yet, and the release
+Missing is the obvious half: the columns this build names may not exist yet, and the release
 step was skipped.
 
-Ahead is the half worth writing down, because it could reasonably go the other way. A newer
-schema means a newer release has already migrated this database. Every migration here is
+An unknown entry is the half worth writing down, because it could reasonably go the other way.
+It means a newer release has already migrated this database. Every migration here is
 additive — `tests/store/test_schema.py::test_every_entry_is_additive` refuses `DROP TABLE`,
 `DROP COLUMN`, `ALTER COLUMN ... TYPE` and `RENAME` — so an older build *can* still write
 everything it knows about, and serving it would usually work.
 
-**Usually is the problem.** Tolerating ahead is a compatibility judgement, made at startup, by
-a process that has no way to check whether it is true. It is true while migrations stay
-additive and stops being true the first time somebody needs an exception; and when it stops
-being true, the failure is an old build writing rows to a shape it does not understand, which
-reports itself as a successful write. The application refuses that class of thing everywhere
-else, and there is no reason for the schema check to be where it starts guessing.
+**Usually is the problem.** Tolerating it is a compatibility judgement, made at startup, by a
+process that has no way to check whether it is true. It is true while migrations stay additive
+and stops being true the first time somebody needs an exception; and when it stops being true,
+the failure is an old build writing rows to a shape it does not understand, which reports
+itself as a successful write. The application refuses that class of thing everywhere else, and
+there is no reason for the schema check to be where it starts guessing.
 
-Exact matching also makes the rule the same in both directions and in both functions: one
-sentence, and no window in which two versions are both correct.
+**The comparison is the set of applied keys, and was `max(key)` until 2026-08-30.** A single
+highest key cannot see an entry added below it. Bands were the mitigation: repairs sat at
+`0200_` so they always sorted above, and a repair keyed anywhere else was applied to no
+database and reported by nothing. That is a rule a person has to remember, guarding a failure
+that is silent, which is the shape this project refuses everywhere else. Comparing the set
+removes the failure instead of detecting it, and `apply` now runs every entry on every release
+step rather than returning early on a marker that has not moved. Keys still decide the order
+an entry runs in. They no longer decide whether it runs at all.
+
+Matching on the set makes the rule the same in both directions and in both functions: one
+sentence, and no window in which two schemas are both correct.
 
 ## Considered options
 
@@ -88,11 +107,11 @@ how long a rollout takes, which nobody would tune and everybody would eventually
 **`make migrate` is a release step and has to be wired up.** Fly's `release_command`, a
 pre-deploy command on Railway or Render, a `pre-upgrade` Job on Kubernetes, a one-off task on
 ECS, the `migrate` service in `deploy/compose.yaml`. It is idempotent, serialises on an
-advisory lock so two releases cannot race, and exits 0 when already current, which is what
+advisory lock so two releases cannot race, and re-runs every entry harmlessly, which is what
 makes it safe in a hook that fires more than once.
 
 **Forgetting it fails the deploy rather than corrupting anything.** The new version refuses to
-start, naming both schema versions. That refusal is the enforcement.
+start, naming the entries the database has not applied. That refusal is the enforcement.
 
 **A rolling deploy has a window.** Between the release step and the last old instance being
 replaced, the database is ahead of every instance still running the previous version. Those
@@ -110,6 +129,25 @@ as rolling forward to a fixed build.
 **Migrations stay additive anyway**, and the test stays. Additive migrations are what make an
 expand-and-contract change possible across two releases, and what keeps a half-finished deploy
 from leaving the database in a shape nothing can read.
+
+**Editing or removing a shipped entry is refused by the gate, not at deploy.** Comparing the
+set of applied keys cannot see either: an edited body leaves every key matching, and a deleted
+key is only visible once a database that ran it is in front of you. `backend/.schema-baseline.json`
+records a hash per entry and refuses both in the pre-commit hook, on `.complexity-baseline.json`'s
+terms — regenerating cannot quiet it, so the only way past is a line in a diff somebody reads.
+
+A cosmetic edit stops a deploy too, and that is accepted: nothing can tell a reformat from a
+column, and the failure being prevented is silent.
+
+**Flyway and Liquibase do the same check in the database, and this one deviates on purpose.**
+Both store a hash per applied migration and validate it at deploy; Flyway's `repair` is the
+escape hatch our hand-edited line is. A runtime version was built here first and rejected. The
+mistake is visible at commit time, so a check at deploy is the latest moment it can be caught
+rather than the earliest, and putting it in `applied_once` would mean reshaping the one table
+the first migration creates. The cost of deviating is that the gate only sees a working tree: a
+build that bypassed it is not caught later. Alembic makes neither choice and hashes nothing, so
+it does not catch this at all — [docs/schema.md](../schema.md) says what that means for anyone
+leaving.
 
 **The migration issues `SET ROLE <schema>_owner`, guarded on two questions.** Does the role
 exist — roles are cluster-wide, so its existence says nothing about *this* database — and are

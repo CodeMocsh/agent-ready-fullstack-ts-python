@@ -242,9 +242,11 @@ Each of these is something a reasonable edit undoes without anything failing unt
 - **Migrations are additive, and the application never applies them.** No `DROP COLUMN`, no
   `ALTER COLUMN ... TYPE`, no `RENAME`. `make migrate` applies; `make schema` and
   `make roles` regenerate the committed artifacts in `deploy/`.
-- **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key. Never
-  edit a shipped entry; a column added later lands twice, once in its table's `CREATE` and
-  once in the `0200_` repair band. Run `make schema` and commit.
+- **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key, and
+  `make migrate` runs all of them every time. Never edit a shipped entry: a column added
+  later lands twice, once in its table's `CREATE` and once in the `0200_` repair band.
+  `.schema-baseline.json` records each body and `make test` refuses the edit. Run
+  `make schema` and commit both files.
 - **The application must never see `DATABASE_OWNER_URL`.** It refuses to start if it can.
 - **Do not delete `MemoryDatabase`** when Postgres feels real enough. The gate runs on it
   and must not need a daemon, and one implementation of a `Protocol` is a shape nothing
@@ -288,6 +290,7 @@ Or work in one half with its own tools — `pnpm -C frontend test:watch`,
 | | |
 |---|---|
 | [CONTEXT.md](CONTEXT.md) | the glossary, and why renaming `tenant_id` is a day-one decision |
+| [docs/schema.md](docs/schema.md) | what the migration system is, what it will not do, and how to move to Alembic |
 | [docs/deployment.md](docs/deployment.md) | serving the two halves, the release step, and two ways to ship something broken |
 | [docs/installation.md](docs/installation.md) | prerequisites, and taking a later template update |
 | [docs/adr/](docs/adr/) | the decisions, and [when to write one](docs/adr/README.md) |

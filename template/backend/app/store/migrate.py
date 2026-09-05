@@ -11,9 +11,16 @@ reach `apply`, whatever credential the process was handed.
 for schema` for a role holding no `CREATE`. A least-privilege application could not start at
 all without a path that only reads.
 
-The version marker is `max(key)`, which is why `ddl.py` bands its keys and why the repair band
-sorts above every other one.
+**The comparison is the set of keys, not the highest one.** `check` asks whether the ledger
+holds every entry this build carries. `apply` runs every entry, every time, under one lock, and
+leans on each one being idempotent. Nothing compares a single scalar and returns early, so an
+entry added below an existing key runs on the next release step like any other.
+
+`known_version` and `schema_version` still answer `max(key)`. That string is what `make migrate`
+prints and what `Database.schema_version()` reports. No decision reads it.
 """
+
+import hashlib
 
 from app.store.conn import Conn, migration_lock, quote_ident, resolve_schema, search_path_sql
 from app.store.ddl import APPLIED_ONCE_DDL, SCHEMA_ENTRY_KEY, statements
@@ -56,80 +63,100 @@ def known_keys(schema: str | None = None) -> list[str]:
 
 
 def known_version(schema: str | None = None) -> str:
-    """The version marker this code expects a database to report."""
+    """The last key, for `make migrate` to print and the store to report. Decides nothing."""
     return known_keys(schema)[-1]
+
+
+def entry_hashes(schema: str | None = None) -> dict[str, str]:
+    """A hash of each entry body, by key. Read by the gate, never at run time.
+
+    `.schema-baseline.json` records these and `test_no_shipped_entry_body_has_changed` compares
+    against them.
+    """
+    return {key: hashlib.sha256(sql.encode()).hexdigest() for key, sql in statements(schema)}
 
 
 def _ledger(schema: str | None) -> str:
     return f"{quote_ident(resolve_schema(schema))}.applied_once"
 
 
-async def schema_version(conn: Conn, schema: str | None = None) -> str | None:
-    """The applied version marker, or `None` on a database that was never migrated.
+async def applied_keys(conn: Conn, schema: str | None = None) -> set[str]:
+    """Every entry key the ledger holds, and empty where it holds none or does not exist.
 
-    Qualified rather than relying on the search path, because this runs *before* the search
-    path is set — on a database where the schema may not exist yet.
-
-    `COLLATE "C"` because the answer is compared against `known_version()` in Python. Without
-    it the database picks the maximum under its own collation and this code picks it under
-    byte order, and the two disagreeing means a current database reported as behind, or worse,
-    a behind one reported as current.
+    Qualified rather than relying on the search path: this runs before the search path is set,
+    on a database whose schema may not exist yet.
     """
     ledger = _ledger(schema)
     if await conn.fetchval("SELECT to_regclass($1)", ledger) is None:
-        return None
-    return await conn.fetchval(f'SELECT max(key COLLATE "C") FROM {ledger}')
+        return set()
+    joined = await conn.fetchval(f"SELECT string_agg(key, chr(10)) FROM {ledger}")
+    return set() if joined is None else set(joined.split("\n"))
+
+
+async def schema_version(conn: Conn, schema: str | None = None) -> str | None:
+    """The last key the ledger holds, or `None` on a database that was never migrated.
+
+    Reported, never compared. `Database.schema_version()` surfaces it and `make migrate`
+    prints it, so it is a string a person reads.
+    """
+    return max(await applied_keys(conn, schema), default=None)
 
 
 async def check(conn: Conn, schema: str | None = None) -> str:
     """Verify that someone has applied this code's schema. Reads the ledger and nothing else.
 
-    **The version must match exactly.** Behind refuses because the columns this build names
-    may not be there; ahead refuses because a newer release has already migrated this
-    database and this one would be writing rows to a shape it does not understand.
+    **Every entry key must be present, and no other.** A missing key refuses because the
+    columns this build names may not be there. An unknown key refuses because a newer release
+    has already migrated this database, and this one would be writing rows to a shape it does
+    not understand.
 
-    Ahead could be tolerated — every migration here is additive, so an older build can still
-    write what it knows about — and this deliberately does not. "Probably compatible" is a
-    judgement call made at startup by a process with no way to check it, and the failure it
+    Unknown keys could be tolerated — every migration here is additive, so an older build can
+    still write what it knows about — and this deliberately does not. "Probably compatible" is
+    a judgement call made at startup by a process with no way to check it, and the failure it
     would let through is silent. The cost is stated in
     `docs/adr/0003-the-application-never-applies-ddl.md`: a rolling deploy has a window in
     which a restarting instance of the previous release will not come back up.
     """
-    target = known_version(schema)
-    current = await schema_version(conn, schema)
-    if current == target:
-        return target
-    if current is not None and current > target:
+    applied = await applied_keys(conn, schema)
+    known = known_keys(schema)
+    unknown = _unknown_keys(applied, known)
+    if unknown:
         raise SchemaTooNewError(
-            f"the database reports schema {current!r} and this build knows {target!r}. "
+            f"the database has applied {unknown!r}, which this build does not carry. "
             f"A newer release has migrated it, so this build would be writing rows to a "
             f"shape it does not know. Deploy the newer build, or roll the schema back."
         )
-    raise SchemaBehindError(
-        f"the database reports schema {current!r} and this build needs {target!r}. "
-        f"This process holds no rights to apply it -- run `make migrate` as part of the "
-        f"release, before the new version serves traffic."
-    )
+    missing = [key for key in known if key not in applied]
+    if missing:
+        raise SchemaBehindError(
+            f"the database has not applied {missing!r}. This process holds no rights to apply "
+            f"it -- run `make migrate` as part of the release, before the new version serves "
+            f"traffic."
+        )
+    return known_version(schema)
 
 
 async def apply(conn: Conn, schema: str | None = None) -> str:
     """Bring the database up to this code's schema. What `make migrate` runs.
 
-    Idempotent and safe to run twice: it returns early when the marker has not moved, which is
-    what lets it be wired into a release hook that may fire more than once.
+    Every entry runs on every call. Each one is idempotent, so a database that is already
+    current is unchanged by the run, and a release hook that fires more than once costs one
+    pass over the entries. Nothing here compares a version and decides to skip: that is what
+    makes an entry sorting below an existing key run at all.
     """
-    target = known_version(schema)
-    current = await schema_version(conn, schema)
-    if current is not None and current > target:
+    unknown = _unknown_keys(await applied_keys(conn, schema), known_keys(schema))
+    if unknown:
         raise SchemaTooNewError(
-            f"the database reports schema {current!r} and this migrator knows {target!r}; "
+            f"the database has applied {unknown!r}, which this migrator does not carry; "
             f"a newer release has already migrated it. Running an older release's migration "
             f"step against it is a deploy-order mistake, not something to reconcile here."
         )
-    if current == target:
-        await _revoke_ledger(conn, schema)
-        return target
     return await _apply_all(conn, schema)
+
+
+def _unknown_keys(applied: set[str], known: list[str]) -> list[str]:
+    """Keys the ledger holds that this build does not carry, sorted for the message."""
+    return sorted(applied - set(known))
 
 
 async def _become_owner(conn: Conn, schema: str | None) -> None:
@@ -150,16 +177,15 @@ async def _revoke_ledger(conn: Conn, schema: str | None) -> None:
     """Take write on the ledger away from the application role.
 
     The role that runs `check` must not be able to forge its own answer. It lives here rather
-    than in `roles.sql` because the ledger does not exist until the first migration has run --
-    and it runs on **every** `apply`, including one that finds the database already current.
-    That matters: the ordinary bootstrap is to migrate first and provision roles afterwards,
-    so the run that creates the tables is usually the one where there is no role to revoke
-    from yet. Skipping it on the current path would leave that database with an application
-    role holding `INSERT` on its own version marker, permanently and silently.
+    than in `roles.sql` because the ledger does not exist until the first migration has run.
 
-    Qualified rather than trusting the search path, because the current path never sets one.
-    `to_regclass` answers NULL for a missing table rather than raising, so `AND` is safe here
-    in a way it is not for `pg_has_role`.
+    Every `apply` runs it. `deploy/roles.sql` is applied before the first migration, so on a
+    provisioned database the run that creates the ledger is also the run that revokes on it. A
+    developer pointing at their own Postgres has no roles at all, and there the revoke does
+    nothing until they provision some; the next `apply` is what catches that database up.
+
+    Qualified rather than trusting the search path. `to_regclass` answers NULL for a missing
+    table rather than raising, so `AND` is safe here in a way it is not for `pg_has_role`.
     """
     role = app_role(schema)
     ledger = _ledger(schema)
@@ -177,8 +203,8 @@ async def _apply_all(conn: Conn, schema: str | None = None) -> str:
 
     Every entry is re-executed rather than filtered against the ledger, because every entry is
     idempotent — that is the rule `ddl.py` enforces, and leaning on it here is what keeps this
-    short enough to read. The ledger answers `max(key)` for `check`; it does not decide what
-    runs.
+    short enough to read. The ledger records what ran, for `check` to read. It never decides
+    what runs.
     """
     name = resolve_schema(schema)
     entries = statements(name)

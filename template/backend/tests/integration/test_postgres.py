@@ -51,8 +51,9 @@ async def test_the_schema_applies_and_reports_its_version(database: Database) ->
 
 
 async def test_applying_twice_changes_nothing() -> None:
-    """`make migrate` wired into a release hook may fire more than once; the second run is a
-    no-op that exits cleanly rather than an error the pipeline has to be taught to ignore."""
+    """`make migrate` wired into a release hook may fire more than once. The second run
+    re-applies every entry, which changes nothing because each one is idempotent, and exits
+    cleanly rather than raising an error the pipeline has to be taught to ignore."""
     schema = a_fresh_schema_name()
     try:
         assert await apply_schema(postgres_dsn(), schema) == known_version()

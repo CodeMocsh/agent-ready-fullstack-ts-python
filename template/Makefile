@@ -192,9 +192,10 @@ db-demo:
 	@cd backend && DATABASE_URL=$${DATABASE_URL:-postgres://app_app:$(APP_DB_PASSWORD)@localhost:$(DB_PORT)/postgres} \
 		uv run --no-sync python devtools/isolation_demo.py
 
-# deploy/schema.sql and deploy/roles.sql are generated from app/store/, the way
-# openapi.json is generated from the models. backend/tests/store/test_schema.py fails when either
-# committed file drifts, so this is how you make that test pass after a change.
+# deploy/schema.sql, deploy/roles.sql and backend/.schema-baseline.json are generated from
+# app/store/, the way openapi.json is generated from the models. backend/tests/store/test_schema.py
+# fails when a committed file drifts, so this is how you make that test pass after a change.
+# It never re-records an entry body that changed after it shipped -- that one you edit by hand.
 schema:
 	cd backend && uv run python devtools/schema.py ../deploy/schema.sql
 

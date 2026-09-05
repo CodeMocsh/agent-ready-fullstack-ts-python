@@ -66,6 +66,7 @@ is what lets a later template change reach a project generated months ago:
 uvx --exclude-newer "14 days" copier@9.17.1 update
 make install
 make openapi
+make schema
 make pre-commit
 ```
 
@@ -80,7 +81,19 @@ What to expect, because it is not all free:
   first two any real project replaces. You are porting a pattern rather than accepting a patch.
 - **Regenerate the contract afterwards.** `openapi.json` and `frontend/src/api/schema.ts` are
   generated from your code, so merging them is meaningless.
+- **Regenerate the schema artifacts too.** `deploy/schema.sql` and `backend/.schema-baseline.json`
+  are generated from your `ddl.py`, which by then holds your entries as well as the template's.
+  A merged copy of either describes neither project, and `make pre-commit` says so. `make schema`
+  rewrites both. Commit them with the update.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
+
+**If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
+silent. It is not any more: every database that applied that entry reports a key your build no
+longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
+the key. Either put the entry back, or, if you are certain no database ever ran it, delete its
+row from `applied_once` and its line from `backend/.schema-baseline.json` in the same commit.
+Deleting the demo `tasks` entries after migrating a database with them is the usual way into
+this. [docs/schema.md](schema.md) says what the baseline is and why it refuses.
 
 If you never intend to take template updates, delete `.copier-answers.yml` and the question
 stops arising. That is a legitimate choice; making it deliberately is the point.
