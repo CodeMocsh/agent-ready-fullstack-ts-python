@@ -24,7 +24,7 @@ const USAGE = `usage: node devtools/complexity.mjs <paths...> [options]
 
   --baseline <file>     baseline to compare against
   --update-baseline     record the current level instead of checking
-  --tighten-baseline    lower a baseline left above the tree, instead of failing on it
+  --tighten-baseline    record a baseline the tree moved away from, instead of failing
   --cap <n>             per-function contribution ceiling for the metric
   --tolerance <n>       allowed relative rise, as a fraction
   --ceiling-factor <n>  multiple of the origin baseline that is never exceeded
@@ -224,6 +224,17 @@ function reportRise(now, previous, drift, tolerance) {
   return 1;
 }
 
+function reportArithmetic(now, previous, drift, tolerance) {
+  process.stderr.write(
+    `\nFAIL: density drifted ${previous.density} -> ${now.density} ` +
+      `(${percent(drift)}, tolerance ${percent(tolerance)}), while the complexity sum ` +
+      `went ${previous.sum} -> ${now.sum}.\n` +
+      "The complexity sum did not move with the density, so nobody has to consent\n" +
+      "to this — but it does have to be recorded: run `pnpm lint`.\n",
+  );
+  return 1;
+}
+
 function reportSlack(now, previous, drift, tolerance) {
   const admits = (previous.density * (1 + tolerance)) / now.density - 1;
   process.stderr.write(
@@ -247,20 +258,40 @@ function tightenBaseline(baseline, now, previous, drift) {
   return 0;
 }
 
+function rerecordBaseline(baseline, now, previous, drift) {
+  recordBaseline(baseline, now, previous);
+  process.stdout.write(
+    `baseline re-recorded: density ${previous.density} -> ${now.density} ` +
+      `(${percent(drift)}), complexity sum ${previous.sum} -> ${now.sum}.\n` +
+      "The complexity sum did not move with the density, so this records the tree's\n" +
+      `shape rather than consent to more complexity. Commit ${baseline}\n`,
+  );
+  return 0;
+}
+
 function driftFrom(now, previous) {
   return (now.density - previous.density) / previous.density;
+}
+
+function complexityMoved(now, previous, drift) {
+  return drift > 0 ? now.sum > previous.sum : now.sum < previous.sum;
 }
 
 function checkDrift(now, previous, tolerance, baseline, tighten) {
   if (!(previous.density > 0)) return 0;
   const drift = driftFrom(now, previous);
-  if (drift > tolerance) return reportRise(now, previous, drift, tolerance);
-  if (drift >= -tolerance) {
+  if (Math.abs(drift) <= tolerance) {
     process.stdout.write(
       `drift ok: density ${previous.density} -> ${now.density} (${percent(drift)})\n`,
     );
     return 0;
   }
+  if (!complexityMoved(now, previous, drift)) {
+    return tighten
+      ? rerecordBaseline(baseline, now, previous, drift)
+      : reportArithmetic(now, previous, drift, tolerance);
+  }
+  if (drift > tolerance) return reportRise(now, previous, drift, tolerance);
   return tighten
     ? tightenBaseline(baseline, now, previous, drift)
     : reportSlack(now, previous, drift, tolerance);
@@ -308,6 +339,17 @@ function assertUsableBaseline(baseline, previous) {
   process.exit(1);
 }
 
+function assertRecordedComplexity(baseline, previous) {
+  if (typeof previous.sum === "number") return;
+  process.stderr.write(
+    `\nFAIL: ${baseline} carries no complexity sum, so a move in density cannot be\n` +
+      "told apart from a move in the source line count. Every baseline this script\n" +
+      "has ever written carries one, so this file was not written by it. Record the\n" +
+      "current level with `pnpm complexity:baseline`.\n",
+  );
+  process.exit(1);
+}
+
 function main(argv) {
   const { paths, flags, baseline, update, tighten } = parseArgs(argv);
   const config = settings(flags);
@@ -347,6 +389,7 @@ function main(argv) {
     return 1;
   }
   assertUsableBaseline(baseline, previous);
+  assertRecordedComplexity(baseline, previous);
 
   return (
     checkDrift(now, previous, config.tolerance, baseline, tighten) |

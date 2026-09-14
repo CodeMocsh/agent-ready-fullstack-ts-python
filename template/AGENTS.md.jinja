@@ -258,7 +258,8 @@ Each of these is something a reasonable edit undoes without anything failing unt
 
 - When a complexity gate fails, **split the function.** Raising a threshold or re-recording
   a baseline upward is a deliberate, reviewable decision, not the way to green. `make lint`
-  lowers a stale baseline for you, and that change belongs in your commit.
+  lowers a stale baseline for you, and re-records one the codebase moved by changing size
+  rather than shape; either change belongs in your commit.
 - A **supply-chain cool-off** applies in both halves, so a package published in the last
   fortnight will not resolve — including via `pnpm dlx shadcn add`. Commit both lockfiles.
 

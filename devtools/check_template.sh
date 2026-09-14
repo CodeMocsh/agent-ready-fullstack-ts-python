@@ -1907,54 +1907,111 @@ echo "==> assert the drift gate is two-sided, on both halves"
     # State the cases as multiples of the measured level rather than as numbers, so the
     # table keeps meaning what it says if biome's scoring ever moves. Below 1 is a tree
     # that got worse; above 1, one that improved since.
+    # Two factors, because the gate reads two numbers. A baseline whose sum moved with
+    # its density describes a tree whose branching really changed; one whose sum stood
+    # still describes a tree that only changed size, and the two must be handled apart.
     seed='const fs = require("node:fs");
     const measured = JSON.parse(fs.readFileSync("measured.json", "utf8"));
     const density = Number((measured.density * Number(process.argv[1])).toFixed(3));
-    fs.writeFileSync("baseline.json", JSON.stringify({ ...measured, density, origin: density }, null, 2));'
+    const sum = Math.round(measured.sum * Number(process.argv[2]));
+    fs.writeFileSync("baseline.json", JSON.stringify({ ...measured, density, sum, origin: density }, null, 2));'
 
+    # Both recorded numbers, because a re-record that wrote the right density beside a
+    # stale sum would leave the next commit measured against a level no tree ever held --
+    # and checking density alone cannot see it.
     settled='const fs = require("node:fs");
-    const measured = JSON.parse(fs.readFileSync("measured.json", "utf8")).density;
-    const want = process.argv[2] === "tree"
-        ? measured
-        : Number((measured * Number(process.argv[1])).toFixed(3));
-    const got = JSON.parse(fs.readFileSync("baseline.json", "utf8")).density;
-    if (got !== want) { console.error(`baseline holds ${got}, wanted ${want}`); process.exit(1); }'
+    const measured = JSON.parse(fs.readFileSync("measured.json", "utf8"));
+    const tree = process.argv[3] === "tree";
+    const want = {
+        density: tree ? measured.density : Number((measured.density * Number(process.argv[1])).toFixed(3)),
+        sum: tree ? measured.sum : Math.round(measured.sum * Number(process.argv[2])),
+    };
+    const got = JSON.parse(fs.readFileSync("baseline.json", "utf8"));
+    for (const key of ["density", "sum"]) {
+        if (got[key] === want[key]) continue;
+        console.error(`baseline holds ${key} ${got[key]}, wanted ${want[key]}`);
+        process.exit(1);
+    }'
 
-    # baseline, as a multiple of the tree | flags | expected exit | baseline afterwards
+    # density and sum, each as a multiple of the tree | flags | expected exit | baseline after
     # The frontend tolerance is 2%: 0.99 and 1.01 sit inside it, 0.90 and 1.05 outside.
-    # The last case is the one worth having -- the flag lowers a stale baseline, and
-    # must never be a way to accept a rise.
-    while IFS='|' read -r factor flags expect after; do
+    # The rows where the two factors agree are the ratchet proper -- a rise is refused,
+    # a fall is recorded for you, and the flag must never be a way to accept a rise.
+    # The rows where the sum factor is 1.00 are a tree that only changed size: density
+    # drifted, branching did not, so the number carries no consent either way and is
+    # re-recorded rather than judged. Deleting dead code is the row that forced this.
+    while IFS='|' read -r factor sum_factor flags expect after; do
         [ -n "$factor" ] || continue
-        node -e "$seed" "$factor"
+        node -e "$seed" "$factor" "$sum_factor"
         rc=0
         # shellcheck disable=SC2086
         node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json $flags \
             >/dev/null 2>&1 || rc=1
         if [ "$rc" != "$expect" ]; then
-            echo "frontend drift: baseline at ${factor}x with '$flags' exited $rc, wanted $expect" >&2
+            echo "frontend drift: ${factor}x/${sum_factor}x with '$flags' exited $rc, wanted $expect" >&2
             exit 1
         fi
-        if ! node -e "$settled" "$factor" "$after"; then
-            echo "frontend drift: baseline at ${factor}x with '$flags' should have left '$after'" >&2
+        if ! node -e "$settled" "$factor" "$sum_factor" "$after"; then
+            echo "frontend drift: ${factor}x/${sum_factor}x with '$flags' should have left '$after'" >&2
             exit 1
         fi
     done <<'DRIFT_CASES'
-0.99|--tighten-baseline|0|same
-1.01|--tighten-baseline|0|same
-1.05|--tighten-baseline|0|tree
-1.05||1|same
-0.90||1|same
-0.90|--tighten-baseline|1|same
+0.99|0.99|--tighten-baseline|0|same
+1.01|1.01|--tighten-baseline|0|same
+1.05|1.05|--tighten-baseline|0|tree
+1.05|1.05||1|same
+0.90|0.90||1|same
+0.90|0.90|--tighten-baseline|1|same
+0.90|1.00|--tighten-baseline|0|tree
+0.90|1.00||1|same
+0.90|1.10|--tighten-baseline|0|tree
+0.90|1.10||1|same
+1.05|1.00|--tighten-baseline|0|tree
+1.05|1.00||1|same
+1.05|0.90|--tighten-baseline|0|tree
 DRIFT_CASES
 
     # An exit code cannot tell the two failures apart, and they ask for opposite things:
     # one for a refactor, the other for a one-line commit of the file.
-    node -e "$seed" 1.05
+    node -e "$seed" 1.05 1.05
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json 2>&1 \
         | grep -q 'baseline is .* above the tree'
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
         --tighten-baseline | grep -q 'baseline tightened'
+
+    # A third message, because the arithmetic move means neither of the other two. Calling
+    # it a rise asks for a refactor nobody owes; calling it a tightening records an
+    # improvement that did not happen. Both directions say the same thing about the cause.
+    node -e "$seed" 0.90 1.00
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json 2>&1 \
+        | grep -q 'complexity sum did not move with the density'
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        --tighten-baseline | grep -q 'baseline re-recorded'
+
+    # Asserted as what the line says, not as the absence of the other line: a crash
+    # printing nothing satisfies "did not say tightened" just as happily as the fix does.
+    node -e "$seed" 1.05 1.00
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        --tighten-baseline | grep -q 'baseline re-recorded'
+
+    # A baseline recorded before the gate read two numbers cannot be told apart from one
+    # whose tree happens to match, so it is refused rather than guessed at.
+    node -e "$seed" 1.05 1.05
+    node -e '
+    const fs = require("node:fs");
+    const { sum, ...rest } = JSON.parse(fs.readFileSync("baseline.json", "utf8"));
+    fs.writeFileSync("baseline.json", JSON.stringify(rest, null, 2));'
+    refusal="$(node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json 2>&1)" \
+        && { echo "a baseline carrying no complexity sum was accepted" >&2; exit 1; }
+    printf '%s\n' "$refusal" | grep -q 'carries no complexity sum' || {
+        echo "the gate refused, but not on the missing complexity sum:" >&2
+        printf '%s\n' "$refusal" >&2
+        exit 1
+    }
+
+    node -e "$seed" 1.05 1.05
+    node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
+        --tighten-baseline >/dev/null
 
     # Tightening lowers the drift reference and must leave the ceiling's anchor alone.
     # Moving origin down too would let a codebase that improves and then regresses walk
@@ -2044,32 +2101,73 @@ compare='import json,operator,sys
 recorded = json.load(open(sys.argv[1]))["mean"]
 sys.exit(not getattr(operator, sys.argv[3])(recorded, float(sys.argv[2])))'
 
-# baseline mean | flags | expected exit | expected baseline afterwards
-# The tree measures 2.000 and the backend tolerance is 0.050.
-while IFS='|' read -r before flags expect after; do
+# Both recorded numbers, as on the frontend half: same leaves the seeded pair, tree leaves
+# what fake-ruff measures -- mean 2.000 over a complexity sum of 4.
+backend_settled='import json,sys
+recorded = json.load(open("baseline.json"))
+tree = sys.argv[3] == "tree"
+want = (2.0, 4.0) if tree else (float(sys.argv[1]), float(sys.argv[2]))
+sys.exit(0 if (recorded["mean"], recorded["sum"]) == want else 1)'
+
+# baseline mean | baseline sum | flags | expected exit | baseline afterwards
+# The backend tolerance is 0.050. The mean is a ratio over the callable count, so extracting
+# or deleting a trivial callable moves it with no branching added or removed anywhere. Those
+# are the rows whose sum stands at 4: the drift is arithmetic, and the gate re-records
+# instead of judging it.
+while IFS='|' read -r before before_sum flags expect after; do
     [ -n "$before" ] || continue
-    printf '{"callables": 2.0, "mean": %s, "p90": 2.0}\n' "$before" >"$CX/baseline.json"
+    printf '{"callables": 2.0, "sum": %s, "mean": %s, "p90": 2.0}\n' \
+        "$before_sum" "$before" >"$CX/baseline.json"
     rc=0
     # shellcheck disable=SC2086
     (cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
         --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1 $flags) \
         >/dev/null 2>&1 || rc=1
     if [ "$rc" != "$expect" ]; then
-        echo "backend drift: baseline $before with '$flags' exited $rc, wanted $expect" >&2
+        echo "backend drift: $before/$before_sum with '$flags' exited $rc, wanted $expect" >&2
         exit 1
     fi
-    if ! python3 -c "$compare" "$CX/baseline.json" "$after" eq; then
-        echo "backend drift: baseline $before with '$flags' should have left $after" >&2
+    if ! (cd "$CX" && python3 -c "$backend_settled" "$before" "$before_sum" "$after"); then
+        echo "backend drift: $before/$before_sum with '$flags' should have left '$after'" >&2
         exit 1
     fi
 done <<'DRIFT_CASES'
-1.970|--tighten-baseline|0|1.970
-2.030|--tighten-baseline|0|2.030
-1.900|--tighten-baseline|1|1.900
-1.900||1|1.900
-2.400||1|2.400
-2.400|--tighten-baseline|0|2.000
+1.970|4.0|--tighten-baseline|0|same
+2.030|4.0|--tighten-baseline|0|same
+1.900|3.0|--tighten-baseline|1|same
+1.900|3.0||1|same
+2.400|6.0||1|same
+2.400|6.0|--tighten-baseline|0|tree
+1.900|5.0|--tighten-baseline|0|tree
+1.900|5.0||1|same
+1.900|4.0|--tighten-baseline|0|tree
+1.900|4.0||1|same
+2.400|3.0|--tighten-baseline|0|tree
+2.400|3.0||1|same
+2.400|4.0|--tighten-baseline|0|tree
+2.400|4.0||1|same
 DRIFT_CASES
+
+# Every baseline written before v0.6.1 omits the complexity sum. Recovering it as
+# mean x callables rounds to a whole number, which is what a complexity sum is; the mean is
+# stored to four places, so the recovery is off by one only past ten thousand callables.
+# That is why this loads where the frontend's refuses -- the frontend has written a sum for
+# as long as the metric has had its current name, so a file without one was not written by it.
+printf '{"callables": 2.0, "mean": 2.400, "p90": 2.0}\n' >"$CX/baseline.json"
+recovery="$(cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
+    --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1 --tighten-baseline)" \
+    || fail "backend complexity refused a baseline recorded without a complexity sum"
+printf '%s\n' "$recovery" | grep -q 'recovered 5 from mean x callables' \
+    || fail "backend complexity recovered a missing complexity sum without saying so"
+(cd "$CX" && python3 -c "$backend_settled" 2.400 5.0 tree) \
+    || fail "backend complexity recovered a sum that changed what the drift meant"
+
+# The third message, as on the frontend: neither a refactor nor an improvement.
+printf '{"callables": 2.0, "sum": 5.0, "mean": 1.900, "p90": 2.0}\n' >"$CX/baseline.json"
+(cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
+    --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1) 2>&1 \
+    | grep -q 'complexity sum did not move with the mean' \
+    || fail "backend complexity reported an arithmetic drift as a rise"
 
 echo "==> assert each half's fixing variant tightens and its checking variant refuses"
 # Tightening only means anything if exactly one of each half's two lint entry points
@@ -2108,7 +2206,8 @@ const fs = require("node:fs");
 const path = "frontend/.complexity-baseline.json";
 const baseline = JSON.parse(fs.readFileSync(path, "utf8"));
 const density = baseline.density * 1.05;
-fs.writeFileSync(path, JSON.stringify({ ...baseline, density }, null, 2));
+const sum = Math.round(baseline.sum * 1.05);
+fs.writeFileSync(path, JSON.stringify({ ...baseline, density, sum }, null, 2));
 process.stdout.write(String(density));
 ')"
 
@@ -2154,7 +2253,15 @@ mv "$WORK/baseline.parked" backend/.complexity-baseline.json
 sed 's/^min-callables = 50$/min-callables = 1/' backend/pyproject.toml >"$WORK/pyproject.floored"
 cp "$WORK/pyproject.floored" backend/pyproject.toml
 need_grep '^min-callables = 1$' backend/pyproject.toml
-printf '{"callables": 1.0, "mean": 2.9, "p90": 1.0}\n' >backend/.complexity-baseline.json
+# Built from the shipped baseline rather than written out, so the stale number stands above
+# a tree this really measured. A sum invented here could sit below the tree's, which would
+# make this an arithmetic drift and send the gate down the other path entirely.
+python3 -c "
+import json
+path = 'backend/.complexity-baseline.json'
+recorded = json.load(open(path))
+json.dump({**recorded, 'mean': 2.9, 'sum': recorded['sum'] * 2}, open(path, 'w'), indent=2)
+"
 
 # --no-sync throughout this block: pyproject.toml was just edited, and a re-resolve
 # against the registry is neither wanted here nor relevant to what is being asserted.
