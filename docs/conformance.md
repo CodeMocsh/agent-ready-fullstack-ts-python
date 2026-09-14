@@ -73,6 +73,27 @@ tolerance means the baseline is stale. `make lint` lowers it for you; `make lint
 and says so. A rise stays manual and lands in a diff, because someone is consenting to more
 complexity.
 
+**Drift is attributed to the complexity sum only when the complexity sum moved.** Both figures
+are ratios — density is the complexity sum over source lines, mean is the complexity sum over
+callables — so either term moves them, and a commit that changed only the denominator added and
+removed no branching at all. Deleting dead code is the case that forced this: it is the one
+action that is unambiguously an improvement, and read as a ratio it is a rise, which fails the
+build and asks for a recorded increase as the price of a deletion. So each half reads the
+complexity sum beside the ratio. Where the sum moved with the ratio, the rules above stand.
+Where it did not, the drift is arithmetic: `make lint` re-records the baseline and `make
+lint-check` still refuses, exactly as for a fall, but under a message that says the sum did not
+follow and that nothing here records consent. A baseline written before the sum was recorded
+still loads — the backend recovers it as mean × callables, while the frontend refuses, because
+the frontend has written one for as long as the metric has carried its current name and a file
+without one did not come from it.
+
+**What this does not catch, and the ceiling is why.** The pair test reads a total, so it cannot
+separate branching added in one file from branching deleted in another, and it is blind to a
+commit that adds branching and adds enough simple lines to hold the ratio flat. Both would need
+a second gate on the sum's own growth, which is the different argument about whether a codebase
+is allowed to get bigger — and the ceiling is already that argument, in the right unit. The
+ceiling reads the ratio alone: it asks where the project is, not what one commit did.
+
 **When a gate fires, split the function.** Raising a threshold or re-recording a baseline upward
 is a decision that belongs in a diff, not the way to make a build green — and the zero-comments
 rule bans `biome-ignore`, `# noqa` and `# type: ignore`, so there is no quiet way past the

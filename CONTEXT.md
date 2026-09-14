@@ -52,6 +52,13 @@ Third-party source that lands inside a generated project's own tree rather than 
 not authored here, so the rules that govern authored source do not reach it.
 _Avoid_: generated code, copied code, third-party code
 
+**Complexity sum**:
+The total of every callable's complexity score across a half, before any division. The
+frontend caps each contribution at 15 and subtracts a floor of 1; the backend takes ruff's
+cyclomatic count whole. Both baselines record it under the key `sum`. It is the numerator of
+the figure the drift check reads, and the only term in that figure a commit can consent to.
+_Avoid_: total complexity, complexity total, the total, mass, branching
+
 **Mock mode**:
 A generated project's frontend running with its Mock Service Worker handlers intercepting
 network calls, so the frontend half is fully usable with no backend behind it. A build-time
