@@ -16,9 +16,16 @@ Not a `test_*.py` file, so nothing here is collected. It is imported by the suit
 it, the way `tests/store_contract.py` is.
 """
 
+from dataclasses import replace
+from typing import Any
+
 from fastapi import Request
 
 from app.identity import Unauthenticated
+from app.wiring import TelemetrySettings
+
+CANARY = "canary-6f1e2d-alice@example.com"
+"""A value a request carries that no log line, span or metric may. Asserted absent from each."""
 
 REFUSAL = "this request carries no credential"
 """What the double says. Asserted on, so the refusal reaching the client is the one raised
@@ -56,3 +63,13 @@ def failing(_request: Request) -> str:
     """A seam that breaks in its own way rather than refusing politely. Anything other than
     handing out a tenant is a resolver that did not serve the request."""
     raise RuntimeError("a resolver failing in its own way")
+
+
+def telemetry_settings(**changed: Any) -> TelemetrySettings:
+    """What a deployment naming a Collector configures, for tests that export elsewhere."""
+    return replace(
+        TelemetrySettings(
+            endpoint="unused", service="tasks-test", sampling_ratio=1.0, trust_inbound_context=False
+        ),
+        **changed,
+    )

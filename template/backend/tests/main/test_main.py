@@ -6,12 +6,12 @@ from app import main
 
 
 def test_importing_the_module_builds_no_app_until_app_is_read() -> None:
-    main.served.cache_clear()
+    main.module_app.cache_clear()
 
-    assert main.served.cache_info().currsize == 0
+    assert main.module_app.cache_info().currsize == 0
     assert isinstance(main.app, FastAPI)
     assert main.app is main.app
-    assert main.served.cache_info().currsize == 1
+    assert main.module_app.cache_info().currsize == 1
 
 
 def test_any_other_name_is_still_missing() -> None:

@@ -3,7 +3,10 @@
 import pytest
 
 from app.wiring import (
+    HEADERS_ENV,
+    NOT_READ,
     OTLP_ENDPOINT_ENV,
+    PROTOCOL_ENV,
     SAMPLING_RATIO_ENV,
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
@@ -17,11 +20,10 @@ ENDPOINT = "http://collector:4318"
 
 
 @pytest.fixture
-def named(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+def configured(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     """An endpoint and a service name: the least that is telemetry."""
     monkeypatch.setenv(OTLP_ENDPOINT_ENV, ENDPOINT)
     monkeypatch.setenv(SERVICE_NAME_ENV, "tasks")
-    monkeypatch.delenv(SEMCONV_ENV, raising=False)
     return monkeypatch
 
 
@@ -29,19 +31,28 @@ def test_no_endpoint_is_no_telemetry() -> None:
     assert build_telemetry() is None
 
 
-def test_an_endpoint_and_a_name_are_telemetry_that_samples_everything_and_trusts_nobody(
-    named: pytest.MonkeyPatch,
+@pytest.mark.parametrize("variable", NOT_READ)
+def test_a_variable_this_process_does_not_read_is_harmless_while_telemetry_is_off(
+    monkeypatch: pytest.MonkeyPatch, variable: str
 ) -> None:
-    named.setenv(OTLP_ENDPOINT_ENV, f"{ENDPOINT}/")
+    monkeypatch.setenv(variable, "true")
+
+    assert build_telemetry() is None
+
+
+def test_an_endpoint_and_a_name_are_telemetry_that_samples_everything_and_trusts_nobody(
+    configured: pytest.MonkeyPatch,
+) -> None:
+    configured.setenv(OTLP_ENDPOINT_ENV, f"{ENDPOINT}/")
 
     assert build_telemetry() == TelemetrySettings(
         endpoint=ENDPOINT, service="tasks", sampling_ratio=1.0, trust_inbound_context=False
     )
 
 
-def test_a_sampling_ratio_and_trust_are_read_when_given(named: pytest.MonkeyPatch) -> None:
-    named.setenv(SAMPLING_RATIO_ENV, "0.1")
-    named.setenv(TRUST_INBOUND_CONTEXT_ENV, "1")
+def test_a_sampling_ratio_and_trust_are_read_when_given(configured: pytest.MonkeyPatch) -> None:
+    configured.setenv(SAMPLING_RATIO_ENV, "0.1")
+    configured.setenv(TRUST_INBOUND_CONTEXT_ENV, "1")
 
     settings = build_telemetry()
 
@@ -51,40 +62,32 @@ def test_a_sampling_ratio_and_trust_are_read_when_given(named: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize(
-    ("said", "refused"),
-    [
-        pytest.param({SERVICE_NAME_ENV: "tasks"}, OTLP_ENDPOINT_ENV, id="a name, no endpoint"),
-        pytest.param({SAMPLING_RATIO_ENV: "0.5"}, OTLP_ENDPOINT_ENV, id="a ratio, no endpoint"),
-        pytest.param({TRUST_INBOUND_CONTEXT_ENV: "1"}, OTLP_ENDPOINT_ENV, id="trust, no endpoint"),
-        pytest.param(
-            {"OTEL_EXPORTER_OTLP_HEADERS": "a=b"}, OTLP_ENDPOINT_ENV, id="headers, no endpoint"
-        ),
-        pytest.param(
-            {"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": ENDPOINT},
-            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-            id="a per-signal endpoint",
-        ),
-        pytest.param({"OTEL_TRACES_SAMPLER": "always_on"}, "OTEL_TRACES_SAMPLER", id="a sampler"),
-        pytest.param({"OTEL_SDK_DISABLED": "true"}, "OTEL_SDK_DISABLED", id="the SDK disabled"),
-        pytest.param(
-            {"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, "OTEL_EXPORTER_OTLP_PROTOCOL", id="grpc"
-        ),
-    ],
+    "variable", [SERVICE_NAME_ENV, SAMPLING_RATIO_ENV, TRUST_INBOUND_CONTEXT_ENV, HEADERS_ENV]
 )
-def test_what_this_process_would_not_act_on_refuses_to_start(
-    monkeypatch: pytest.MonkeyPatch, said: dict[str, str], refused: str
+def test_a_variable_that_needs_the_endpoint_refuses_to_start_without_it(
+    monkeypatch: pytest.MonkeyPatch, variable: str
 ) -> None:
-    for name, value in said.items():
-        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(variable, "1")
 
-    with pytest.raises(TelemetryMisconfigured, match=refused):
+    with pytest.raises(TelemetryMisconfigured, match=OTLP_ENDPOINT_ENV):
+        build_telemetry()
+
+
+@pytest.mark.parametrize("variable", NOT_READ)
+def test_a_variable_this_process_does_not_read_refuses_to_start_beside_the_endpoint(
+    configured: pytest.MonkeyPatch, variable: str
+) -> None:
+    configured.setenv(variable, "true")
+
+    with pytest.raises(TelemetryMisconfigured, match=variable):
         build_telemetry()
 
 
 @pytest.mark.parametrize(
-    ("name", "value"),
+    ("variable", "value"),
     [
         pytest.param(OTLP_ENDPOINT_ENV, "localhost:4318", id="an endpoint with no scheme"),
+        pytest.param(PROTOCOL_ENV, "grpc", id="grpc"),
         pytest.param(SAMPLING_RATIO_ENV, "half", id="a ratio that is not a number"),
         pytest.param(SAMPLING_RATIO_ENV, "1.5", id="a ratio above one"),
         pytest.param(SAMPLING_RATIO_ENV, "nan", id="a ratio that is not one"),
@@ -93,9 +96,16 @@ def test_what_this_process_would_not_act_on_refuses_to_start(
     ],
 )
 def test_a_value_that_is_not_one_refuses_to_start(
-    named: pytest.MonkeyPatch, name: str, value: str
+    configured: pytest.MonkeyPatch, variable: str, value: str
 ) -> None:
-    named.setenv(name, value)
+    configured.setenv(variable, value)
 
-    with pytest.raises(TelemetryMisconfigured, match=name):
+    with pytest.raises(TelemetryMisconfigured, match=variable):
+        build_telemetry()
+
+
+def test_an_endpoint_without_a_name_refuses_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(OTLP_ENDPOINT_ENV, ENDPOINT)
+
+    with pytest.raises(TelemetryMisconfigured, match=SERVICE_NAME_ENV):
         build_telemetry()

@@ -7,9 +7,9 @@ the data goes, and that Collector belongs to the deployment.
 
 ## Why OTLP to a Collector
 
-Every destination worth having accepts OTLP: Cloud Trace and Cloud Monitoring, X-Ray and
-CloudWatch, Azure Monitor, Grafana, Jaeger, Datadog, Honeycomb. What differs between them is
-authentication, temporality and endpoint, and each of those is Collector configuration. Keeping
+Every destination worth having accepts OTLP (`docs/deployment.md` names them). What differs
+between them is authentication, temporality and endpoint, and each of those is Collector
+configuration. Keeping
 them there means changing clouds never touches the application, and one Collector can send to
 two destinations during a move.
 
@@ -36,7 +36,6 @@ whose callers are the deployment's own. Baggage is never read or forwarded.
 - OpenTelemetry's SDK and instrumentations are in every project. The instrumentations are 0.x
   betas that move with the SDK.
 - A Collector that cannot be reached loses spans from a bounded queue and never blocks a
-  request. Shutdown waits up to the exporter's timeout for it.
+  request. Shutdown waits up to the export timeout for traces, then again for metrics.
 - One instrumented app per process: the propagator and the asyncpg instrumentation are
   process-wide.
-- A new span attribute is an edit to `SPAN_ATTRIBUTES`.

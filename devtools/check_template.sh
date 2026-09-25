@@ -606,6 +606,12 @@ need backend/tests/test_gate.py
 # a test that passed, and a run where every one of them skipped looks green. The generated
 # project polices this from then on in test_gate.py; this is what makes it ship that way.
 need_grep '^norecursedirs = \["integration", "observe"\]' backend/pyproject.toml
+# The bans that make app/log.py and app/telemetry.py the only writers of what leaves the
+# process. Deleting one fails nothing else, so the gate names each.
+for banned in logging structlog opentelemetry; do
+    grep -q "^\"$banned\".msg = " backend/pyproject.toml \
+        || { echo "pyproject.toml no longer bans importing $banned" >&2; exit 1; }
+done
 need_grep '^DB_TEST_SUITE = tests/integration$' Makefile
 need backend/tests/tiers.py
 # The tier is out of the default run, so the default run has to say so. Without this line a

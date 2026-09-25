@@ -65,7 +65,8 @@ decides where traces and metrics go; the application never names a destination.
 _Avoid_: agent, exporter (an exporter is one of the Collector's parts), sink.
 
 **Trace id**:
-OpenTelemetry's id for one trace, on every span and on every log line written inside one. It
+OpenTelemetry's id for one trace, on every span and on every log line written inside a
+sampled one. It
 crosses services; a request id does not.
 _Avoid_: correlation id.
 

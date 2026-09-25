@@ -11,10 +11,8 @@ from opentelemetry.trace import SpanKind
 
 from app import telemetry
 from app.main import create_app
-from app.wiring import TelemetrySettings
+from tests.doubles import CANARY, telemetry_settings
 from tests.integration.conftest import Provisioned
-
-CANARY = "canary-6f1e2d-alice@example.com"
 
 
 def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
@@ -24,10 +22,7 @@ def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
     monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
     app = create_app()
     spans = InMemorySpanExporter()
-    settings = TelemetrySettings(
-        endpoint="unused", service="tasks-test", sampling_ratio=1.0, trust_inbound_context=False
-    )
-    instruments = telemetry.instrument(app, settings, spans, InMemoryMetricReader())
+    instruments = telemetry.instrument(app, telemetry_settings(), spans, InMemoryMetricReader())
 
     try:
         with TestClient(app) as client:

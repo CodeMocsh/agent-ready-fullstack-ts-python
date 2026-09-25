@@ -59,12 +59,14 @@ SAMPLING_RATIO_ENV: Final = "OTEL_TRACES_SAMPLER_ARG"
 TRUST_INBOUND_CONTEXT_ENV: Final = "TRUST_INBOUND_TRACE_CONTEXT"
 SEMCONV_ENV: Final = "OTEL_SEMCONV_STABILITY_OPT_IN"
 STABLE_SEMCONV: Final = "http,database"
+PROTOCOL_ENV: Final = "OTEL_EXPORTER_OTLP_PROTOCOL"
+HEADERS_ENV: Final = "OTEL_EXPORTER_OTLP_HEADERS"
 
 NEEDS_THE_ENDPOINT: Final = (
     SERVICE_NAME_ENV,
     SAMPLING_RATIO_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
-    "OTEL_EXPORTER_OTLP_HEADERS",
+    HEADERS_ENV,
 )
 """Variables that mean something only once the endpoint is named."""
 
@@ -72,10 +74,23 @@ NOT_READ: Final = (
     "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
     "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
     "OTEL_TRACES_SAMPLER",
+    "OTEL_TRACES_EXPORTER",
+    "OTEL_METRICS_EXPORTER",
+    "OTEL_PROPAGATORS",
     "OTEL_SDK_DISABLED",
+    "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST",
+    "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE",
 )
-"""Variables the SDK would honour and this process does not, so it refuses them rather than
-start with a configuration nobody applied."""
+"""Variables the SDK would honour and this process does not. Refused alongside the endpoint."""
+
+TELEMETRY_ENV: Final = (
+    OTLP_ENDPOINT_ENV,
+    PROTOCOL_ENV,
+    SEMCONV_ENV,
+    *NEEDS_THE_ENDPOINT,
+    *NOT_READ,
+)
+"""Every variable `build_telemetry` reads."""
 
 AFFIRMATIONS: Final = frozenset({"1", "true", "yes", "on"})
 
@@ -128,81 +143,75 @@ def build_telemetry() -> TelemetrySettings | None:
     """Telemetry, when `OTEL_EXPORTER_OTLP_ENDPOINT` names a Collector over HTTP; otherwise
     `None`, and nothing is instrumented.
 
-    Refuses to start on anything it would not act on: a variable from `NEEDS_THE_ENDPOINT`
-    without the endpoint, one from `NOT_READ`, a protocol other than `http/protobuf`, an
-    endpoint that is not a URL, an unparsable ratio or trust flag, and a semantic-convention
+    Refuses to start on anything it would not act on: without the endpoint, a variable from
+    `NEEDS_THE_ENDPOINT`; with it, one from `NOT_READ`, a protocol other than `http/protobuf`,
+    an endpoint that is not a URL, an unparsable ratio or trust flag, or a semantic-convention
     choice other than `STABLE_SEMCONV`.
     """
-    _refuse_what_is_not_read()
-    endpoint = os.environ.get(OTLP_ENDPOINT_ENV, "").strip().rstrip("/")
+    endpoint = _named(OTLP_ENDPOINT_ENV).rstrip("/")
     if endpoint == "":
-        named = [name for name in NEEDS_THE_ENDPOINT if os.environ.get(name, "").strip()]
-        if named:
-            raise TelemetryMisconfigured(
-                f"{', '.join(named)} set, and {OTLP_ENDPOINT_ENV} unset: nothing would be "
-                f"exported. Name the Collector, or unset the rest."
-            )
+        _refuse_any_of(
+            NEEDS_THE_ENDPOINT, f"and {OTLP_ENDPOINT_ENV} unset: nothing would be exported"
+        )
         return None
+    _refuse_any_of(NOT_READ, "and this process does not read it")
+    if _named(PROTOCOL_ENV) not in ("", "http/protobuf"):
+        raise TelemetryMisconfigured(
+            f"{PROTOCOL_ENV}={_named(PROTOCOL_ENV)!r}: this process exports over http/protobuf "
+            f"only. Point it at the Collector's HTTP port."
+        )
+    if _named(SEMCONV_ENV) not in ("", STABLE_SEMCONV):
+        raise TelemetryMisconfigured(
+            f"{SEMCONV_ENV}={_named(SEMCONV_ENV)!r}: the declared attributes are the stable "
+            f"conventions' names, so this process sets {STABLE_SEMCONV!r} itself. Unset it."
+        )
     if not endpoint.startswith(("http://", "https://")):
         raise TelemetryMisconfigured(
             f"{OTLP_ENDPOINT_ENV}={endpoint!r} is not an http:// or https:// URL."
         )
-    service = os.environ.get(SERVICE_NAME_ENV, "").strip()
-    if service == "":
+    if _named(SERVICE_NAME_ENV) == "":
         raise TelemetryMisconfigured(
             f"{OTLP_ENDPOINT_ENV} is set and {SERVICE_NAME_ENV} is not. Every span and metric "
             f"is filed under the service name, so name this one."
         )
     return TelemetrySettings(
         endpoint=endpoint,
-        service=service,
+        service=_named(SERVICE_NAME_ENV),
         sampling_ratio=_sampling_ratio(),
         trust_inbound_context=_trusts_inbound_context(),
     )
 
 
-def _refuse_what_is_not_read() -> None:
-    named = [name for name in NOT_READ if os.environ.get(name, "").strip()]
-    if named:
-        raise TelemetryMisconfigured(
-            f"{', '.join(named)} set, and this process does not read it. Use "
-            f"{OTLP_ENDPOINT_ENV} and {SAMPLING_RATIO_ENV}, or unset it."
-        )
-    protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "").strip()
-    if protocol not in ("", "http/protobuf"):
-        raise TelemetryMisconfigured(
-            f"OTEL_EXPORTER_OTLP_PROTOCOL={protocol!r}: this process exports over "
-            f"http/protobuf only. Point it at the Collector's HTTP port."
-        )
-    semconv = os.environ.get(SEMCONV_ENV, "").strip()
-    if semconv not in ("", STABLE_SEMCONV):
-        raise TelemetryMisconfigured(
-            f"{SEMCONV_ENV}={semconv!r}: the declared attributes are the stable conventions' "
-            f"names, so this process sets {STABLE_SEMCONV!r} itself. Unset it."
-        )
+def _named(variable: str) -> str:
+    return os.environ.get(variable, "").strip()
+
+
+def _refuse_any_of(variables: tuple[str, ...], because: str) -> None:
+    said = [one for one in variables if _named(one)]
+    if said:
+        raise TelemetryMisconfigured(f"{', '.join(said)} set, {because}. Unset it.")
 
 
 def _trusts_inbound_context() -> bool:
-    named = os.environ.get(TRUST_INBOUND_CONTEXT_ENV, "").strip().lower()
-    if named in AFFIRMATIONS:
+    said = _named(TRUST_INBOUND_CONTEXT_ENV).lower()
+    if said in AFFIRMATIONS:
         return True
-    if named in DENIALS:
+    if said in DENIALS:
         return False
     raise TelemetryMisconfigured(
-        f"{TRUST_INBOUND_CONTEXT_ENV}={named!r} is neither yes nor no. Trusting a caller's "
-        f"trace is a choice, so say 1 or 0."
+        f"{TRUST_INBOUND_CONTEXT_ENV}={said!r} is neither yes nor no. Say 1 or 0."
     )
 
 
 def _sampling_ratio() -> float:
-    named = os.environ.get(SAMPLING_RATIO_ENV, "").strip()
-    if named == "":
+    said = _named(SAMPLING_RATIO_ENV)
+    if said == "":
         return EVERY_TRACE
     refusal = TelemetryMisconfigured(
-        f"{SAMPLING_RATIO_ENV}={named!r} is not a ratio. Give a number from 0 to 1."
+        f"{SAMPLING_RATIO_ENV}={said!r} is not a ratio. Give a number from 0 to 1."
     )
     try:
-        ratio = float(named)
+        ratio = float(said)
     except ValueError as error:
         raise refusal from error
     if not 0.0 <= ratio <= 1.0:

@@ -115,9 +115,11 @@ says why the application stops there.
 | `TRUST_INBOUND_TRACE_CONTEXT` | `1` continues a caller's trace. Unset, a caller's trace is a link. |
 
 `OTEL_SERVICE_NAME`, the ratio, trust or `OTEL_EXPORTER_OTLP_HEADERS` without the endpoint
-refuses to start. So does a variable the SDK would honour and this process does not -- a
-per-signal endpoint, `OTEL_TRACES_SAMPLER`, `OTEL_SDK_DISABLED`, or a protocol other than
-`http/protobuf`. The SDK reads its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
+refuses to start. Beside the endpoint, so does a variable the SDK would honour and this
+process does not -- a
+per-signal endpoint, a sampler, exporter or propagator choice, `OTEL_SDK_DISABLED`, header
+capture, or a protocol other than `http/protobuf`. The SDK reads `OTEL_RESOURCE_ATTRIBUTES` for
+labels such as `deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
 `_CERTIFICATE` for a Collector that needs them.
 
 **Run the Collector beside the application, and point it at your destination.**

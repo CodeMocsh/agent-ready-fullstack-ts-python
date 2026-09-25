@@ -117,7 +117,7 @@ else
 		uv run --no-sync pytest $(DB_TEST_SUITE)
 endif
 
-# The whole path telemetry takes in a deployment: this app, a real Collector, and the stores
+# The whole path telemetry takes in a deployment: this app, the viewer's Collector, and the stores
 # behind it, asserted by reading back what they kept. Out of the gate, because it fetches the
 # viewer's image. Ephemeral ports and a PID-named container, for the reason db-test gives.
 OBSERVE_IMAGE = $(shell sed -n 's/^ *image: \(grafana\/otel-lgtm:.*\)$$/\1/p' $(COMPOSE))

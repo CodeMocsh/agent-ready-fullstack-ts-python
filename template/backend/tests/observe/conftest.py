@@ -10,7 +10,7 @@ import os
 import pytest
 
 
-def named(variable: str) -> str:
+def required(variable: str) -> str:
     value = os.environ.get(variable, "").strip()
     if not value:
         raise RuntimeError(
@@ -22,9 +22,9 @@ def named(variable: str) -> str:
 
 @pytest.fixture(scope="module")
 def grafana() -> str:
-    return named("OBSERVE_GRAFANA_URL")
+    return required("OBSERVE_GRAFANA_URL")
 
 
 @pytest.fixture(scope="module")
 def otlp() -> str:
-    return named("OBSERVE_OTLP_URL")
+    return required("OBSERVE_OTLP_URL")

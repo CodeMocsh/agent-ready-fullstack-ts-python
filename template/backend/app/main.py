@@ -92,14 +92,14 @@ async def _refuse(_request: Request, refusal: Exception) -> JSONResponse:
 
 
 @cache
-def served() -> FastAPI:
-    """The app this module serves, built on the first call and kept."""
+def module_app() -> FastAPI:
+    """The app `app` names, built on the first call and kept."""
     return create_app()
 
 
 def __getattr__(name: str) -> FastAPI:
-    """`app`, built the first time something asks for it -- `uvicorn app.main:app` does.
-    Importing `create_app` from here builds nothing, so `app.serve` instruments one app."""
+    """`app`, built the first time something reads it. Importing anything else from this
+    module builds no app."""
     if name == "app":
-        return served()
+        return module_app()
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -3,12 +3,12 @@
 Nothing here runs unless `wiring.build_telemetry` returns settings. When it does, every request
 is a server span named by its route template, every query a database span, and every request
 adds to `http.server.request.duration`; `/health` and `/ready` are left out. This module
-instruments; `app.log` only reads the current span. No other module may import
-`opentelemetry`.
+instruments and `app.log` reads the current span; ruff refuses `opentelemetry` anywhere else.
 
 **What leaves the process is declared here.** A span keeps only the attributes in
 `SPAN_ATTRIBUTES`, its status code, none of its events and no caller's `tracestate`; a
-metric keeps only `METRIC_ATTRIBUTES`. An attribute left out is reported once, by name. A caller's trace context
+metric keeps only `METRIC_ATTRIBUTES` and carries no exemplars. A span attribute left out is reported once, by
+name. A caller's trace context
 is continued only when the deployment trusts its callers, and is otherwise a link on a new
 trace. `docs/adr/0010` holds the reasoning.
 """
@@ -34,7 +34,7 @@ from opentelemetry.propagators.textmap import (
     default_getter,
     default_setter,
 )
-from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics import AlwaysOffExemplarFilter, MeterProvider
 from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import View
 from opentelemetry.sdk.resources import Resource
@@ -69,8 +69,8 @@ METRIC_ATTRIBUTES: Final = frozenset(
 )
 """The metric attributes that may leave the process. Never a tenant or a user."""
 
-PROBES: Final = "/health$,/ready$"
-"""The paths never traced or measured: a platform asks them every few seconds."""
+PROBES: Final = r"^https?://[^/]+(/api)?/(health|ready)$"
+"""The URLs never traced or measured: the two probes, bare or under `app.serve`'s prefix."""
 
 _CALLER: Final = create_key("untrusted-caller")
 
@@ -81,13 +81,19 @@ class Instruments:
 
     tracer_provider: TracerProvider
     meter_provider: MeterProvider
+    semconv_before: str | None
 
     def shutdown(self) -> None:
-        """Flush and stop both providers, and take the instrumentation off asyncpg. Waits up to
-        the exporter's timeout for a Collector that does not answer."""
+        """Flush and stop both providers, take the instrumentation off asyncpg, and put back
+        `SEMCONV_ENV`. Waits up to the export timeout for each provider, one after the other,
+        when the Collector does not answer."""
         self.tracer_provider.shutdown()
         self.meter_provider.shutdown()
         AsyncPGInstrumentor().uninstrument()
+        if self.semconv_before is None:
+            os.environ.pop(SEMCONV_ENV, None)
+        else:
+            os.environ[SEMCONV_ENV] = self.semconv_before
 
 
 def otlp(settings: TelemetrySettings) -> tuple[SpanExporter, MetricReader]:
@@ -107,14 +113,15 @@ def instrument(
     """Instrument `app` and asyncpg, exporting through `spans` and `metrics`.
 
     One instrumented app per process: the propagator and the asyncpg instrumentation are
-    process-wide, so a second call before `Instruments.shutdown` raises. Sets `SEMCONV_ENV`,
-    which `wiring.build_telemetry` has already refused to see set otherwise.
+    process-wide, so a second call before `Instruments.shutdown` raises. Sets `SEMCONV_ENV` to
+    `STABLE_SEMCONV` until then.
     """
     if AsyncPGInstrumentor().is_instrumented_by_opentelemetry:
         raise RuntimeError(
             "asyncpg is already instrumented by another app in this process. Shut that app's "
             "Instruments down first."
         )
+    semconv_before = os.environ.get(SEMCONV_ENV)
     os.environ[SEMCONV_ENV] = STABLE_SEMCONV
     set_global_textmap(
         TraceContextTextMapPropagator() if settings.trust_inbound_context else _CallerAsLink()
@@ -128,6 +135,7 @@ def instrument(
     meter_provider = MeterProvider(
         metric_readers=[metrics],
         resource=resource,
+        exemplar_filter=AlwaysOffExemplarFilter(),
         views=[View(instrument_name="*", attribute_keys=set(METRIC_ATTRIBUTES))],
     )
     FastAPIInstrumentor.instrument_app(
@@ -138,7 +146,7 @@ def instrument(
         excluded_urls=PROBES,
     )
     AsyncPGInstrumentor().instrument(tracer_provider=tracer_provider)
-    return Instruments(tracer_provider, meter_provider)
+    return Instruments(tracer_provider, meter_provider, semconv_before)
 
 
 class _CallerAsLink(TextMapPropagator):
@@ -214,12 +222,12 @@ class _Declared(SpanExporter):
             log.span_attribute_dropped(key)
         return ReadableSpan(
             name=span.name,
-            context=_without_state(span.context),
-            parent=_without_state(span.parent),
+            context=None if span.context is None else _without_state(span.context),
+            parent=None if span.parent is None else _without_state(span.parent),
             resource=span.resource,
             attributes={k: v for k, v in attributes.items() if k in SPAN_ATTRIBUTES},
             events=(),
-            links=tuple(Link(_bare(one.context)) for one in span.links),
+            links=tuple(Link(_without_state(one.context)) for one in span.links),
             kind=span.kind,
             status=Status(span.status.status_code),
             start_time=span.start_time,
@@ -228,7 +236,7 @@ class _Declared(SpanExporter):
         )
 
 
-def _bare(context: SpanContext) -> SpanContext:
+def _without_state(context: SpanContext) -> SpanContext:
     return SpanContext(
         trace_id=context.trace_id,
         span_id=context.span_id,
@@ -236,7 +244,3 @@ def _bare(context: SpanContext) -> SpanContext:
         trace_flags=context.trace_flags,
         trace_state=TraceState(),
     )
-
-
-def _without_state(context: SpanContext | None) -> SpanContext | None:
-    return None if context is None else _bare(context)
