@@ -5,7 +5,9 @@ what is asserted is what an OTLP exporter would have been handed.
 """
 
 import json
+import socket
 import threading
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -59,7 +61,9 @@ class Instrumented:
         ]
 
 
-def instrumented(monkeypatch: pytest.MonkeyPatch, *, trust: bool) -> Iterator[Instrumented]:
+def instrumented(
+    monkeypatch: pytest.MonkeyPatch, *, trust: bool, ratio: float = 1.0
+) -> Iterator[Instrumented]:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
 
@@ -74,7 +78,7 @@ def instrumented(monkeypatch: pytest.MonkeyPatch, *, trust: bool) -> Iterator[In
     spans = InMemorySpanExporter()
     metrics = InMemoryMetricReader()
     settings = TelemetrySettings(
-        endpoint="unused", service="tasks-test", sampling_ratio=1.0, trust_inbound_context=trust
+        endpoint="unused", service="tasks-test", sampling_ratio=ratio, trust_inbound_context=trust
     )
     instruments = telemetry.instrument(app, settings, spans, metrics)
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -90,6 +94,11 @@ def served(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
 @pytest.fixture
 def trusting(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
     yield from instrumented(monkeypatch, trust=True)
+
+
+@pytest.fixture
+def unsampled(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
+    yield from instrumented(monkeypatch, trust=False, ratio=0.0)
 
 
 def trace_of(span: ReadableSpan) -> str:
@@ -240,6 +249,22 @@ def test_an_attribute_left_out_is_reported_once_by_name_and_never_by_value(
     assert CANARY not in json.dumps(dropped)
 
 
+def test_a_request_sampled_out_exports_no_span_and_logs_no_trace_but_is_still_measured(
+    unsampled: Instrumented, logged: Logged
+) -> None:
+    """A `trace_id` on a log line promises a trace somebody can open. Metrics are never
+    sampled, so the error rate and latency stay exact whatever the ratio."""
+    logged()
+    unsampled.client.get("/tasks")
+
+    lines = logged()
+    durations = [n for n, _ in unsampled.data_points() if n == "http.server.request.duration"]
+
+    assert unsampled.finished() == ()
+    assert [one for one in lines if "trace_id" in one] == []
+    assert durations == ["http.server.request.duration"]
+
+
 def test_a_probe_is_neither_traced_nor_measured(served: Instrumented) -> None:
     served.client.get("/health")
     served.client.get("/ready")
@@ -272,6 +297,29 @@ def test_an_app_with_no_endpoint_is_not_instrumented(
 
     assert app.state.instruments is None
     assert all("trace_id" not in line for line in logged())
+
+
+def test_a_collector_that_does_not_answer_slows_no_request_and_delays_shutdown_by_its_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        closed = probe.getsockname()[1]
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv(OTLP_ENDPOINT_ENV, f"http://127.0.0.1:{closed}")
+    monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "1")
+
+    with TestClient(create_app()) as client:
+        started = time.monotonic()
+        answered = client.get("/tasks")
+        answering = time.monotonic() - started
+        stopping = time.monotonic()
+    stopped = time.monotonic() - stopping
+
+    assert answered.status_code == 200
+    assert answering < 0.5
+    assert stopped < 5
 
 
 class _Collector(BaseHTTPRequestHandler):

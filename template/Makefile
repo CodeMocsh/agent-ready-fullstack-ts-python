@@ -22,7 +22,7 @@ export UV_EXCLUDE_NEWER
 
 .PHONY: default install hooks pre-commit lint lint-check test test-fast test-contract \
         test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
-        dev dev-frontend observe \
+        dev dev-frontend observe observe-test \
         dev-backend openapi \
         openapi-check build upgrade clean
 
@@ -116,6 +116,24 @@ else
 	cd backend && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$$port/postgres \
 		uv run --no-sync pytest $(DB_TEST_SUITE)
 endif
+
+# The whole path telemetry takes in a deployment: this app, a real Collector, and the stores
+# behind it, asserted by reading back what they kept. Out of the gate, because it fetches the
+# viewer's image. Ephemeral ports and a PID-named container, for the reason db-test gives.
+OBSERVE_IMAGE = $(shell sed -n 's/^ *image: \(grafana\/otel-lgtm:.*\)$$/\1/p' $(COMPOSE))
+OBSERVE_TEST_SUITE = tests/observe
+
+observe-test:
+	@name=observe-test-$$$$; \
+	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
+	docker run -d --rm -p 127.0.0.1::3000 -p 127.0.0.1::4318 --name $$name $(OBSERVE_IMAGE) >/dev/null; \
+	grafana=http://$$(docker port $$name 3000/tcp | head -1); \
+	otlp=http://$$(docker port $$name 4318/tcp | head -1); \
+	printf 'otel-lgtm on %s' "$$grafana"; \
+	until docker exec $$name test -f /tmp/ready 2>/dev/null; do printf '.'; sleep 1; done; \
+	echo ' ready'; \
+	cd backend && OBSERVE_GRAFANA_URL=$$grafana OBSERVE_OTLP_URL=$$otlp \
+		uv run --no-sync pytest $(OBSERVE_TEST_SUITE)
 
 # The contract suite against a backend that is actually on Postgres. `make test-contract`
 # runs the same file against the in-memory substrate, which is right for the gate and is
