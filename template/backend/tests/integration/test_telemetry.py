@@ -5,7 +5,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
 
@@ -62,17 +62,19 @@ def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
 
     assert collected is not None
     points = [
-        (metric.name, dict(point.attributes or {}), getattr(point, "value", None))
+        (metric.name, dict(point.attributes or {}), point.value)
         for resource in collected.resource_metrics
         for scope in resource.scope_metrics
         for metric in scope.metrics
         for point in metric.data.data_points
-        if metric.name.startswith("db.client.connection.")
+        if metric.name.startswith("db.client.connection.") and isinstance(point, NumberDataPoint)
     ]
-    by_state = {
-        attributes["db.client.connection.state"]: value
-        for name, attributes, value in points
-        if name == "db.client.connection.count"
-    }
-    assert by_state == {"used": 0, "idle": 1}
-    assert ("db.client.connection.max", {}, 10) in points
+    pool = {"db.client.connection.pool.name": provisioned.schema}
+    assert sorted(points, key=str) == sorted(
+        [
+            ("db.client.connection.count", {**pool, "db.client.connection.state": "used"}, 0),
+            ("db.client.connection.count", {**pool, "db.client.connection.state": "idle"}, 1),
+            ("db.client.connection.max", pool, 10),
+        ],
+        key=str,
+    )

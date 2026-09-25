@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from app.store import Connections
-from app.store.pg import PoolExhausted, PostgresDatabase, Timeouts
+from app.store.pg import AcquireTimedOut, PostgresDatabase, Timeouts
 from tests.integration.conftest import Provisioned
 
 SHORT = Timeouts(statement=0.2, idle_in_transaction=0.2, acquire=0.2)
@@ -56,19 +56,26 @@ async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
     one_connection: PostgresDatabase,
 ) -> None:
     async with one_connection.connection():
-        with pytest.raises(PoolExhausted, match="all 1 were in use"):
+        with pytest.raises(AcquireTimedOut, match="all 1 stayed in use"):
             await one_connection.store("a-tenant").list()
 
 
 async def test_a_connection_lent_out_is_counted_as_used_until_it_comes_back(
-    one_connection: PostgresDatabase,
+    provisioned: Provisioned, one_connection: PostgresDatabase
 ) -> None:
     async with one_connection.connection():
-        assert one_connection.connections() == Connections(used=1, idle=0, limit=1)
-    assert one_connection.connections() == Connections(used=0, idle=1, limit=1)
+        lent = one_connection.connections()
+    returned = one_connection.connections()
+
+    assert lent == Connections(pool=provisioned.schema, used=1, idle=0, max_size=1)
+    assert returned == Connections(pool=provisioned.schema, used=0, idle=1, max_size=1)
 
 
-async def test_a_closed_pool_counts_no_connections(one_connection: PostgresDatabase) -> None:
+async def test_a_closed_pool_counts_no_connections(
+    provisioned: Provisioned, one_connection: PostgresDatabase
+) -> None:
     await one_connection.close()
 
-    assert one_connection.connections() == Connections(used=0, idle=0, limit=1)
+    assert one_connection.connections() == Connections(
+        pool=provisioned.schema, used=0, idle=0, max_size=1
+    )

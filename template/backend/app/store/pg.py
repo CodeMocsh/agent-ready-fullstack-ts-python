@@ -13,12 +13,10 @@ that made it, and the next request handed that pooled connection inherits it —
 reading another's rows, with nothing in any log to say so. `set_config(..., true)` is the
 local form and every statement below runs inside a transaction that has issued it.
 
-**Every wait has a bound.** A statement, a reply, a transaction left idle, and a wait for a free
-connection each raise once `Timeouts` says so. A platform's request timeout closes the client's
-connection and leaves the handler running with a pooled connection in hand. So a database that
-stops answering fills the pool, and every request after it waits without an error. The bounds
-on the statement and the idle transaction are startup parameters, for the reason the search
-path is one.
+**Every wait has a bound.** A statement, an answer, a transaction left idle, and a wait for a
+connection each raise once `Timeouts` says so. `docs/deployment.md` says why a platform's
+request timeout is not one of them. The bounds on the statement and the idle transaction are
+startup parameters, for the reason the search path is one.
 
 **No environment variable is read here.** The DSN and the schema are constructor arguments and
 `wiring.py` is the only reader, which is what lets one process hold two of these at once —
@@ -45,9 +43,13 @@ _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
 
 
+_SMALLEST: Final = 0.001
+
+
 @dataclass(frozen=True)
 class Timeouts:
-    """How long each wait may last, in seconds, before it raises."""
+    """How long each wait may last, in seconds, before it raises. Each is at least a
+    millisecond, because Postgres reads a bound of zero as no bound at all."""
 
     statement: float = 5.0
     """Postgres cancels a statement that runs longer, and asyncpg raises `QueryCanceledError`."""
@@ -57,21 +59,25 @@ class Timeouts:
     with it."""
 
     acquire: float = 5.0
-    """A request that finds every connection in use waits this long, then `PoolExhausted`."""
+    """A request that finds every connection in use waits this long, then `AcquireTimedOut`."""
+
+    def __post_init__(self) -> None:
+        if min(self.statement, self.idle_in_transaction, self.acquire) < _SMALLEST:
+            raise ValueError(f"{self} holds a bound under a millisecond, which Postgres ignores")
 
     @property
-    def reply(self) -> float:
-        """How long asyncpg waits for any answer before it raises `TimeoutError`: for a server
-        that cannot answer at all. A second past `statement`, so a slow statement is reported
-        by Postgres, which says why."""
+    def answer(self) -> float:
+        """How long asyncpg waits for any answer before it raises `TimeoutError`. A second
+        longer than `statement`, so Postgres reports a slow statement first."""
         return self.statement + 1.0
 
 
 TIMEOUTS: Final = Timeouts()
 
 
-class PoolExhausted(TimeoutError):
-    """Every connection stayed in use for as long as a request may wait for one."""
+class AcquireTimedOut(TimeoutError):
+    """No connection came to a request within `Timeouts.acquire`: every one stayed in use, or a
+    new one did not open in time."""
 
 
 def _milliseconds(seconds: float) -> str:
@@ -189,7 +195,7 @@ class PostgresDatabase:
                         dsn=self._dsn,
                         min_size=self._min_size,
                         max_size=self._max_size,
-                        command_timeout=self._timeouts.reply,
+                        command_timeout=self._timeouts.answer,
                         server_settings={
                             "search_path": self._schema,
                             "statement_timeout": _milliseconds(self._timeouts.statement),
@@ -202,15 +208,15 @@ class PostgresDatabase:
 
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator[Any]:
-        """A connection from the pool, returned to it on exit. Raises `PoolExhausted` when none
-        comes free within `Timeouts.acquire`."""
+        """A connection from the pool, returned to it on exit. Raises `AcquireTimedOut` when none
+        comes within `Timeouts.acquire`."""
         pool = await self.pool()
         try:
             conn = await pool.acquire(timeout=self._timeouts.acquire)
         except TimeoutError as waited:
-            raise PoolExhausted(
-                f"no connection came free within {self._timeouts.acquire}s: all "
-                f"{self._max_size} were in use for that long"
+            raise AcquireTimedOut(
+                f"no connection within {self._timeouts.acquire}s: all {self._max_size} stayed "
+                f"in use, or a new one did not open in time"
             ) from waited
         try:
             yield conn
@@ -218,11 +224,15 @@ class PostgresDatabase:
             await pool.release(conn)
 
     def connections(self) -> Connections:
-        """The pool's connections now. Before the pool opens and after it closes, none."""
-        if self._pool is None:
-            return Connections(used=0, idle=0, limit=self._max_size)
-        idle = self._pool.get_idle_size()
-        return Connections(used=self._pool.get_size() - idle, idle=idle, limit=self._max_size)
+        """The pool's connections now. Before the pool opens and after it closes, none. Safe to
+        call from another thread, as a metric reader does."""
+        pool = self._pool
+        if pool is None:
+            return Connections(pool=self._schema, used=0, idle=0, max_size=self._max_size)
+        idle = pool.get_idle_size()
+        return Connections(
+            pool=self._schema, used=pool.get_size() - idle, idle=idle, max_size=self._max_size
+        )
 
     def store(self, tenant_id: str) -> TaskStore:
         if tenant_id.strip() == "":

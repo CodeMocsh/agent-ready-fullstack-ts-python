@@ -60,11 +60,12 @@ class TaskStore(Protocol):
 @dataclass(frozen=True)
 class Connections:
     """A pool's connections at one moment: lent to a request, waiting in the pool, and the most
-    it will open."""
+    it will open. `pool` names the pool, and is never an address or a credential."""
 
+    pool: str
     used: int
     idle: int
-    limit: int
+    max_size: int
 
 
 @runtime_checkable

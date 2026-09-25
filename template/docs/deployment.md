@@ -73,7 +73,8 @@ Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets eac
 - **A server that does not answer** at all makes asyncpg raise `TimeoutError`.
 - **A transaction left open** with nothing sent is ended by Postgres. The pool replaces the
   connection.
-- **A request that finds every connection in use** waits, then raises `PoolExhausted`.
+- **A request that waits for a connection** raises `AcquireTimedOut`: every connection stayed
+  in use, or a new one did not open in time.
 
 Each one answers `500` and writes its traceback to the log. Your platform's request timeout does
 not replace them. It closes the client's connection and leaves the handler running with a
@@ -159,7 +160,7 @@ under a threshold at p95 or p99. Both come from `http.server.request.duration`, 
 backend spells its own way (`http_server_request_duration_seconds` in Prometheus). On Postgres,
 `db.client.connection.count` reports the pool's connections by state (`used`, `idle`), and
 `db.client.connection.max` reports the most it will open. Used near the maximum means requests
-are waiting for a connection, and `PoolExhausted` in the log follows. Alert on
+are waiting for a connection, and `AcquireTimedOut` in the log follows. Alert on
 burn rate rather than on thresholds: for a 99.9% target, page at 14.4 times the budget over an
 hour and five minutes, page at 6 times over six hours and thirty minutes, and open a ticket at
 once over three days and six hours.

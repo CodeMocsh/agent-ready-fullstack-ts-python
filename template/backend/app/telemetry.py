@@ -75,6 +75,7 @@ METRIC_ATTRIBUTES: Final = frozenset(
         "http.response.status_code",
         "error.type",
         "db.client.connection.state",
+        "db.client.connection.pool.name",
     }
 )
 """The metric attributes that may leave the process. Never a tenant or a user."""
@@ -101,20 +102,22 @@ class Instruments:
 
         def count(_options: CallbackOptions) -> Iterable[Observation]:
             now = database.connections()
+            pool = {"db.client.connection.pool.name": now.pool}
             return [
-                Observation(now.used, {"db.client.connection.state": "used"}),
-                Observation(now.idle, {"db.client.connection.state": "idle"}),
+                Observation(now.used, {**pool, "db.client.connection.state": "used"}),
+                Observation(now.idle, {**pool, "db.client.connection.state": "idle"}),
             ]
 
-        def limit(_options: CallbackOptions) -> Iterable[Observation]:
-            return [Observation(database.connections().limit)]
+        def most(_options: CallbackOptions) -> Iterable[Observation]:
+            now = database.connections()
+            return [Observation(now.max_size, {"db.client.connection.pool.name": now.pool})]
 
         meter = self.meter_provider.get_meter(__name__)
         meter.create_observable_up_down_counter(
             "db.client.connection.count", callbacks=[count], unit="{connection}"
         )
         meter.create_observable_up_down_counter(
-            "db.client.connection.max", callbacks=[limit], unit="{connection}"
+            "db.client.connection.max", callbacks=[most], unit="{connection}"
         )
 
     def shutdown(self) -> None:
