@@ -1,14 +1,15 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from functools import cache
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app import log
+from app import log, telemetry
 from app.identity import Unauthenticated, resolved_without_a_credential
 from app.models import ErrorBody
 from app.routes import public_router, router
-from app.wiring import build, unauthenticated_is_acknowledged
+from app.wiring import build, build_telemetry, unauthenticated_is_acknowledged
 
 
 @asynccontextmanager
@@ -28,7 +29,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
-        await database.close()
+        try:
+            await database.close()
+        finally:
+            if app.state.instruments is not None:
+                app.state.instruments.shutdown()
 
 
 async def _say_what_this_deployment_authenticates(substrate: str) -> None:
@@ -64,6 +69,10 @@ def create_app() -> FastAPI:
     app.include_router(router)
     app.add_exception_handler(Unauthenticated, _refuse)
     log.instrument(app)
+    settings = build_telemetry()
+    app.state.instruments = (
+        None if settings is None else telemetry.instrument(app, settings, *telemetry.otlp(settings))
+    )
     return app
 
 
@@ -82,4 +91,15 @@ async def _refuse(_request: Request, refusal: Exception) -> JSONResponse:
     )
 
 
-app = create_app()
+@cache
+def module_app() -> FastAPI:
+    """The app `app` names, built on the first call and kept."""
+    return create_app()
+
+
+def __getattr__(name: str) -> FastAPI:
+    """`app`, built the first time something reads it. Importing anything else from this
+    module builds no app."""
+    if name == "app":
+        return module_app()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

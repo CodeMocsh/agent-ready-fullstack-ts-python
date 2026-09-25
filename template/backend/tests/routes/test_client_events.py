@@ -14,8 +14,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.models import MAX_CLIENT_EVENTS
 from tests.conftest import Logged
-
-CANARY = "canary-6f1e2d-alice@example.com"
+from tests.doubles import CANARY
 
 
 def an_event(**changed: Any) -> dict[str, Any]:

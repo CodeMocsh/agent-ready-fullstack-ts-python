@@ -20,6 +20,7 @@ from typing import Final, TextIO, final, override
 import structlog
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from fastapi import FastAPI, Request, Response
+from opentelemetry import trace
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 from app.models import ClientEvent
@@ -122,6 +123,11 @@ def client_event(event: ClientEvent) -> None:
     )
 
 
+def span_attribute_dropped(attribute: str) -> None:
+    """A span attribute `app.telemetry` did not declare, named once. Never its value."""
+    _LOG.info("span attribute dropped", attribute=attribute)
+
+
 _IDENTITY_OPEN_ON_PURPOSE: Final = (
     f"identity: none, and {ACKNOWLEDGED_ENV} says that is deliberate -- every request is "
     f"served as one tenant"
@@ -156,6 +162,14 @@ def _with_request_id(_logger: WrappedLogger, _method: str, line: EventDict) -> E
     return line
 
 
+def _with_trace(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:
+    span = trace.get_current_span().get_span_context()
+    if span.is_valid and span.trace_flags.sampled:
+        line["trace_id"] = format(span.trace_id, "032x")
+        line["span_id"] = format(span.span_id, "016x")
+    return line
+
+
 def _named_for_every_cloud(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:
     line["severity"] = line.pop("level").upper()
     line["message"] = line.pop("event")
@@ -170,6 +184,7 @@ _ENRICHED: Final[list[Processor]] = [
     structlog.stdlib.add_log_level,
     structlog.processors.TimeStamper(fmt="iso", utc=True, key="time"),
     _with_request_id,
+    _with_trace,
 ]
 
 

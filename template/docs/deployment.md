@@ -81,6 +81,7 @@ line is declared.
 | `message` | a constant sentence; values go in fields of their own |
 | `logger` | `app` for this project's lines, a library's name for its own |
 | `request_id` | while a request is served; the response carries it as `X-Request-ID` |
+| `trace_id`, `span_id` | while a traced request is served; the ids its spans carry |
 | `exception` | the whole traceback, when there is one |
 
 **What each cloud does with it:**
@@ -99,6 +100,56 @@ suits operational logs. When you add security events, PCI DSS asks for 12 months
 
 **Browser failures arrive here too**, as lines whose `message` is `client event` and whose
 `source` is `client`. Anybody can post one, so read them as a report and never as evidence.
+
+## Traces and metrics
+
+Off until `OTEL_EXPORTER_OTLP_ENDPOINT` names a Collector, which the application posts to over
+OTLP/HTTP. [adr/0010](adr/0010-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md)
+says why the application stops there.
+
+| Variable | What it does |
+|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | The Collector, e.g. `http://localhost:4318`. Unset, nothing is instrumented. |
+| `OTEL_SERVICE_NAME` | Required with the endpoint; every span and metric is filed under it. |
+| `OTEL_TRACES_SAMPLER_ARG` | The share of new traces kept, 0 to 1. Every trace when unset. |
+| `TRUST_INBOUND_TRACE_CONTEXT` | `1` continues a caller's trace. Unset, a caller's trace is a link. |
+
+`OTEL_SERVICE_NAME`, the ratio, trust or `OTEL_EXPORTER_OTLP_HEADERS` without the endpoint
+refuses to start. Beside the endpoint, so does a variable the SDK would honour and this
+process does not -- a
+per-signal endpoint, a sampler, exporter or propagator choice, `OTEL_SDK_DISABLED`, header
+capture, or a protocol other than `http/protobuf`. The SDK reads `OTEL_RESOURCE_ATTRIBUTES` for
+labels such as `deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
+`_CERTIFICATE` for a Collector that needs them.
+
+**Run the Collector beside the application, and point it at your destination.**
+
+- **GCP.** Google's Collector build as a Cloud Run sidecar, or on GKE, exporting to
+  `telemetry.googleapis.com` with the service account's credentials.
+- **AWS.** The AWS Distro for OpenTelemetry as an ECS sidecar, exporting traces to X-Ray and
+  metrics to CloudWatch over OTLP with SigV4. Application Signals then builds a service map and
+  SLOs from the spans.
+- **Azure.** The Container Apps managed agent, or a Collector, exporting to Azure Monitor. It
+  needs delta temporality, which the Collector's `cumulativetodelta` processor provides.
+- **Anything else** that takes OTLP: Grafana, Jaeger, Datadog, Honeycomb.
+
+Add the Collector's `redaction` processor as a second layer; the application already sends only
+declared attributes. Sampling beyond a fixed ratio -- keeping every error and every slow
+request -- is tail sampling, which also lives in the Collector.
+
+**What to watch.** Availability is non-5xx over all requests; latency is the share of requests
+under a threshold at p95 or p99. Both come from `http.server.request.duration`, which each
+backend spells its own way (`http_server_request_duration_seconds` in Prometheus). Alert on
+burn rate rather than on thresholds: for a 99.9% target, page at 14.4 times the budget over an
+hour and five minutes, page at 6 times over six hours and thirty minutes, and open a ticket at
+once over three days and six hours.
+
+**Probes.** `/health` answers while the process does; point liveness at it. `/ready` answers
+once the substrate does and its schema is current; point readiness at it, so a database outage
+takes an instance out of rotation instead of restarting it. Under `app.serve` both sit under
+`/api`. Neither is traced or measured.
+
+`make observe` runs Grafana, Tempo and Prometheus locally and prints what to export.
 
 ## Three ways to ship something broken
 

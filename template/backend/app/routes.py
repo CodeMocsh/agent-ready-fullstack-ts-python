@@ -1,9 +1,9 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from app import log
-from app.deps import StoreDep
+from app.deps import StoreDep, database_of
 from app.identity import tenant_for
 from app.models import ClientEvents, CreateTaskBody, ErrorBody, Task, UpdateTaskBody
 
@@ -33,6 +33,14 @@ async def health() -> dict[str, str]:
     describes the API rather than the infrastructure around it.
     """
     return {"status": "ok"}
+
+
+@public_router.get("/ready", include_in_schema=False)
+async def ready(request: Request) -> dict[str, str]:
+    """That this process can serve: its substrate answers and its schema is the one it was built
+    for. Raises otherwise, which a readiness probe reads as not ready."""
+    await database_of(request).check()
+    return {"status": "ready"}
 
 
 @public_router.post("/client-events", status_code=204)

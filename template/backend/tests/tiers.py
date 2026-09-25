@@ -117,6 +117,15 @@ TIERS = (
         needs="a Postgres daemon",
     ),
     Tier(
+        runs="make observe-test",
+        path=f"{PYTEST_ROOT}/observe",
+        holds="test_*.py",
+        declares="def test_",
+        selected_by="Makefile",
+        names="tests/observe",
+        needs="Docker, to run the otel-lgtm viewer",
+    ),
+    Tier(
         runs="make test-e2e",
         path="frontend/e2e",
         holds="*.spec.ts",

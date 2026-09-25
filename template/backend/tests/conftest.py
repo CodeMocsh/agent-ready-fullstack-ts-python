@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from app.wiring import TELEMETRY_ENV
 from tests.tiers import python_tiers
 
 
@@ -36,6 +37,13 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
+
+
+@pytest.fixture(autouse=True)
+def no_collector(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts with no telemetry variable set, whatever the shell exports."""
+    for name in TELEMETRY_ENV:
+        monkeypatch.delenv(name, raising=False)
 
 
 Logged = Callable[[], list[dict[str, Any]]]

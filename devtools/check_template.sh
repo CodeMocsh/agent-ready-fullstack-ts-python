@@ -580,7 +580,8 @@ done
 echo "==> assert the shape of both halves"
 need Makefile
 for target in install hooks pre-commit lint lint-check test test-fast test-contract \
-              test-e2e test-e2e-live db-test db db-demo migrate roles schema dev \
+              test-e2e test-e2e-live db-test observe observe-test db db-demo migrate roles \
+              schema dev \
               dev-frontend dev-backend \
               openapi openapi-check build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
@@ -592,6 +593,7 @@ done
 need_grep '^pre-commit: lint-check openapi-check test$' Makefile
 need_no_grep '^pre-commit:.*test-e2e' Makefile
 need_no_grep '^pre-commit:.*db-test' Makefile
+need_no_grep '^pre-commit:.*observe-test' Makefile
 need_no_grep '^pre-commit:.*test-contract-db' Makefile
 # The contract suite on Postgres serves as the application role, never as the superuser: a
 # superuser bypasses every policy, so the admin connection would pass against a database
@@ -603,7 +605,13 @@ need backend/tests/test_gate.py
 # whole by `make db-test` -- because a test that skips itself exits 0 and reads exactly like
 # a test that passed, and a run where every one of them skipped looks green. The generated
 # project polices this from then on in test_gate.py; this is what makes it ship that way.
-need_grep '^norecursedirs = \["integration"\]' backend/pyproject.toml
+need_grep '^norecursedirs = \["integration", "observe"\]' backend/pyproject.toml
+# The bans that make app/log.py and app/telemetry.py the only writers of what leaves the
+# process. Deleting one fails nothing else, so the gate names each.
+for banned in logging structlog opentelemetry; do
+    grep -q "^\"$banned\".msg = " backend/pyproject.toml \
+        || { echo "pyproject.toml no longer bans importing $banned" >&2; exit 1; }
+done
 need_grep '^DB_TEST_SUITE = tests/integration$' Makefile
 need backend/tests/tiers.py
 # The tier is out of the default run, so the default run has to say so. Without this line a
@@ -637,7 +645,8 @@ PY
 # project from piling every file at the top of tests/, and it is what the tier targets
 # select on. test_gate.py stays at the top because it covers no source: it reads this
 # Makefile, the hook and the workflow.
-for folder in devtools identity integration routes serve store; do
+for folder in devtools identity integration log main observe routes serve store telemetry \
+              wiring; do
     need "backend/tests/$folder/__init__.py"
 done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and

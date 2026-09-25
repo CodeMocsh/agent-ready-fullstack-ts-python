@@ -21,6 +21,7 @@ that migrates and then serves drops it between the two — `env -u DATABASE_OWNE
 """
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -52,6 +53,66 @@ def unauthenticated_is_acknowledged() -> bool:
     return os.environ.get(ACKNOWLEDGED_ENV, "").strip().lower() not in DENIALS
 
 
+OTLP_ENDPOINT_ENV: Final = "OTEL_EXPORTER_OTLP_ENDPOINT"
+SERVICE_NAME_ENV: Final = "OTEL_SERVICE_NAME"
+SAMPLING_RATIO_ENV: Final = "OTEL_TRACES_SAMPLER_ARG"
+TRUST_INBOUND_CONTEXT_ENV: Final = "TRUST_INBOUND_TRACE_CONTEXT"
+SEMCONV_ENV: Final = "OTEL_SEMCONV_STABILITY_OPT_IN"
+STABLE_SEMCONV: Final = "http,database"
+PROTOCOL_ENV: Final = "OTEL_EXPORTER_OTLP_PROTOCOL"
+HEADERS_ENV: Final = "OTEL_EXPORTER_OTLP_HEADERS"
+
+NEEDS_THE_ENDPOINT: Final = (
+    SERVICE_NAME_ENV,
+    SAMPLING_RATIO_ENV,
+    TRUST_INBOUND_CONTEXT_ENV,
+    HEADERS_ENV,
+)
+"""Variables that mean something only once the endpoint is named."""
+
+NOT_READ: Final = (
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+    "OTEL_TRACES_SAMPLER",
+    "OTEL_TRACES_EXPORTER",
+    "OTEL_METRICS_EXPORTER",
+    "OTEL_PROPAGATORS",
+    "OTEL_SDK_DISABLED",
+    "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST",
+    "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE",
+)
+"""Variables the SDK would honour and this process does not. Refused alongside the endpoint."""
+
+TELEMETRY_ENV: Final = (
+    OTLP_ENDPOINT_ENV,
+    PROTOCOL_ENV,
+    SEMCONV_ENV,
+    *NEEDS_THE_ENDPOINT,
+    *NOT_READ,
+)
+"""Every variable `build_telemetry` reads."""
+
+AFFIRMATIONS: Final = frozenset({"1", "true", "yes", "on"})
+
+EVERY_TRACE: Final = 1.0
+"""The sampling ratio when a deployment names none."""
+
+
+@dataclass(frozen=True)
+class TelemetrySettings:
+    """Where traces and metrics go, what the service is called there, and whom it believes."""
+
+    endpoint: str
+    service: str
+    sampling_ratio: float
+    trust_inbound_context: bool
+
+
+class TelemetryMisconfigured(RuntimeError):
+    """The environment says something about telemetry this process will not act on, so it
+    refuses to start."""
+
+
 class OwnerCredentialVisible(RuntimeError):
     """The application can see `DATABASE_OWNER_URL`, and it must not be able to."""
 
@@ -76,6 +137,86 @@ def build_bundle() -> Path:
             f"that strips the prefix instead."
         )
     return Path(named)
+
+
+def build_telemetry() -> TelemetrySettings | None:
+    """Telemetry, when `OTEL_EXPORTER_OTLP_ENDPOINT` names a Collector over HTTP; otherwise
+    `None`, and nothing is instrumented.
+
+    Refuses to start on anything it would not act on: without the endpoint, a variable from
+    `NEEDS_THE_ENDPOINT`; with it, one from `NOT_READ`, a protocol other than `http/protobuf`,
+    an endpoint that is not a URL, an unparsable ratio or trust flag, or a semantic-convention
+    choice other than `STABLE_SEMCONV`.
+    """
+    endpoint = _named(OTLP_ENDPOINT_ENV).rstrip("/")
+    if endpoint == "":
+        _refuse_any_of(
+            NEEDS_THE_ENDPOINT, f"and {OTLP_ENDPOINT_ENV} unset: nothing would be exported"
+        )
+        return None
+    _refuse_any_of(NOT_READ, "and this process does not read it")
+    if _named(PROTOCOL_ENV) not in ("", "http/protobuf"):
+        raise TelemetryMisconfigured(
+            f"{PROTOCOL_ENV}={_named(PROTOCOL_ENV)!r}: this process exports over http/protobuf "
+            f"only. Point it at the Collector's HTTP port."
+        )
+    if _named(SEMCONV_ENV) not in ("", STABLE_SEMCONV):
+        raise TelemetryMisconfigured(
+            f"{SEMCONV_ENV}={_named(SEMCONV_ENV)!r}: the declared attributes are the stable "
+            f"conventions' names, so this process sets {STABLE_SEMCONV!r} itself. Unset it."
+        )
+    if not endpoint.startswith(("http://", "https://")):
+        raise TelemetryMisconfigured(
+            f"{OTLP_ENDPOINT_ENV}={endpoint!r} is not an http:// or https:// URL."
+        )
+    if _named(SERVICE_NAME_ENV) == "":
+        raise TelemetryMisconfigured(
+            f"{OTLP_ENDPOINT_ENV} is set and {SERVICE_NAME_ENV} is not. Every span and metric "
+            f"is filed under the service name, so name this one."
+        )
+    return TelemetrySettings(
+        endpoint=endpoint,
+        service=_named(SERVICE_NAME_ENV),
+        sampling_ratio=_sampling_ratio(),
+        trust_inbound_context=_trusts_inbound_context(),
+    )
+
+
+def _named(variable: str) -> str:
+    return os.environ.get(variable, "").strip()
+
+
+def _refuse_any_of(variables: tuple[str, ...], because: str) -> None:
+    said = [one for one in variables if _named(one)]
+    if said:
+        raise TelemetryMisconfigured(f"{', '.join(said)} set, {because}. Unset it.")
+
+
+def _trusts_inbound_context() -> bool:
+    said = _named(TRUST_INBOUND_CONTEXT_ENV).lower()
+    if said in AFFIRMATIONS:
+        return True
+    if said in DENIALS:
+        return False
+    raise TelemetryMisconfigured(
+        f"{TRUST_INBOUND_CONTEXT_ENV}={said!r} is neither yes nor no. Say 1 or 0."
+    )
+
+
+def _sampling_ratio() -> float:
+    said = _named(SAMPLING_RATIO_ENV)
+    if said == "":
+        return EVERY_TRACE
+    refusal = TelemetryMisconfigured(
+        f"{SAMPLING_RATIO_ENV}={said!r} is not a ratio. Give a number from 0 to 1."
+    )
+    try:
+        ratio = float(said)
+    except ValueError as error:
+        raise refusal from error
+    if not 0.0 <= ratio <= 1.0:
+        raise refusal
+    return ratio
 
 
 def build() -> Database:

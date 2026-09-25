@@ -152,6 +152,7 @@ backend/              everything uv touches
   app/serve.py        the one-origin entrypoint: app.main plus the frontend bundle
   app/identity.py     which tenant a request is -- ships as a stub returning "default"
   app/log.py          every line the application logs, and the only importer of logging
+  app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/integration/, which is a tier
   tests/tiers.py      what a tier needs and what runs it
@@ -185,11 +186,12 @@ Each of these is something a reasonable edit undoes without anything failing unt
   a commit and `.github/workflows/ci.yml` runs the same target after a push, against a fresh
   checkout nobody configured. New checks go in the gate, never into the workflow: a workflow
   that re-lists the steps is a second copy, and the copy is the one that goes stale.
-- **The tiers are deliberately outside it** — `make test-e2e`, `make test-e2e-live` and
-  `make db-test` each need something fetched or started first, and a gate that fetches a
-  browser or a daemon is a gate people learn to commit around. They are the one tier nothing
-  will tell you that you did not run: `test-e2e` after a UI change, `db-test` after touching
-  `app/store/` or `deploy/`.
+- **The tiers are deliberately outside it** — `make test-e2e`, `make test-e2e-live`,
+  `make db-test` and `make observe-test` each need something fetched or started first, and a
+  gate that fetches a browser or a daemon is a gate people learn to commit around. They are
+  the one tier nothing will tell you that you did not run: `test-e2e` after a UI change,
+  `db-test` after touching `app/store/` or `deploy/`, `observe-test` after touching
+  `app/telemetry.py`.
 - **You have a browser. Use it.** After a UI change, run the app and look at it rather
   than inferring from the JSX. A screenshot is evidence; reading markup is a guess.
 
@@ -243,6 +245,10 @@ Each of these is something a reasonable edit undoes without anything failing unt
   `app/log.py` and `tests/log/`, and `print` outside `devtools/`. A field is a parameter
   somebody declared, so never pass a body, a path, a query string or an exception's message.
   `tests/log/test_log.py` holds a canary to that.
+- **A span attribute leaves the process only if `SPAN_ATTRIBUTES` in `app/telemetry.py` names
+  it**, and a metric attribute only if `METRIC_ATTRIBUTES` does. Never a path, a query string,
+  a header, an address, query text, a tenant or a user. `tests/telemetry/` holds a canary to
+  that.
 - **`app/wiring.py` is the only reader of the environment.** Everything below it takes its
   DSN, schema and migrate mode as arguments. Nothing degrades from Postgres to memory: a
   bad `DATABASE_URL` fails at boot.
@@ -287,6 +293,7 @@ make lint           # auto-fix and lint both halves (lint-check is the check-onl
 make test           # both halves, then the contract suite against the real backend
 make openapi        # regenerate the contract artifacts
 make db             # a Postgres to develop against; prints the DATABASE_URL to export
+make observe        # Grafana, Tempo and Prometheus locally; prints the OTEL_* to export
 make build          # production build of the frontend
 ```
 

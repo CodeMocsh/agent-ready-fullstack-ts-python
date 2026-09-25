@@ -21,10 +21,7 @@ from fastapi.testclient import TestClient
 
 from app.main import create_app
 from tests.conftest import Logged
-
-CANARY = "canary-6f1e2d-alice@example.com"
-"""A value no route has a reason to log. Sent in every place a request can carry one, and
-refused everywhere in the output."""
+from tests.doubles import CANARY
 
 SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
