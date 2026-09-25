@@ -1,8 +1,17 @@
 version: 2
 
 # This root has no package.json and no pyproject.toml, so the only thing here with a
-# version to bump is the actions the two workflows pin by commit. The second entry reaches
-# the workflow the template ships, which every generated project inherits.
+# version to bump is the actions the workflows pin by commit -- this repo's own, and the one
+# the template ships, which every generated project inherits.
+#
+# One entry, both directories, one group, so a bump lands in both trees in one pull request.
+# check_template.sh refuses an action pinned to two commits, and two pull requests would each
+# fail it until the other merged.
+#
+# The template's directory is its workflows folder and not `/template`. Dependabot reads
+# `.github/workflows` only under `/`; anywhere else it reads the YAML in the directory named,
+# and `/template` holds none. That entry failed every week and left the template four majors
+# behind this repo with nothing saying so.
 #
 # The rest of the template is out of reach and stays a person's job: its manifests are
 # `package.json.jinja` and `pyproject.toml.jinja`, which Dependabot cannot parse, and its
@@ -11,19 +20,15 @@ version: 2
 
 updates:
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /template/.github/workflows
     schedule:
       interval: weekly
       day: monday
+    groups:
+      actions:
+        patterns: ["*"]
     commit-message:
       prefix: "Bump"
     labels: ["dependencies"]
-
-  - package-ecosystem: github-actions
-    directory: /template
-    schedule:
-      interval: weekly
-      day: monday
-    commit-message:
-      prefix: "Bump"
-    labels: ["dependencies", "template"]

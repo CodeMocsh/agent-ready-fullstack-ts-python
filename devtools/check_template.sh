@@ -375,6 +375,15 @@ for workflows in "$REPO/.github/workflows" "$OUT/.github/workflows"; do
     done <"$WORK/workflow-list"
 done
 
+# One action, one commit, in both trees. A pin spelled twice goes stale in one place, and
+# the stale one is the workflow that ships: nothing here runs it, so nothing here notices.
+find "$REPO/.github/workflows" "$OUT/.github/workflows" \( -name '*.yml' -o -name '*.yaml' \) \
+    -exec grep -hoE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}' {} + \
+    | sed -E 's/uses:[[:space:]]*//; s/@/ /' | sort -u >"$WORK/action-pins"
+[ -s "$WORK/action-pins" ] || fail "found no action pinned in either tree, so there was nothing to compare."
+split="$(awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' "$WORK/action-pins" | sort | tr '\n' ' ')"
+[ -z "$split" ] || fail "pinned to more than one commit across this repo and the template: ${split% }. Move every workflow to the same commit; .github/dependabot.yml bumps both trees in one pull request."
+
 # The generated project's backend/tests/test_gate.py refuses a workflow that re-lists the
 # gate's steps instead of naming the target. This repo asserts the same of its own, because
 # a rule the template asserts and its own generator ignores is a rule nobody believes.
