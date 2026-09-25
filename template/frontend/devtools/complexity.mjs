@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertResolves, excluded, fail, section, sourceFiles } from "./gate.mjs";
+import { assertResolves, excluded, fail, nonBlankLines, section, sourceFiles } from "./gate.mjs";
 
 const DEFAULTS = {
   cap: 15,
@@ -34,16 +34,6 @@ See AGENTS.md for what to do when a threshold is crossed.`;
 
 function measurable(name) {
   return SOURCE.test(name) && !GENERATED.test(name);
-}
-
-function nonBlankLines(files) {
-  let total = 0;
-  for (const file of files) {
-    for (const line of readFileSync(file, "utf8").split("\n")) {
-      if (line.trim() !== "") total++;
-    }
-  }
-  return total;
 }
 
 function measurementConfig() {
@@ -121,7 +111,7 @@ function measure(paths, config) {
     skipped: (path) => excluded(path, config.exclude),
   });
   if (files.length === 0) fail(`no source files under ${paths.join(", ")}`);
-  const lines = nonBlankLines(files);
+  const lines = files.reduce((total, file) => total + nonBlankLines(file), 0);
   const { functions, sum } = scores(files, config.cap);
   return {
     files: files.length,

@@ -16,6 +16,12 @@ export function ordering(one, other) {
   return one.file === other.file ? one.line - other.line : one.file.localeCompare(other.file);
 }
 
+export function nonBlankLines(file) {
+  return readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.trim() !== "").length;
+}
+
 export function excluded(path, patterns) {
   return patterns.some((pattern) => {
     const prefix = pattern.replace(/\/\*\*$/, "");

@@ -218,6 +218,10 @@ Each of these is something a reasonable edit undoes without anything failing unt
   `TaskList`. The file name is how anything finds a component without reading it.
 - **Export a function, not an arrow.** `export function load()`, never
   `export const load = () => …` — a declaration names itself; an assignment does not.
+- **A file holds no more non-blank lines than `complexity.maxFileLines`**, JSX included, and
+  `pnpm file-length` refuses one past it. Split by what the parts require of a caller. A
+  file that must stay whole goes in `complexity.overCap` by name; biome's own file-length
+  rule cannot see JSX and is not the gate.
 - Use the `@/` alias for anything under `src/`. TypeScript is `strict`, plus
   `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
 - **There is no `.env.production`, on purpose.** Production mode loads no env file, so mock
