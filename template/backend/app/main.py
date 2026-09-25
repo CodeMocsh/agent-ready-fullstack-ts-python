@@ -1,24 +1,14 @@
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app import log
 from app.identity import Unauthenticated, resolved_without_a_credential
 from app.models import ErrorBody
 from app.routes import public_router, router
-from app.wiring import ACKNOWLEDGED_ENV, build, unauthenticated_is_acknowledged
-
-_LOG = logging.getLogger("uvicorn.error")
-"""The logger the server has already configured.
-
-`getLogger(__name__)` is the obvious choice and it is the wrong one: uvicorn configures its
-own loggers and leaves the root logger untouched, so an `INFO` record from `app.main`
-propagates to a root that has no handler and is silently dropped. Verified by running both.
-Falling back is harmless under another server -- an unconfigured logger is exactly as quiet as
-the one this replaces.
-"""
+from app.wiring import build, unauthenticated_is_acknowledged
 
 
 @asynccontextmanager
@@ -32,7 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     database = build()
     version = await database.check()
-    _LOG.info("serving on the %s substrate, schema %s", database.name, version)
+    log.serving(database.name, version)
     await _say_what_this_deployment_authenticates(database.name)
     app.state.database = database
     try:
@@ -49,32 +39,20 @@ async def _say_what_this_deployment_authenticates(substrate: str) -> None:
     """
     tenant = await resolved_without_a_credential()
     if tenant is None:
-        _LOG.info("identity: a credential is verified on every request")
-        return
-    if unauthenticated_is_acknowledged():
-        _LOG.info(
-            "identity: none, and %s says that is deliberate -- every request is served as "
-            "tenant %r",
-            ACKNOWLEDGED_ENV,
-            tenant,
-        )
-        return
-    _LOG.warning(
-        "identity: this deployment authenticates nothing. A request carrying no credential "
-        "resolved to tenant %r, so anyone who can reach this process can read and write "
-        "everything it holds on the %s substrate. Replace tenant_for() in app/identity.py -- "
-        "or set %s=1 to record that serving everybody is deliberate and see this as INFO.",
-        tenant,
-        substrate,
-        ACKNOWLEDGED_ENV,
-    )
+        log.identity_verified()
+    elif unauthenticated_is_acknowledged():
+        log.identity_open_on_purpose(tenant)
+    else:
+        log.identity_open(tenant, substrate)
 
 
 def create_app() -> FastAPI:
     """The app, assembled. A function so a test can hold two with different substrates.
 
-    `docs/adr/0007` holds the settings below and why each one is off.
+    `docs/adr/0007` holds the settings below and why each one is off. Building one configures
+    the logging of the whole process: see `app.log.configure`.
     """
+    log.configure()
     app = FastAPI(
         title="Tasks API",
         version="0.1.0",
@@ -85,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(public_router)
     app.include_router(router)
     app.add_exception_handler(Unauthenticated, _refuse)
+    log.instrument(app)
     return app
 
 

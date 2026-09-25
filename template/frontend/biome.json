@@ -76,6 +76,14 @@
                 "skipBlankLines": true
               }
             }
+          },
+          "suspicious": {
+            "noConsole": {
+              "level": "error",
+              "options": {
+                "allow": []
+              }
+            }
           }
         }
       }

@@ -57,7 +57,7 @@ def generated_by_fastapi(app: FastAPI) -> frozenset[str]:
     return frozenset(one for one in named if one)
 
 
-PUBLIC_ROUTES: tuple[tuple[str, str], ...] = (("GET", "/health"),)
+PUBLIC_ROUTES: tuple[tuple[str, str], ...] = (("GET", "/health"), ("POST", "/client-events"))
 """Every route allowed to answer without resolving a tenant, spelled exactly.
 
 Exact pairs and never a prefix. A prefix would hand the exemption to every future route that

@@ -37,6 +37,23 @@ that is not the application. `make migrate` is it.
 _Avoid_: auto-migrate, startup migration, boot migration — the application does none of these,
 by design.
 
+## Logs
+
+**Log line**:
+One JSON object on stdout. Each one the application writes is a function in `app/log.py`, and
+its parameters are the only fields it may carry.
+_Avoid_: log message (the `message` is one field of a line), log entry, event.
+
+**Client event**:
+A failure the browser saw, sent to `POST /client-events` and written to the log as a log line
+whose `source` is `client`. Named, never described: a kind, a route template, an error class.
+_Avoid_: telemetry, beacon, crash report.
+
+**Request id**:
+The `X-Request-ID` a response carries and every log line written while serving it. A client
+may send one that is a uuid; anything else is replaced.
+_Avoid_: correlation id, trace id (a trace id is OpenTelemetry's, and a different thing).
+
 ## Renaming `tenant_id`
 
 Almost no product's users say "tenant"; they say org, workspace, team or account. If yours

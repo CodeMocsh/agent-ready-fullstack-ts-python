@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { API_BASE_URL } from "@/api/base";
-import { tasksApi } from "@/api/client";
+import { clientEventsApi, tasksApi } from "@/api/client";
 
 const againstLiveBackend = process.env.CONTRACT_TARGET === "live";
 
@@ -54,5 +54,37 @@ describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers
       "Task not found",
     );
     await expect(tasksApi.remove("does-not-exist")).rejects.toThrow("Task not found");
+  });
+});
+
+const DECLARED = {
+  kind: "uncaught",
+  route: "/",
+  error: "TypeError",
+  status: null,
+  request_id: null,
+};
+
+function postClientEvent(event: Record<string, unknown>): Promise<Response> {
+  return fetch(`${API_BASE_URL}/client-events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ events: [event] }),
+  });
+}
+
+describe(`client events contract (${againstLiveBackend ? "live backend" : "mock handlers"})`, () => {
+  it("accepts a client event with no body in return", async () => {
+    await expect(
+      clientEventsApi.record({ events: [{ ...DECLARED, kind: "uncaught" }] }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses a client event that carries free text", async () => {
+    expect((await postClientEvent({ ...DECLARED, error: "a sentence" })).status).toBe(422);
+  });
+
+  it("refuses a client event with a field nobody declared", async () => {
+    expect((await postClientEvent({ ...DECLARED, message: "anything" })).status).toBe(422);
   });
 });

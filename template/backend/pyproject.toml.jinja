@@ -46,11 +46,16 @@ requires-python = ">=3.12"
 # both substrates, and a substrate you cannot import is a substrate nobody checks. It is
 # imported lazily (app/store/pg.py), so a project that never sets DATABASE_URL never opens
 # a connection, and one that deletes this line still starts on the in-memory substrate.
+#
+# structlog and asgi-correlation-id are the log: one JSON line per record and an id per
+# request. Neither writes any part of the contract. docs/adr/0009 says why these two.
 dependencies = [
     "fastapi>=0.140.0,<0.142.0",
     "uvicorn[standard]>=0.38.0,<0.53.0",
     "pydantic>=2.12.0,<2.14.0",
     "asyncpg>=0.30.0,<0.32.0",
+    "structlog>=26.1.0,<27",
+    "asgi-correlation-id>=5.0.1,<6",
 ]
 
 # There is deliberately no [build-system] table and no [project.scripts]. This half
@@ -99,7 +104,7 @@ line-length = 100
 # logger directly, and the module-level handle every real project uses is invisible to it.
 # The TRY and LOG rules below would then pass on the one file that actually logs -- a green
 # check that inspected nothing. Name the handle here whenever you add one.
-logger-objects = ["app.main._LOG"]
+logger-objects = ["app.log._LOG"]
 
 select = [
     "E", # https://docs.astral.sh/ruff/rules/#error-e
@@ -134,6 +139,12 @@ select = [
     # is per-file-ignores below, which is a line somebody reviews rather than a decision
     # taken silently at the point of pain.
     "BLE", # https://docs.astral.sh/ruff/rules/#flake8-blind-except-ble
+    # Every line the application logs is declared in app/log.py, which is what keeps a
+    # request's values out of the log: a field is a parameter somebody wrote down there.
+    # The banned imports below are that rule mechanised.
+    "TID251", # https://docs.astral.sh/ruff/rules/banned-api/
+    # A print is a line on stdout that is not JSON, which breaks every log agent reading it.
+    "T20", # https://docs.astral.sh/ruff/rules/#flake8-print-t20
 ]
 ignore = [
     "E501", # https://docs.astral.sh/ruff/rules/line-too-long/
@@ -152,6 +163,15 @@ ignore = [
 # replacement resolver might raise, which is not knowable from here.
 [tool.ruff.lint.per-file-ignores]
 "app/identity.py" = ["BLE001"]
+# The one module that writes the log, and the tests that read it.
+"app/log.py" = ["TID251"]
+"tests/log/**" = ["TID251"]
+# The devtools are command-line scripts, and stdout is where they answer.
+"devtools/**" = ["T20"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"logging".msg = "Log through a function in app/log.py, which declares every field a line can carry."
+"structlog".msg = "Log through a function in app/log.py, which declares every field a line can carry."
 
 [tool.ruff.lint.mccabe]
 # The per-function hard gate. Measured across httpx and flask, p95 complexity is

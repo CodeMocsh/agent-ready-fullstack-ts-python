@@ -5,6 +5,38 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/client-events": {
+      "post": {
+        "summary": "Record Client Events",
+        "description": "Failures the browser saw, written to this process's log. Public, and so untrusted:\n`ClientEvent` takes no free text. `docs/adr/0009`.",
+        "operationId": "record_client_events_client_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientEvents"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tasks": {
       "get": {
         "summary": "List Tasks",
@@ -165,6 +197,94 @@
   },
   "components": {
     "schemas": {
+      "ClientEvent": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "uncaught",
+              "caught",
+              "query",
+              "mutation"
+            ],
+            "title": "Kind"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200,
+                "pattern": "^[A-Za-z0-9_$./-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route"
+          },
+          "error": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+            "title": "Error"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 599.0,
+                "minimum": 100.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "route",
+          "error",
+          "status",
+          "request_id"
+        ],
+        "title": "ClientEvent",
+        "description": "One failure the browser saw, named rather than described. No field takes free text:\nthe route is the router's template and the error is its class name."
+      },
+      "ClientEvents": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ClientEvent"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Events"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "ClientEvents"
+      },
       "CreateTaskBody": {
         "properties": {
           "title": {
