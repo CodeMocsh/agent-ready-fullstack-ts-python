@@ -670,6 +670,10 @@ need_grep '^SHELL := /bin/bash' Makefile
 need .github/workflows/ci.yml
 need_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
+# And a second job runs the Postgres tier, because a laptop with no Docker never does. Read
+# with comments stripped: the header names the target while explaining it.
+sed 's/#.*//' .github/workflows/ci.yml | grep -q 'make db-test' \
+    || fail "ci.yml no longer runs 'make db-test' outside a comment, so tenant isolation is checked against a real Postgres nowhere after a push."
 
 # test_gate.py decides what runs by reading files as text, and a text check can be
 # satisfied by a string that means nothing: `"e2e" in playwright.config.ts` was true of a
