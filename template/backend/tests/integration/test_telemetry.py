@@ -1,5 +1,5 @@
-"""The database spans a real Postgres produces: named by operation, with no query text and no
-value that was sent."""
+"""What a real Postgres produces: database spans named by operation, with no query text and no
+value that was sent, and the pool's connections as metrics."""
 
 import json
 
@@ -43,3 +43,36 @@ def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
     assert CANARY not in json.dumps(
         [(one.name, dict(one.attributes or {})) for one in spans.get_finished_spans()]
     )
+
+
+def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
+    monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
+    app = create_app()
+    metrics = InMemoryMetricReader()
+    app.state.instruments = telemetry.instrument(
+        app, telemetry_settings(), InMemorySpanExporter(), metrics
+    )
+
+    with TestClient(app) as client:
+        client.get("/tasks")
+        collected = metrics.get_metrics_data()
+
+    assert collected is not None
+    points = [
+        (metric.name, dict(point.attributes or {}), getattr(point, "value", None))
+        for resource in collected.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+        for point in metric.data.data_points
+        if metric.name.startswith("db.client.connection.")
+    ]
+    by_state = {
+        attributes["db.client.connection.state"]: value
+        for name, attributes, value in points
+        if name == "db.client.connection.count"
+    }
+    assert by_state == {"used": 0, "idle": 1}
+    assert ("db.client.connection.max", {}, 10) in points

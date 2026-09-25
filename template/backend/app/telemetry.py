@@ -2,8 +2,10 @@
 
 Nothing here runs unless `wiring.build_telemetry` returns settings. When it does, every request
 is a server span named by its route template, every query a database span, and every request
-adds to `http.server.request.duration`; `/health` and `/ready` are left out. This module
-instruments and `app.log` reads the current span; ruff refuses `opentelemetry` anywhere else.
+adds to `http.server.request.duration`; `/health` and `/ready` are left out. A pooled substrate
+reports its connections as `db.client.connection.count`, by state, and as
+`db.client.connection.max`. This module instruments and `app.log` reads the current span; ruff
+refuses `opentelemetry` anywhere else.
 
 **What leaves the process is declared here.** A span keeps only the attributes in
 `SPAN_ATTRIBUTES`, its status code, none of its events and no caller's `tracestate`; a
@@ -14,7 +16,7 @@ trace. `docs/adr/0010` holds the reasoning.
 """
 
 import os
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final, final, override
 
@@ -25,6 +27,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExp
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.textmap import (
     CarrierT,
@@ -45,6 +48,7 @@ from opentelemetry.trace import Link, SpanContext, Status, TraceState
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from app import log
+from app.store import Database, Pooled
 from app.wiring import SEMCONV_ENV, STABLE_SEMCONV, TelemetrySettings
 
 SPAN_ATTRIBUTES: Final = frozenset(
@@ -65,7 +69,13 @@ SPAN_ATTRIBUTES: Final = frozenset(
 address, a user agent or query text."""
 
 METRIC_ATTRIBUTES: Final = frozenset(
-    {"http.request.method", "http.route", "http.response.status_code", "error.type"}
+    {
+        "http.request.method",
+        "http.route",
+        "http.response.status_code",
+        "error.type",
+        "db.client.connection.state",
+    }
 )
 """The metric attributes that may leave the process. Never a tenant or a user."""
 
@@ -82,6 +92,30 @@ class Instruments:
     tracer_provider: TracerProvider
     meter_provider: MeterProvider
     semconv_before: str | None
+
+    def observe(self, database: Database) -> None:
+        """Report the connections of `database` at every collection. A substrate with no pool
+        has no connections to count, and is not observed."""
+        if not isinstance(database, Pooled):
+            return
+
+        def count(_options: CallbackOptions) -> Iterable[Observation]:
+            now = database.connections()
+            return [
+                Observation(now.used, {"db.client.connection.state": "used"}),
+                Observation(now.idle, {"db.client.connection.state": "idle"}),
+            ]
+
+        def limit(_options: CallbackOptions) -> Iterable[Observation]:
+            return [Observation(database.connections().limit)]
+
+        meter = self.meter_provider.get_meter(__name__)
+        meter.create_observable_up_down_counter(
+            "db.client.connection.count", callbacks=[count], unit="{connection}"
+        )
+        meter.create_observable_up_down_counter(
+            "db.client.connection.max", callbacks=[limit], unit="{connection}"
+        )
 
     def shutdown(self) -> None:
         """Flush and stop both providers, take the instrumentation off asyncpg, and put back

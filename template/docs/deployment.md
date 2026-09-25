@@ -65,6 +65,23 @@ any instance of the *previous* version that restarts will not come back up. Alre
 instances are fine. If that window matters, make the migration and the rollout one step — scale
 down, migrate, scale up — and plan a rollback as a schema rollback.
 
+## Timeouts
+
+Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets each one:
+
+- **A statement** that runs too long is cancelled by Postgres, which raises `QueryCanceledError`.
+- **A server that does not answer** at all makes asyncpg raise `TimeoutError`.
+- **A transaction left open** with nothing sent is ended by Postgres. The pool replaces the
+  connection.
+- **A request that finds every connection in use** waits, then raises `PoolExhausted`.
+
+Each one answers `500` and writes its traceback to the log. Your platform's request timeout does
+not replace them. It closes the client's connection and leaves the handler running with a
+connection in hand, so a database that stops answering fills the pool.
+
+To change a bound, pass a different `Timeouts` to `PostgresDatabase` in `app/wiring.py`. It
+applies to every route.
+
 ## Logs
 
 The backend writes one JSON object per line to stdout, and nothing else. Every cloud's container
@@ -139,7 +156,10 @@ request -- is tail sampling, which also lives in the Collector.
 
 **What to watch.** Availability is non-5xx over all requests; latency is the share of requests
 under a threshold at p95 or p99. Both come from `http.server.request.duration`, which each
-backend spells its own way (`http_server_request_duration_seconds` in Prometheus). Alert on
+backend spells its own way (`http_server_request_duration_seconds` in Prometheus). On Postgres,
+`db.client.connection.count` reports the pool's connections by state (`used`, `idle`), and
+`db.client.connection.max` reports the most it will open. Used near the maximum means requests
+are waiting for a connection, and `PoolExhausted` in the log follows. Alert on
 burn rate rather than on thresholds: for a 99.9% target, page at 14.4 times the budget over an
 hour and five minutes, page at 6 times over six hours and thirty minutes, and open a ticket at
 once over three days and six hours.
