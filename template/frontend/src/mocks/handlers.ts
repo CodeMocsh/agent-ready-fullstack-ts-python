@@ -1,26 +1,10 @@
 import { createOpenApiHttp } from "openapi-msw";
 import { API_BASE_URL } from "@/api/base";
 import type { paths } from "@/api/schema";
-import type { ClientEvents } from "@/api/types";
+import { acceptsClientEvents } from "@/mocks/client-events";
 import { taskStore } from "@/mocks/store";
 
 const http = createOpenApiHttp<paths>({ baseUrl: API_BASE_URL });
-
-const CLIENT_EVENT_FIELDS = new Set(["kind", "route", "error", "status", "request_id"]);
-const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
-const MAX_CLIENT_EVENTS = 20;
-
-function refusesClientEvents(body: ClientEvents): boolean {
-  return (
-    body.events.length === 0 ||
-    body.events.length > MAX_CLIENT_EVENTS ||
-    body.events.some(
-      (event) =>
-        Object.keys(event).some((field) => !CLIENT_EVENT_FIELDS.has(field)) ||
-        !ERROR_NAME.test(event.error),
-    )
-  );
-}
 
 export const handlers = [
   http.get("/tasks", ({ response }) => response(200).json(taskStore.list())),
@@ -39,11 +23,9 @@ export const handlers = [
   }),
 
   http.post("/client-events", async ({ request, response }) =>
-    refusesClientEvents(await request.json())
-      ? response(422).json({
-          detail: [{ loc: ["body", "events"], msg: "refused", type: "value_error" }],
-        })
-      : response(204).empty(),
+    acceptsClientEvents(await request.json())
+      ? response(204).empty()
+      : response(422).json({ detail: [{ loc: ["body"], msg: "refused", type: "value_error" }] }),
   ),
 
   http.delete("/tasks/{id}", ({ params, response }) =>

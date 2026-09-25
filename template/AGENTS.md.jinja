@@ -239,9 +239,10 @@ Each of these is something a reasonable edit undoes without anything failing unt
 
 **Backend**
 
-- **Log through a function in `app/log.py`.** ruff refuses `logging`, `structlog` and `print`
-  everywhere else in the backend but its tests and devtools. A field is a parameter somebody declared, so never pass a body, a path, a
-  query string or an exception's message. `tests/log/test_log.py` holds a canary to that.
+- **Log through a function in `app/log.py`.** ruff refuses `logging` and `structlog` outside
+  `app/log.py` and `tests/log/`, and `print` outside `devtools/`. A field is a parameter
+  somebody declared, so never pass a body, a path, a query string or an exception's message.
+  `tests/log/test_log.py` holds a canary to that.
 - **`app/wiring.py` is the only reader of the environment.** Everything below it takes its
   DSN, schema and migrate mode as arguments. Nothing degrades from Postgres to memory: a
   bad `DATABASE_URL` fails at boot.

@@ -69,8 +69,10 @@ down, migrate, scale up — and plan a rollback as a schema rollback.
 
 The backend writes one JSON object per line to stdout, and nothing else. Every cloud's container
 runtime collects stdout with no agent and no SDK, so there is nothing to configure in the
-application. [adr/0009](adr/0009-every-log-line-is-declared-and-written-as-json-to-stdout.md)
-says why each field is named the way it is.
+application. The names are the ones Cloud Logging reads as they are, and the HTTP fields follow
+the OpenTelemetry semantic conventions.
+[adr/0009](adr/0009-every-log-line-is-declared-and-written-as-json-to-stdout.md) says why every
+line is declared.
 
 | Field | What it holds |
 |---|---|
