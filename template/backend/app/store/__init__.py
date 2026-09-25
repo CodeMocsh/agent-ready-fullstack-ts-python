@@ -23,6 +23,7 @@ in-memory substrate and every hermetic test run without one. Reach for it as
 is the only module that does.
 """
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from app.models import CreateTaskBody, Task, UpdateTaskBody
@@ -54,6 +55,24 @@ class TaskStore(Protocol):
     async def update(self, id: str, body: UpdateTaskBody) -> Task | None: ...
 
     async def remove(self, id: str) -> bool: ...
+
+
+@dataclass(frozen=True)
+class Connections:
+    """A pool's connections at one moment: lent to a request, waiting in the pool, and the most
+    it will open. `pool` names the pool, and is never an address or a credential."""
+
+    pool: str
+    used: int
+    idle: int
+    max_size: int
+
+
+@runtime_checkable
+class Pooled(Protocol):
+    """A substrate that holds a pool, and so has connections to count."""
+
+    def connections(self) -> Connections: ...
 
 
 @runtime_checkable

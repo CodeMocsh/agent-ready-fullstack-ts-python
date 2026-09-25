@@ -13,6 +13,11 @@ that made it, and the next request handed that pooled connection inherits it —
 reading another's rows, with nothing in any log to say so. `set_config(..., true)` is the
 local form and every statement below runs inside a transaction that has issued it.
 
+**Every wait has a bound.** A statement, an answer, a transaction left idle, and a wait for a
+connection each raise once `Timeouts` says so. `docs/deployment.md` says why a platform's
+request timeout is not one of them. The bounds on the statement and the idle transaction are
+startup parameters, for the reason the search path is one.
+
 **No environment variable is read here.** The DSN and the schema are constructor arguments and
 `wiring.py` is the only reader, which is what lets one process hold two of these at once —
 what the contract suite does.
@@ -21,11 +26,12 @@ what the contract suite does.
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Final
 from uuid import UUID, uuid4
 
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import TaskStore, TenantUnset
+from app.store import Connections, TaskStore, TenantUnset
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
 from app.store.migrate import check, schema_version
@@ -35,6 +41,47 @@ _LIST = "SELECT id, title, done FROM tasks ORDER BY seq"
 _CREATE = "INSERT INTO tasks (id, tenant_id, title) VALUES ($1, $2, $3) RETURNING id, title, done"
 _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
+
+
+_SMALLEST: Final = 0.001
+
+
+@dataclass(frozen=True)
+class Timeouts:
+    """How long each wait may last, in seconds, before it raises. Each is at least a
+    millisecond, because Postgres reads a bound of zero as no bound at all."""
+
+    statement: float = 5.0
+    """Postgres cancels a statement that runs longer, and asyncpg raises `QueryCanceledError`."""
+
+    idle_in_transaction: float = 10.0
+    """Postgres ends a session that holds a transaction open and sends nothing. Its locks go
+    with it."""
+
+    acquire: float = 5.0
+    """A request that finds every connection in use waits this long, then `AcquireTimedOut`."""
+
+    def __post_init__(self) -> None:
+        if min(self.statement, self.idle_in_transaction, self.acquire) < _SMALLEST:
+            raise ValueError(f"{self} holds a bound under a millisecond, which Postgres ignores")
+
+    @property
+    def answer(self) -> float:
+        """How long asyncpg waits for any answer before it raises `TimeoutError`. A second
+        longer than `statement`, so Postgres reports a slow statement first."""
+        return self.statement + 1.0
+
+
+TIMEOUTS: Final = Timeouts()
+
+
+class AcquireTimedOut(TimeoutError):
+    """No connection came to a request within `Timeouts.acquire`: every one stayed in use, or a
+    new one did not open in time."""
+
+
+def _milliseconds(seconds: float) -> str:
+    return str(round(seconds * 1000))
 
 
 def _driver() -> Any:
@@ -83,8 +130,7 @@ class PostgresTaskStore:
 
     @asynccontextmanager
     async def _scoped(self) -> AsyncGenerator[Any]:
-        pool = await self._database.pool()
-        async with pool.acquire() as conn, conn.transaction():
+        async with self._database.connection() as conn, conn.transaction():
             await conn.execute(_SET_TENANT, TENANT_GUC, self._tenant_id)
             yield conn
 
@@ -124,11 +170,13 @@ class PostgresDatabase:
         schema: str | None = None,
         min_size: int = 1,
         max_size: int = 10,
+        timeouts: Timeouts = TIMEOUTS,
     ) -> None:
         self._dsn: str = dsn
         self._schema: str = resolve_schema(schema)
         self._min_size: int = min_size
         self._max_size: int = max_size
+        self._timeouts: Timeouts = timeouts
         self._pool: Any = None
         self._opening: asyncio.Lock = asyncio.Lock()
 
@@ -147,9 +195,44 @@ class PostgresDatabase:
                         dsn=self._dsn,
                         min_size=self._min_size,
                         max_size=self._max_size,
-                        server_settings={"search_path": self._schema},
+                        command_timeout=self._timeouts.answer,
+                        server_settings={
+                            "search_path": self._schema,
+                            "statement_timeout": _milliseconds(self._timeouts.statement),
+                            "idle_in_transaction_session_timeout": _milliseconds(
+                                self._timeouts.idle_in_transaction
+                            ),
+                        },
                     )
         return self._pool
+
+    @asynccontextmanager
+    async def connection(self) -> AsyncGenerator[Any]:
+        """A connection from the pool, returned to it on exit. Raises `AcquireTimedOut` when none
+        comes within `Timeouts.acquire`."""
+        pool = await self.pool()
+        try:
+            conn = await pool.acquire(timeout=self._timeouts.acquire)
+        except TimeoutError as waited:
+            raise AcquireTimedOut(
+                f"no connection within {self._timeouts.acquire}s: all {self._max_size} stayed "
+                f"in use, or a new one did not open in time"
+            ) from waited
+        try:
+            yield conn
+        finally:
+            await pool.release(conn)
+
+    def connections(self) -> Connections:
+        """The pool's connections now. Before the pool opens and after it closes, none. Safe to
+        call from another thread, as a metric reader does."""
+        pool = self._pool
+        if pool is None:
+            return Connections(pool=self._schema, used=0, idle=0, max_size=self._max_size)
+        idle = pool.get_idle_size()
+        return Connections(
+            pool=self._schema, used=pool.get_size() - idle, idle=idle, max_size=self._max_size
+        )
 
     def store(self, tenant_id: str) -> TaskStore:
         if tenant_id.strip() == "":
@@ -160,13 +243,11 @@ class PostgresDatabase:
         return PostgresTaskStore(self, tenant_id)
 
     async def check(self) -> str:
-        pool = await self.pool()
-        async with pool.acquire() as conn:
+        async with self.connection() as conn:
             return await check(conn, self._schema)
 
     async def schema_version(self) -> str | None:
-        pool = await self.pool()
-        async with pool.acquire() as conn:
+        async with self.connection() as conn:
             return await schema_version(conn, self._schema)
 
     async def close(self) -> None:

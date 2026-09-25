@@ -26,6 +26,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     log.serving(database.name, version)
     await _say_what_this_deployment_authenticates(database.name)
     app.state.database = database
+    if app.state.instruments is not None:
+        app.state.instruments.observe(database)
     try:
         yield
     finally:
