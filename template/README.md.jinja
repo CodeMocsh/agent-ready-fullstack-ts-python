@@ -66,8 +66,8 @@ make upgrade        # update dependencies, then regenerate the contract
 `.github/workflows/ci.yml` runs after a push — one target, two moments, so a commit that
 skipped the hook is still checked. It needs no browser, no database daemon and no second
 terminal. The opt-in targets each need one
-of those, which is why they are opt-in — and why nothing will tell you that you did not run
-them.
+of those, which is why they are opt-in. `ci.yml` also runs `make db-test` in a job of its own;
+nothing runs the others, so nothing will tell you that you did not run them.
 
 [AGENTS.md](AGENTS.md) is the map: the principles, the layout, the rules that bite, and an
 index into [docs/installation.md](docs/installation.md) for prerequisites,

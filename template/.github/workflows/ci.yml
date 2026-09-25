@@ -12,11 +12,13 @@ name: CI
 # need nothing fetched or started. Add a tier to that job and the check people wait on stops
 # being the check they can run.
 #
-# `make db-test` is a second job beside it. It needs only Docker, which the runner has, and
-# it is the one place tenant isolation is checked against a real Postgres. It adds a status
-# of its own rather than time to the gate, and a laptop with no Docker never runs it -- so
-# without this job nothing does. The browser tiers stay out: `make test-e2e` fetches a
-# browser, and the live one needs `make dev` running beside it.
+# A second job runs `make db-test`. That tier needs only Docker, which the runner has, and
+# it is the one place tenant isolation is checked against a real Postgres. The job adds a
+# status of its own rather than time to the gate, and a laptop with no Docker never runs the
+# tier -- so without this job nothing does. The browser tiers stay out: `make test-e2e`
+# fetches a browser, and the live one needs `make dev` running beside it. So does
+# `make observe-test`: it checks the viewer `make observe` starts on a laptop, which no
+# deployment runs.
 
 on:
   push:
@@ -73,6 +75,8 @@ jobs:
 
   db:
     runs-on: ubuntu-latest
+    # A container that never comes up leaves the recipe waiting. This is where it stops.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

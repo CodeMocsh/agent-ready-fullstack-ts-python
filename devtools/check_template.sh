@@ -994,6 +994,7 @@ need_grep 'service_completed_successfully' deploy/compose.yaml
 # Over TCP, not the socket: the entrypoint runs init against a temporary server that answers
 # on the unix socket only, so a socket probe reports healthy while init is still running.
 need_grep 'pg_isready -h 127.0.0.1' deploy/compose.yaml
+need_no_grep 'pg_isready -q' Makefile
 need backend/devtools/schema.py
 need_grep 'CREATE TABLE IF NOT EXISTS tasks' deploy/schema.sql
 need_grep 'applied_once' deploy/schema.sql
