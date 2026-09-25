@@ -49,6 +49,10 @@ requires-python = ">=3.12"
 #
 # structlog and asgi-correlation-id are the log: one JSON line per record and an id per
 # request. Neither writes any part of the contract. docs/adr/0009 says why these two.
+#
+# The opentelemetry packages are traces and metrics, installed everywhere and switched on only
+# by OTEL_EXPORTER_OTLP_ENDPOINT (docs/adr/0010). The instrumentations are still 0.x betas
+# released in lockstep with the SDK, so both are capped at the next minor and move together.
 dependencies = [
     "fastapi>=0.140.0,<0.142.0",
     "uvicorn[standard]>=0.38.0,<0.53.0",
@@ -56,6 +60,11 @@ dependencies = [
     "asyncpg>=0.30.0,<0.32.0",
     "structlog>=26.1.0,<27",
     "asgi-correlation-id>=5.0.1,<6",
+    "opentelemetry-api>=1.44.0,<1.45",
+    "opentelemetry-sdk>=1.44.0,<1.45",
+    "opentelemetry-exporter-otlp-proto-http>=1.44.0,<1.45",
+    "opentelemetry-instrumentation-fastapi>=0.65b0,<0.66",
+    "opentelemetry-instrumentation-asyncpg>=0.65b0,<0.66",
 ]
 
 # There is deliberately no [build-system] table and no [project.scripts]. This half
@@ -166,12 +175,17 @@ ignore = [
 # The one module that writes the log, and the tests that read it.
 "app/log.py" = ["TID251"]
 "tests/log/**" = ["TID251"]
+# The one module that instruments the app, and the tests that read what it exports.
+"app/telemetry.py" = ["TID251"]
+"tests/telemetry/test_telemetry.py" = ["TID251"]
+"tests/integration/test_telemetry.py" = ["TID251"]
 # The devtools are command-line scripts, and stdout is where they answer.
 "devtools/**" = ["T20"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "logging".msg = "Log through a function in app/log.py, which declares every field a line can carry."
 "structlog".msg = "Log through a function in app/log.py, which declares every field a line can carry."
+"opentelemetry".msg = "Instrument in app/telemetry.py, which declares every attribute a span or metric can carry."
 
 [tool.ruff.lint.mccabe]
 # The per-function hard gate. Measured across httpx and flask, p95 complexity is

@@ -54,6 +54,21 @@ The `X-Request-ID` a response carries and every log line written while serving i
 may send one that is a uuid; anything else is replaced.
 _Avoid_: correlation id, trace id (a trace id is OpenTelemetry's, and a different thing).
 
+**Span attribute**:
+A field on a span. Only the ones in `SPAN_ATTRIBUTES` in `app/telemetry.py` leave the process;
+the rest are dropped and named once in the log.
+_Avoid_: tag, label (a label is a metric's).
+
+**Collector**:
+The OpenTelemetry Collector the deployment runs beside the application. It receives OTLP and
+decides where traces and metrics go; the application never names a destination.
+_Avoid_: agent, exporter (an exporter is one of the Collector's parts), sink.
+
+**Trace id**:
+OpenTelemetry's id for one trace, on every span and on every log line written inside one. It
+crosses services; a request id does not.
+_Avoid_: correlation id.
+
 ## Renaming `tenant_id`
 
 Almost no product's users say "tenant"; they say org, workspace, team or account. If yours

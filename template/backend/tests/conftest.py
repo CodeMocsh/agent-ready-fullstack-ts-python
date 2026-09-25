@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from app.wiring import NEEDS_THE_ENDPOINT, NOT_READ, OTLP_ENDPOINT_ENV
 from tests.tiers import python_tiers
 
 
@@ -36,6 +37,14 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
+
+
+@pytest.fixture(autouse=True)
+def no_collector(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test inherits a Collector from the shell -- `make observe` prints exports that would
+    otherwise instrument every app the suite builds."""
+    for name in (OTLP_ENDPOINT_ENV, "OTEL_EXPORTER_OTLP_PROTOCOL", *NEEDS_THE_ENDPOINT, *NOT_READ):
+        monkeypatch.delenv(name, raising=False)
 
 
 Logged = Callable[[], list[dict[str, Any]]]

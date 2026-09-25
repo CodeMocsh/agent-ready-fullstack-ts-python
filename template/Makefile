@@ -22,7 +22,7 @@ export UV_EXCLUDE_NEWER
 
 .PHONY: default install hooks pre-commit lint lint-check test test-fast test-contract \
         test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
-        dev dev-frontend \
+        dev dev-frontend observe \
         dev-backend openapi \
         openapi-check build upgrade clean
 
@@ -165,6 +165,8 @@ COMPOSE = deploy/compose.yaml
 DB_PORT ?= 5433
 DB_SUPERUSER_PASSWORD ?= postgres
 APP_DB_PASSWORD ?= app
+OBSERVE_PORT ?= 3000
+OTLP_PORT ?= 4318
 
 # compose reads these from its *environment*, and a make variable is not one: a
 # `make db DB_PORT=5544` that reached only the migration would start the database on 5433 and
@@ -172,6 +174,8 @@ APP_DB_PASSWORD ?= app
 # on the recipe line, because a prefix goes through the shell and a password containing a
 # quote or a space would end the command rather than be passed to it.
 export DB_PORT
+export OBSERVE_PORT
+export OTLP_PORT
 export APP_DB_PASSWORD
 export POSTGRES_PASSWORD = $(DB_SUPERUSER_PASSWORD)
 
@@ -186,6 +190,15 @@ db:
 	@echo "export DATABASE_URL=postgres://app_app:$(APP_DB_PASSWORD)@localhost:$(DB_PORT)/postgres"
 	@echo "# then: make dev-backend. That role holds DML and no CREATE, so the app verifies"
 	@echo "# the schema and cannot apply it -- run 'make migrate' when you add an entry."
+
+# Traces and metrics, made visible. Starts the viewer and says what to export; the app sends
+# nothing until OTEL_EXPORTER_OTLP_ENDPOINT is set, and refuses to start with only half of it.
+observe:
+	docker compose -f $(COMPOSE) --profile observe up -d --wait observe
+	@echo ""
+	@echo "export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:$(OTLP_PORT) OTEL_SERVICE_NAME=api"
+	@echo "# then: make dev. Grafana is on http://localhost:$(OBSERVE_PORT) -- Explore, then Tempo"
+	@echo "# for traces and Prometheus for http_server_request_duration_seconds."
 
 # Isolation, made visible. Everything else about it is proved by tests nobody watches.
 db-demo:
