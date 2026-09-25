@@ -2,9 +2,10 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
+from app import log
 from app.deps import StoreDep
 from app.identity import tenant_for
-from app.models import CreateTaskBody, ErrorBody, Task, UpdateTaskBody
+from app.models import ClientEvents, CreateTaskBody, ErrorBody, Task, UpdateTaskBody
 
 router = APIRouter(dependencies=[Depends(tenant_for)])
 """Every route that reads or writes what belongs to a tenant.
@@ -18,7 +19,7 @@ is not the obvious arrangement, and `tests/routes/test_guarantee.py` is what hol
 public_router = APIRouter()
 """The routes that may answer without resolving a tenant.
 
-One today, and which ones is named in `tests/routes/test_guarantee.py` rather than marked here.
+Which ones is named in `tests/routes/test_guarantee.py` rather than marked here.
 `docs/adr/0008` says why an exemption is a list and never a decorator.
 """
 
@@ -32,6 +33,15 @@ async def health() -> dict[str, str]:
     describes the API rather than the infrastructure around it.
     """
     return {"status": "ok"}
+
+
+@public_router.post("/client-events", status_code=204)
+async def record_client_events(body: ClientEvents) -> Response:
+    """Failures the browser saw, written to this process's log. Public, and so untrusted:
+    `ClientEvent` takes no free text. `docs/adr/0009`."""
+    for event in body.events:
+        log.client_event(event)
+    return Response(status_code=204)
 
 
 NOT_FOUND: dict[int | str, dict[str, Any]] = {

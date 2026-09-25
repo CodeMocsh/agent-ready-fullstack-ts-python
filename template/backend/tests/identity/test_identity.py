@@ -9,7 +9,7 @@ swapped in a synchronous seam reported a fully authenticating deployment as auth
 nothing, green, on every boot.
 """
 
-import logging
+from typing import Any
 
 import pytest
 from fastapi import Request
@@ -23,6 +23,7 @@ from app.identity import (
 )
 from app.main import create_app
 from app.wiring import ACKNOWLEDGED_ENV
+from tests.conftest import Logged
 from tests.doubles import failing, refusing, refusing_async, resolving_async
 
 SEAM = "app.identity.tenant_for"
@@ -111,21 +112,17 @@ async def test_a_seam_that_breaks_in_its_own_way_is_silence_too(
     assert await resolved_without_a_credential() is None
 
 
-def identity_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+def identity_lines(logged: Logged) -> list[dict[str, Any]]:
     """What one startup wrote about identity, with its level.
 
     Driven through a real `TestClient` so the lifespan runs, because a test that called the
     reporting function directly would keep passing after somebody stopped calling it.
     """
-    return [
-        f"{one.levelname} {one.getMessage()}"
-        for one in caplog.records
-        if one.getMessage().startswith("identity:")
-    ]
+    return [one for one in logged() if one["message"].startswith("identity:")]
 
 
 def test_a_deployment_that_authenticates_nothing_is_warned_at_every_boot(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    logged: Logged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The default build is a correct default *and* an indistinguishable one: from outside, a
     service that meant to have authentication and never got it looks exactly like this one.
@@ -137,18 +134,18 @@ def test_a_deployment_that_authenticates_nothing_is_warned_at_every_boot(
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
 
-    with caplog.at_level(logging.INFO, logger="uvicorn.error"), TestClient(create_app()):
+    with TestClient(create_app()):
         pass
 
-    said = identity_lines(caplog)
+    said = identity_lines(logged)
     assert len(said) == 1, said
-    assert said[0].startswith("WARNING")
-    assert "app/identity.py" in said[0]
-    assert SENTINEL_TENANT in said[0]
+    assert said[0]["severity"] == "WARNING"
+    assert "app/identity.py" in said[0]["message"]
+    assert said[0]["tenant"] == SENTINEL_TENANT
 
 
 def test_a_deployment_that_says_it_is_deliberate_is_told_rather_than_warned(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    logged: Logged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Serving everybody on purpose is a real thing to be, and a warning that cannot be
     acknowledged is one a deployment learns to mute — which costs the deployment that needed to
@@ -161,32 +158,32 @@ def test_a_deployment_that_says_it_is_deliberate_is_told_rather_than_warned(
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(ACKNOWLEDGED_ENV, "1")
 
-    with caplog.at_level(logging.INFO, logger="uvicorn.error"), TestClient(create_app()):
+    with TestClient(create_app()):
         pass
 
-    said = identity_lines(caplog)
+    said = identity_lines(logged)
     assert len(said) == 1, said
-    assert said[0].startswith("INFO")
-    assert ACKNOWLEDGED_ENV in said[0]
+    assert said[0]["severity"] == "INFO"
+    assert ACKNOWLEDGED_ENV in said[0]["message"]
 
 
 @pytest.mark.parametrize("denial", ["0", "false", "no", "off", " "])
 def test_a_spelling_of_no_does_not_acknowledge_anything(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch, denial: str
+    logged: Logged, monkeypatch: pytest.MonkeyPatch, denial: str
 ) -> None:
     """`UNAUTHENTICATED_IS_INTENTIONAL=0` silencing the warning is the opposite of what somebody
     typing it meant, and the only way they would find out is by not being told."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(ACKNOWLEDGED_ENV, denial)
 
-    with caplog.at_level(logging.INFO, logger="uvicorn.error"), TestClient(create_app()):
+    with TestClient(create_app()):
         pass
 
-    assert identity_lines(caplog)[0].startswith("WARNING")
+    assert identity_lines(logged)[0]["severity"] == "WARNING"
 
 
 def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
-    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    logged: Logged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The third direction, and the one that decides whether any of this is worth keeping. A
     project that replaced the seam must stop being warned without touching a flag, or the
@@ -199,10 +196,10 @@ def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
     monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
     monkeypatch.setattr(SEAM, refusing_async)
 
-    with caplog.at_level(logging.INFO, logger="uvicorn.error"), TestClient(create_app()):
+    with TestClient(create_app()):
         pass
 
-    said = identity_lines(caplog)
+    said = identity_lines(logged)
     assert len(said) == 1, said
-    assert said[0].startswith("INFO")
-    assert "verified" in said[0]
+    assert said[0]["severity"] == "INFO"
+    assert "verified" in said[0]["message"]

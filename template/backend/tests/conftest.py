@@ -7,7 +7,10 @@ looked at. This prints the tiers that were not in the run, so a green result nev
 "everything passed" when a whole folder was not selected.
 """
 
+import json
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -33,3 +36,21 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
+
+
+Logged = Callable[[], list[dict[str, Any]]]
+
+
+@pytest.fixture
+def logged(capsys: pytest.CaptureFixture[str]) -> Logged:
+    """What this process wrote to stdout since the last read, one parsed line per record.
+
+    Parsed rather than searched, so a line that is not one JSON object fails the test that
+    produced it. `app.log.configure` binds stdout when `create_app` runs, so build the app
+    inside the test that reads it.
+    """
+
+    def read() -> list[dict[str, Any]]:
+        return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+
+    return read

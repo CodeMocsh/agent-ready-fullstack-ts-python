@@ -40,6 +40,7 @@ with vendored UI excluded, 4.8% to 8.9% over every file. This template earns the
 | **Correctness and simplification** | the exact simple form over the verbose one; no commented-out code | ruff `SIM` `RET` `PIE` `C4` `PERF` `ERA` |
 | **Failure handling** | an exception is raised or logged, never both; `logging.exception` keeps the traceback | ruff `TRY400` `TRY401` |
 | **Log messages** | a message is a format string with arguments, not an f-string already collapsed to text | ruff `LOG` `G` |
+| **Log lines** | every line the application logs is a function in `app/log.py`, so a field is a declared parameter; nothing else writes to stdout | ruff `TID251` refuses `logging` and `structlog` outside `app/log.py`, and `T20` refuses `print` outside `devtools/` |
 | **Types** | strict, no untyped seam | basedpyright |
 | **Prose** | spelling in names, docstrings and messages | codespell |
 | **Comments** | none | `comments.py` |

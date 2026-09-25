@@ -1007,8 +1007,11 @@ for name in ('Task', 'CreateTaskBody', 'UpdateTaskBody', 'ErrorBody'):
 split = [n for n in schemas if n.endswith('-Input') or n.endswith('-Output')]
 assert not split, f'input/output schemas split: {split}'
 paths = spec['paths']
-assert sorted(paths) == ['/tasks', '/tasks/{id}'], sorted(paths)
+assert sorted(paths) == ['/client-events', '/tasks', '/tasks/{id}'], sorted(paths)
 assert '201' in paths['/tasks']['post']['responses']
+# The one public route takes untrusted input, so its body refuses what it did not declare.
+assert schemas['ClientEvent']['additionalProperties'] is False
+assert schemas['ClientEvents']['additionalProperties'] is False
 assert '204' in paths['/tasks/{id}']['delete']['responses']
 # An error response without a model claims it has no body, while HTTPException
 # returns one -- and the typed handlers then cannot mock it.
@@ -1100,7 +1103,7 @@ need backend/tests/devtools/test_comments.py
 need_grep 'max-complexity' backend/pyproject.toml
 need_grep 'max-statements' backend/pyproject.toml
 need_grep '\[tool.complexity\]' backend/pyproject.toml
-for family in SIM RET PIE C4 PERF ERA C90 PLR0915; do
+for family in SIM RET PIE C4 PERF ERA C90 PLR0915 TID251; do
     grep -q "\"$family\"" backend/pyproject.toml || { echo "ruff family $family missing" >&2; exit 1; }
 done
 

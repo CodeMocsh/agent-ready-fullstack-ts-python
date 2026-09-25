@@ -65,6 +65,41 @@ any instance of the *previous* version that restarts will not come back up. Alre
 instances are fine. If that window matters, make the migration and the rollout one step — scale
 down, migrate, scale up — and plan a rollback as a schema rollback.
 
+## Logs
+
+The backend writes one JSON object per line to stdout, and nothing else. Every cloud's container
+runtime collects stdout with no agent and no SDK, so there is nothing to configure in the
+application. The names are the ones Cloud Logging reads as they are, and the HTTP fields follow
+the OpenTelemetry semantic conventions.
+[adr/0009](adr/0009-every-log-line-is-declared-and-written-as-json-to-stdout.md) says why every
+line is declared.
+
+| Field | What it holds |
+|---|---|
+| `time` | ISO 8601, UTC |
+| `severity` | `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
+| `message` | a constant sentence; values go in fields of their own |
+| `logger` | `app` for this project's lines, a library's name for its own |
+| `request_id` | while a request is served; the response carries it as `X-Request-ID` |
+| `exception` | the whole traceback, when there is one |
+
+**What each cloud does with it:**
+
+- **GCP.** Cloud Logging parses each line into `jsonPayload` and reads `severity` and `message`.
+  Error Reporting groups on `exception` at no charge.
+- **AWS.** CloudWatch Logs Insights finds the fields at query time, on the Standard log class
+  only. **A log group keeps its data forever until you set a retention period**, so set one.
+  A data protection policy on the group masks emails, card numbers and credentials as they
+  arrive. It is billed per GB scanned, and it is worth having as a second layer.
+- **Azure.** Container Apps stores the line as one string. Read it with `parse_json` in KQL.
+
+**Retention is yours to set, and shorter is safer.** The log holds personal data even when
+nobody meant it to: an exception's message is written as the library wrote it. 14 to 30 days
+suits operational logs. When you add security events, PCI DSS asks for 12 months.
+
+**Browser failures arrive here too**, as lines whose `message` is `client event` and whose
+`source` is `client`. Anybody can post one, so read them as a report and never as evidence.
+
 ## Three ways to ship something broken
 
 **Never ship mock mode.** A production build must leave `VITE_ENABLE_MSW` unset, which is why
@@ -72,14 +107,14 @@ there is no `.env.production` to set it in.
 
 **Set `DATABASE_URL`, or you are deploying the in-memory substrate.** It resets on every restart
 and nothing complains: the app comes up, serves, and loses the data. It logs which substrate it
-came up on — grep your deploy logs for `serving on the … substrate`, or assert
+came up on — find the line whose `message` is `serving` and read its `substrate`, or assert
 `app.state.database.name` from a smoke test.
 
 **Replace `tenant_for()` in `app/identity.py`, or you are serving everybody.** It ships as a
 stub: every request resolves to the tenant `default`, so anyone who reaches the process reads
-and writes everything it holds. This one does complain — grep for `identity:` and read the
-level. `WARNING` means nobody has replaced it. Serving everybody is a real thing to do for a
-while, behind an authenticating proxy or on an internal tool; set
+and writes everything it holds. This one does complain — find the line whose `message` starts
+`identity:` and read its `severity`. `WARNING` means nobody has replaced it. Serving everybody
+is a real thing to do for a while, behind an authenticating proxy or on an internal tool; set
 `UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
 level and nothing else. [adr/0008](adr/0008-a-route-cannot-escape-the-identity-seam.md) says
 what a replacement owes.

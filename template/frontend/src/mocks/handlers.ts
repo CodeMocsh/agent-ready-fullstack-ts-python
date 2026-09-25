@@ -1,6 +1,7 @@
 import { createOpenApiHttp } from "openapi-msw";
 import { API_BASE_URL } from "@/api/base";
 import type { paths } from "@/api/schema";
+import { acceptsClientEvents } from "@/mocks/client-events";
 import { taskStore } from "@/mocks/store";
 
 const http = createOpenApiHttp<paths>({ baseUrl: API_BASE_URL });
@@ -20,6 +21,12 @@ export const handlers = [
       ? response(404).json({ detail: "Task not found" })
       : response(200).json(updated);
   }),
+
+  http.post("/client-events", async ({ request, response }) =>
+    acceptsClientEvents(await request.json())
+      ? response(204).empty()
+      : response(422).json({ detail: [{ loc: ["body"], msg: "refused", type: "value_error" }] }),
+  ),
 
   http.delete("/tasks/{id}", ({ params, response }) =>
     taskStore.remove(params.id)

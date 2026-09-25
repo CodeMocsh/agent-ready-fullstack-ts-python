@@ -138,6 +138,7 @@ frontend/             everything pnpm touches
   src/components/     UI; ui/ is vendored shadcn
   src/index.css       the @theme block -- see the theme rule below
   src/router.tsx      routes
+  src/client-events.ts reports a failure the browser saw to the backend's log
   tests/              mirrors src/
   e2e/                Playwright; *.live.spec.ts needs a running backend
   devtools/           the frontend's own gates, and the scanner they share
@@ -150,6 +151,7 @@ backend/              everything uv touches
   app/wiring.py       the only reader of the environment
   app/serve.py        the one-origin entrypoint: app.main plus the frontend bundle
   app/identity.py     which tenant a request is -- ships as a stub returning "default"
+  app/log.py          every line the application logs, and the only importer of logging
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/integration/, which is a tier
   tests/tiers.py      what a tier needs and what runs it
@@ -229,11 +231,18 @@ Each of these is something a reasonable edit undoes without anything failing unt
   someone can switch it back on. `public/` is copied into every build whatever the mode, so
   the `strip-mock-worker` plugin in `vite.config.ts` covers what no mode can; without it a
   production deploy ships `mockServiceWorker.js` to its own origin.
+- **Record a failure through the function `startClientEvents` returns**, never through
+  `console`, which biome refuses in `src/`. A client event names a kind, a route template and an
+  error class, and never carries a message: an error's message is where a user's input ends up.
 - The agent guard blocks writes to any `.env*` file. If one needs to change, say so and let
   a human edit it.
 
 **Backend**
 
+- **Log through a function in `app/log.py`.** ruff refuses `logging` and `structlog` outside
+  `app/log.py` and `tests/log/`, and `print` outside `devtools/`. A field is a parameter
+  somebody declared, so never pass a body, a path, a query string or an exception's message.
+  `tests/log/test_log.py` holds a canary to that.
 - **`app/wiring.py` is the only reader of the environment.** Everything below it takes its
   DSN, schema and migrate mode as arguments. Nothing degrades from Postgres to memory: a
   bad `DATABASE_URL` fails at boot.
