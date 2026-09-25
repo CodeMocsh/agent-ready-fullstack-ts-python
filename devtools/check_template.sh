@@ -360,6 +360,8 @@ tar -xzf "$ACTIONLINT_DIR/actionlint.tar.gz" -C "$ACTIONLINT_DIR" actionlint \
 # that is not there exits clean -- which is how this check would come to lint neither
 # tree while still printing. So the directory and the file list are asserted first, and
 # `-exec +` hands the files over without a word-splitting expansion.
+USES='^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*'
+: >"$WORK/action-pins"
 for workflows in "$REPO/.github/workflows" "$OUT/.github/workflows"; do
     [ -d "$workflows" ] || fail "expected workflows in $workflows, and the directory is absent."
     find "$workflows" \( -name '*.yml' -o -name '*.yaml' \) -print >"$WORK/workflow-list"
@@ -370,19 +372,17 @@ for workflows in "$REPO/.github/workflows" "$OUT/.github/workflows"; do
     # runs whatever that tag pointed at this morning -- and the token it runs under can
     # read this repository.
     while IFS= read -r workflow; do
-        unpinned="$(grep -nE '^[[:space:]]*-?[[:space:]]*uses:' "$workflow" | grep -vE '@[0-9a-f]{40}' || true)"
+        unpinned="$(grep -nE "$USES" "$workflow" | grep -vE '@[0-9a-f]{40}' || true)"
         [ -z "$unpinned" ] || fail "$workflow uses an action that is not pinned to a commit: $unpinned"
+        grep -hE "$USES" "$workflow" | sed -E "s/$USES//; s/@([0-9a-f]{40}).*/ \\1/" >>"$WORK/action-pins"
     done <"$WORK/workflow-list"
 done
 
 # One action, one commit, in both trees. A pin spelled twice goes stale in one place, and
 # the stale one is the workflow that ships: nothing here runs it, so nothing here notices.
-find "$REPO/.github/workflows" "$OUT/.github/workflows" \( -name '*.yml' -o -name '*.yaml' \) \
-    -exec grep -hoE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}' {} + \
-    | sed -E 's/uses:[[:space:]]*//; s/@/ /' | sort -u >"$WORK/action-pins"
 [ -s "$WORK/action-pins" ] || fail "found no action pinned in either tree, so there was nothing to compare."
-split="$(awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' "$WORK/action-pins" | sort | tr '\n' ' ')"
-[ -z "$split" ] || fail "pinned to more than one commit across this repo and the template: ${split% }. Move every workflow to the same commit; .github/dependabot.yml bumps both trees in one pull request."
+split="$(sort -u "$WORK/action-pins" | awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' | sort | tr '\n' ' ')"
+[ -z "$split" ] || fail "pinned to more than one commit across both trees: ${split% }. Pin every use of that action to one commit; .github/dependabot.yml bumps both trees in one pull request."
 
 # The generated project's backend/tests/test_gate.py refuses a workflow that re-lists the
 # gate's steps instead of naming the target. This repo asserts the same of its own, because

@@ -4,14 +4,13 @@ version: 2
 # version to bump is the actions the workflows pin by commit -- this repo's own, and the one
 # the template ships, which every generated project inherits.
 #
-# One entry, both directories, one group, so a bump lands in both trees in one pull request.
-# check_template.sh refuses an action pinned to two commits, and two pull requests would each
-# fail it until the other merged.
+# One entry, both directories, and a group for each kind of update, so a bump lands in both
+# trees in one pull request. check_template.sh refuses an action pinned to two commits, and
+# two pull requests would each fail it until the other merged. A group applies to version
+# updates unless it says otherwise, so security updates need a group of their own.
 #
 # The template's directory is its workflows folder and not `/template`. Dependabot reads
-# `.github/workflows` only under `/`; anywhere else it reads the YAML in the directory named,
-# and `/template` holds none. That entry failed every week and left the template four majors
-# behind this repo with nothing saying so.
+# `.github/workflows` only under `/`; anywhere else it reads the YAML in the directory named.
 #
 # The rest of the template is out of reach and stays a person's job: its manifests are
 # `package.json.jinja` and `pyproject.toml.jinja`, which Dependabot cannot parse, and its
@@ -28,6 +27,9 @@ updates:
       day: monday
     groups:
       actions:
+        patterns: ["*"]
+      actions-security:
+        applies-to: security-updates
         patterns: ["*"]
     commit-message:
       prefix: "Bump"
