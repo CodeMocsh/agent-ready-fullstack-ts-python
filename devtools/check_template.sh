@@ -1042,7 +1042,10 @@ for rule in noUselessElse useCollapsedElseIf noNegationElse useSimplifiedLogicEx
 done
 need frontend/devtools/complexity.mjs
 need frontend/devtools/conformance.mjs
+need frontend/devtools/file-length.mjs
+need frontend/tests/devtools/file-length.test.ts
 need_grep 'devtools/complexity.mjs' frontend/package.json
+need_grep 'devtools/file-length.mjs' frontend/package.json
 need_grep 'devtools/conformance.mjs' frontend/package.json
 need_grep '"strict": true' frontend/tsconfig.json
 need_grep 'noUncheckedIndexedAccess' frontend/tsconfig.json

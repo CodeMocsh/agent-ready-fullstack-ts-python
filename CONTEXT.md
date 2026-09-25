@@ -59,6 +59,13 @@ cyclomatic count whole. Both baselines record it under the key `sum`. It is the 
 the figure the drift check reads, and the only term in that figure a commit can consent to.
 _Avoid_: total complexity, complexity total, the total, mass, branching
 
+**Over-cap entry**:
+A file named in `complexity.overCap`, which the frontend file-length gate does not refuse for
+being past `complexity.maxFileLines`. An entry is valid only while its file is read by the gate
+and is still past the cap, so the list only gets shorter. Vendored and generated files go in
+`complexity.exclude` instead.
+_Avoid_: exemption, exempt file, allowlist, waiver
+
 **Mock mode**:
 A generated project's frontend running with its Mock Service Worker handlers intercepting
 network calls, so the frontend half is fully usable with no backend behind it. A build-time

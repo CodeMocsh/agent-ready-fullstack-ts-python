@@ -63,7 +63,7 @@ time. So each half runs several.
 |---|---|---|
 | **Per function** | cognitive complexity, biome, in the editor | cyclomatic complexity, ruff `C901` |
 | **Function volume** | lines, biome | statements, ruff `PLR0915` |
-| **File volume** | a backstop over `src/**` | none — service modules grow by adding routes |
+| **File volume** | non-blank lines, JSX included, `file-length.mjs` | none — service modules grow by adding routes |
 | **Drift** | density against a committed baseline | mean against a committed baseline |
 | **Ceiling** | relative, a multiple of the project's origin | absolute |
 
@@ -110,8 +110,17 @@ The per-function cap flags 0.00–5.59% of functions across them, with React at 
 end because JSX adds structure without branching. Length is capped separately because it is
 independent of complexity: sixty lines of markup score **0**. The file cap is a backstop at two
 and a half times the largest file in bulletproof-react, which has no file over 200 lines across
-104. The drift tolerance leaves roughly 2.4× headroom over the largest single-commit rise in 200
-commits of hono (+0.82%) and zod (+0.60%).
+104. It covers `src`, `tests`, `e2e` and `devtools`, because a 900-line spec is the same problem
+as a 900-line component. A file that must stay whole is named in `complexity.overCap`, and an
+entry the cap no longer needs fails the gate, so the list only gets shorter. The drift tolerance
+leaves roughly 2.4× headroom over the largest single-commit rise in 200 commits of hono (+0.82%)
+and zod (+0.60%).
+
+**biome's `noExcessiveLinesPerFile` is not the enforcement.** It does not count lines inside
+JSX: on biome 2.5.6 a 906-line component passes a 500-line cap that 501 lines of plain
+TypeScript fail. `biome.json` keeps the rule because it costs nothing and catches the plain
+case in the editor. `file-length.mjs` counts every non-blank line, and its test holds it to a
+component whose length is JSX.
 
 **Backend**, against httpx and flask with ruff's cyclomatic counter: p95 is 6 and p99 is 9–11,
 so the cap flags roughly the top 2%.
