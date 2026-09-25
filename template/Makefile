@@ -111,7 +111,7 @@ else
 	docker run -d --rm -P -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
 	port=$$(docker port $$name 5432/tcp | head -1 | sed 's/.*://'); \
 	printf 'postgres on %s' "$$port"; \
-	until docker exec $$name pg_isready -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
+	until docker exec $$name pg_isready -h 127.0.0.1 -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
 	echo ' ready'; \
 	cd backend && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$$port/postgres \
 		uv run --no-sync pytest $(DB_TEST_SUITE)
@@ -160,7 +160,7 @@ test-contract-db:
 	docker run -d --rm -P -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
 	port=$$(docker port $$name 5432/tcp | head -1 | sed 's/.*://'); \
 	printf 'postgres on %s' "$$port"; \
-	until docker exec $$name pg_isready -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
+	until docker exec $$name pg_isready -h 127.0.0.1 -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
 	echo ' ready'; \
 	docker exec -i $$name psql -q -v ON_ERROR_STOP=1 -U postgres < deploy/roles.sql; \
 	docker exec $$name psql -q -v ON_ERROR_STOP=1 -U postgres \

@@ -1,6 +1,6 @@
 name: CI
 
-# One job, and it runs `make pre-commit` -- the same target the git hook runs.
+# The gate runs `make pre-commit` -- the same target the git hook runs.
 #
 # Not a list of steps that happens to match the gate. A re-listed copy drifts, always in
 # the direction of checking less, and the drift surfaces as a green push that a commit
@@ -9,10 +9,16 @@ name: CI
 # satisfy the check.
 #
 # The gate is deliberately the fast tier: lint, the contract artifacts, and the tests that
-# need nothing fetched or started. The suites that need a Postgres daemon or a browser are
-# tiers of their own -- `make db-test`, `make test-e2e` -- and they stay out of this file
-# for the reason they stay out of the hook. Add one here and the check people wait on stops
+# need nothing fetched or started. Add a tier to that job and the check people wait on stops
 # being the check they can run.
+#
+# A second job runs `make db-test`. That tier needs only Docker, which the runner has, and
+# it is the one place tenant isolation is checked against a real Postgres. The job adds a
+# status of its own rather than time to the gate, and a laptop with no Docker never runs the
+# tier -- so without this job nothing does. The browser tiers stay out: `make test-e2e`
+# fetches a browser, and the live one needs `make dev` running beside it. So does
+# `make observe-test`: it checks the viewer `make observe` starts on a laptop, which no
+# deployment runs.
 
 on:
   push:
@@ -66,3 +72,26 @@ jobs:
           uv sync --all-groups --frozen
 
       - run: make pre-commit
+
+  db:
+    runs-on: ubuntu-latest
+    # A container that never comes up leaves the recipe waiting. This is where it stops.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.25"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install the backend
+        working-directory: backend
+        run: |
+          uv python install
+          uv sync --all-groups --frozen
+
+      - run: make db-test
