@@ -2,7 +2,7 @@
 may not carry.
 
 `app/wiring.py` answers *what did this deployment configure* and builds from it. This answers
-*is this configuration legitimate at all*, and builds nothing. `docs/adr/0014`.
+*is this configuration legitimate at all*, and builds nothing. `docs/adr/template/0014`.
 
 **An unset `APP_ENV` is production**, so a deployment that forgets the variable is checked
 rather than waved through. Production refuses the in-memory substrate, naming every finding at
@@ -16,7 +16,7 @@ DATABASE_URL_ENV: Final = "DATABASE_URL"
 BUNDLE_ENV: Final = "FRONTEND_BUNDLE"
 ACKNOWLEDGED_ENV: Final = "UNAUTHENTICATED_IS_INTENTIONAL"
 """Set by a deployment that means to serve everybody, so it is told at `INFO` rather than
-warned on every boot. It changes a log level and nothing else -- `docs/adr/0008`."""
+warned on every boot. It changes a log level and nothing else -- `docs/adr/template/0008`."""
 
 OTLP_ENDPOINT_ENV: Final = "OTEL_EXPORTER_OTLP_ENDPOINT"
 SERVICE_NAME_ENV: Final = "OTEL_SERVICE_NAME"

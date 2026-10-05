@@ -14,7 +14,7 @@ from app.wiring import build_telemetry
 def create_app() -> FastAPI:
     """The app, assembled. A function so a test can hold two with different substrates.
 
-    `docs/adr/0007` holds the settings below and why each one is off. Building one configures
+    `docs/adr/template/0007` holds the settings below and why each one is off. Building one configures
     the logging of the whole process: see `app.log.configure`.
     """
     log.configure()

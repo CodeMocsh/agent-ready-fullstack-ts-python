@@ -2,7 +2,7 @@
 
 `.schema-baseline.json` ships committed and `check_template.sh` requires it, so a missing one is
 a failure and this reads it unconditionally. Why a key keeps the hash it was first written with
-is in `docs/adr/0003-the-application-never-applies-ddl.md`.
+is in `docs/adr/template/0003-the-application-never-applies-ddl.md`.
 """
 
 import json

@@ -2,7 +2,7 @@
 # The gate, before the commit. `make gate` is the list of checks; this script decides whether
 # this clone can run it, queues it behind any other gate on the machine, and skips a tree that
 # already passed. `make pre-commit` runs it, and the git hook runs `make pre-commit`.
-# docs/adr/0015.
+# docs/adr/template/0015.
 #
 # A half that is not installed is skipped rather than failing the commit, because a clone that
 # has installed only one of them is a legitimate way to work here. A run where everything

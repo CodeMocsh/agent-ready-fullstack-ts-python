@@ -144,7 +144,7 @@ depend on application code being correct.
 
 | Category | What must hold | Enforced by |
 |---|---|---|
-| **Isolation is forced, not merely enabled** | the role that owns a table is still bound by its own policy, so no connection sits above it | `test_isolation.py`, against a real server; `adr/0002` for why |
+| **Isolation is forced, not merely enabled** | the role that owns a table is still bound by its own policy, so no connection sits above it | `test_isolation.py`, against a real server; `adr/template/0002` for why |
 | **A tenant touches only its own rows** | read, write and delete are all covered, and `WITH CHECK` stops a tenant inserting what it could not then read | `test_isolation.py` |
 | **An absent tenant is not a wildcard** | an empty or missing setting matches nothing, and cannot be stored either | `test_isolation.py` |
 | **The tenant does not outlive its request** | a pooled connection cannot carry one request's tenant into the next | `test_isolation.py` |
@@ -152,7 +152,7 @@ depend on application code being correct.
 | **Ownership stays with the owner role** | an object owned by anyone else escapes the policy set | `test_isolation.py` |
 | **Every index leads with `tenant_id`** | otherwise the policy predicate cannot be satisfied and Postgres scans — right answers, quietly slower | `test_schema.py` |
 | **One door to a store, and one to the substrate** | `Database.store(tenant_id)` is called in exactly one place, and the substrate is taken off the app in exactly one place, so no route can hold an unscoped store or ask for another tenant's | `test_tenant_scoping.py` |
-| **No route escapes the identity seam** | every route the app declares resolves a tenant before its handler runs, and the exempt ones are named in a list checked in both directions | `test_guarantee.py`, which reads the routes off the app and drives each one against a seam that refuses; `adr/0008` for why |
+| **No route escapes the identity seam** | every route the app declares resolves a tenant before its handler runs, and the exempt ones are named in a list checked in both directions | `test_guarantee.py`, which reads the routes off the app and drives each one against a seam that refuses; `adr/template/0008` for why |
 | **The application never holds owner rights** | it refuses to start if it can see `DATABASE_OWNER_URL` | `wiring.py`, at boot |
 
 Two things carry the design. `Database.store(tenant_id)` is the only way to obtain a store and
@@ -181,14 +181,14 @@ the failure it catches otherwise looks like working software.
 
 | Category | What must hold | Enforced by |
 |---|---|---|
-| **Contract freshness** | the committed spec and generated types match the backend code | `make openapi-check`, in the gate; `adr/0007` for the settings it depends on |
+| **Contract freshness** | the committed spec and generated types match the backend code | `make openapi-check`, in the gate; `adr/template/0007` for the settings it depends on |
 | **Two implementations, one contract** | the [MSW](https://mswjs.io/) handlers and the real backend answer alike | one contract suite, run against both |
 | **Typed mocks** | a handler cannot return a status code or shape the spec does not declare | openapi-msw, at compile time |
 | **Mock mode leaves no trace** | a production build ships no worker and no msw bundle | a build assertion in the gate |
 | **Two substrates, one store** | in-memory and Postgres satisfy the same suite | `store_contract.py`, run twice |
 | **Schema integrity** | one statement per key, in applied order, with a later column also in its `CREATE` | `test_schema.py` |
 | **One-origin serving** | the built bundle answers deep links and refuses a stale hashed asset | `test_serve.py`, and the gate against a real build |
-| **Test discipline** | no test switches itself off; the tiers stay out of the gate | `test_gate.py`, `tiers.py`; `adr/0005` for why |
+| **Test discipline** | no test switches itself off; the tiers stay out of the gate | `test_gate.py`, `tiers.py`; `adr/template/0005` for why |
 | **Gate discipline** | the hook runs the gate, says when it ran only part, and offers no way off | `test_gate.py` |
 | **Document reachability** | every document a file names exists, and every document is named by another file | `links.py`, over this repository and over a generated project; `links_test.py` holds it to each citation spelling |
 

@@ -340,7 +340,7 @@ async def test_check_refuses_a_database_missing_only_an_entry_below_the_highest_
 async def test_check_refuses_a_database_carrying_an_entry_this_build_does_not() -> None:
     """Tolerating it would be a compatibility judgement made at startup by a process with no
     way to verify it, and the failure it lets through -- an older build writing rows to a
-    shape it does not know about -- is silent. `docs/adr/0003` records what refusing costs.
+    shape it does not know about -- is silent. `docs/adr/template/0003` records what refusing costs.
     """
     conn = FakeConn([*known_keys("app"), "9999_from_the_future"])
 
@@ -374,7 +374,7 @@ def test_no_shipped_entry_body_has_changed() -> None:
 
     Fires in the pre-commit hook, before a database exists to be wrong. Why the baseline is
     something a person updates rather than a file `make schema` rewrites is in
-    `docs/adr/0003-the-application-never-applies-ddl.md`.
+    `docs/adr/template/0003-the-application-never-applies-ddl.md`.
     """
     assert SCHEMA_BASELINE.exists(), f"{SCHEMA_BASELINE} is missing; run `make schema`"
     shipped = json.loads(SCHEMA_BASELINE.read_text())

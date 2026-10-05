@@ -27,7 +27,8 @@ MARKDOWN_LINK = re.compile(r"\]\(([^)\s]+)\)")
 DOCUMENT_PATH = re.compile(
     r"(?<![\w/])((?:\.{1,2}/)?(?:[\w.-]+/)*[\w.-]+\.md(?:\.jinja)?)(?![\w]|\.[A-Za-z])"
 )
-DECISION_STEM = re.compile(r"(?<![\w/])((?:[\w.-]+/)*adr/\d{4})(?![\w-])")
+DECISION_STEM = re.compile(r"(?<![\w/])((?:[\w.-]+/)*adr/(?:template/)?\d{4})(?![\w-])")
+DECISION_DIRECTORY = re.compile(r"(^|/)adr(/template)?$")
 FILENAME_PLACEHOLDER = "NNNN"
 REPLACEMENT = "\ufffd"
 KNOWN_FLAGS = ("--exclude", "--allow-orphan")
@@ -83,7 +84,7 @@ def answers_for(root: Path, every_file: list[Path], source: Path, name: str) -> 
             return {(base / name).resolve()}
     tail = "/" + re.sub(r"^(\.{1,2}/)+", "", name)
     cited = Path(name)
-    if cited.parent.name == "adr" and cited.name.isdigit():
+    if cited.name.isdigit() and DECISION_DIRECTORY.search(cited.parent.as_posix()):
         return {
             path.resolve()
             for path in every_file

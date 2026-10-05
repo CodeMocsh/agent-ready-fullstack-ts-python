@@ -9,7 +9,7 @@ proves nothing — the interesting rules are exactly the ones a single implement
 by accident. Introduce the Protocol when there is a second resolver to hold to it.
 
 Every route reaches this because `app/routes/tenant/` declares it on the router rather than on
-the handlers. `docs/adr/0008` says why, and what a replacement owes.
+the handlers. `docs/adr/template/0008` says why, and what a replacement owes.
 
 **What this is not is a trap**, because `tenant_id` is on every row from the first migration.
 Going from here to real authentication is a change to this function and a configuration
@@ -20,7 +20,7 @@ One rule outlives the stub and belongs to every implementation that replaces it:
 malformed credential raises `Unauthenticated` — never a quiet fall back to the sentinel, which
 would hand one tenant's data to anybody who failed to log in.
 
-Anything finer than the tenant is enforced beside a route and never in a policy: `docs/adr/0002`
+Anything finer than the tenant is enforced beside a route and never in a policy: `docs/adr/template/0002`
 permits a policy to compare a column to a setting and nothing else.
 """
 
@@ -71,7 +71,7 @@ async def resolved_without_a_credential() -> str | None:
     """The tenant a request carrying nothing resolves to, or `None` when it is refused.
 
     A property rather than a flag, and it awaits: a replacement is written `async def`, and
-    calling one returns a coroutine rather than raising. `docs/adr/0008` records both, and what
+    calling one returns a coroutine rather than raising. `docs/adr/template/0008` records both, and what
     reading that coroutine as a tenant did. Anything that is not a string is `None`, and every
     exception is silence -- a resolver that did not hand out a tenant did not serve the request.
     """

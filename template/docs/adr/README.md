@@ -26,8 +26,12 @@ Anything an agent can work out from the diff does not belong here. Neither does 
 ## How
 
 One file per decision, `NNNN-a-sentence-saying-what-was-decided.md`, numbered in order and
-never renumbered. The title is the decision, in the present tense, as a claim — *"Row-level
-security is on for every table, and forced"*, not *"RLS decision"*. Then the reasoning, a
+never renumbered. Yours go in this directory. `template/` holds the decisions that came with
+the template and is numbered on its own, so a template update never lands a number beside one
+of yours; cite one of those as `docs/adr/template/NNNN`. `docs/adr/template/0016` says why.
+
+The title is the decision, in the present tense, as a claim — *"Row-level security is on for
+every table, and forced"*, not *"RLS decision"*. Then the reasoning, a
 **Considered options** section naming what was rejected and why, and a **Consequences** section
 for what this costs and what it makes impossible.
 

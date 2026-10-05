@@ -110,6 +110,11 @@ much the code changed. That is the only question a user of a template can act on
 A large diff that lands cleanly is a minor. A one-line change that renames a file every project
 has edited is a major. Size is not the test; cost to the person updating is.
 
+**While the version starts with `0.`, what would be a major is a minor**, and the commit says
+which it would have been. Semantic versioning allows anything below `1.0.0` to break, and a
+generated project pins the exact tag it came from, so nobody receives a breaking update
+without running `copier update` themselves.
+
 ## Reporting something
 
 A vulnerability goes to [SECURITY.md](SECURITY.md), never to a public issue. Anything else is

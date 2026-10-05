@@ -1,5 +1,5 @@
 """Nothing in `app/models/` imports upward, and every shape in it is reachable as
-`from app.models import X`. `docs/adr/0013`."""
+`from app.models import X`. `docs/adr/template/0013`."""
 
 import ast
 from pathlib import Path
@@ -20,7 +20,7 @@ LAYERS: dict[str, frozenset[str]] = {
     "client_events": frozenset(),
 }
 """The modules each module under `app/models/` may import, and no others. Each entry lists only
-the imports that module makes today. `docs/adr/0013`."""
+the imports that module makes today. `docs/adr/template/0013`."""
 
 
 def _modules() -> list[str]:

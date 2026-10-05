@@ -3,7 +3,7 @@ where its telemetry goes. Everything here reads the environment and builds from 
 
 Two questions live elsewhere. `app/environment.py` names the variables and says whether this
 configuration is legitimate at all; `app/lifespan.py` runs what this builds and reads nothing.
-`docs/adr/0014`.
+`docs/adr/template/0014`.
 
 **No `DATABASE_URL` means the in-memory substrate**, which only the development loop may run:
 `refuse_development_settings` refuses it in production. Nothing here degrades from Postgres to

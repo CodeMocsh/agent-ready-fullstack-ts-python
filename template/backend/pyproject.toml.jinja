@@ -48,10 +48,10 @@ requires-python = ">=3.12"
 # a connection, and one that deletes this line still starts on the in-memory substrate.
 #
 # structlog and asgi-correlation-id are the log: one JSON line per record and an id per
-# request. Neither writes any part of the contract. docs/adr/0009 says why these two.
+# request. Neither writes any part of the contract. docs/adr/template/0009 says why these two.
 #
 # The opentelemetry packages are traces and metrics, installed everywhere and switched on only
-# by OTEL_EXPORTER_OTLP_ENDPOINT (docs/adr/0010). The instrumentations are still 0.x betas
+# by OTEL_EXPORTER_OTLP_ENDPOINT (docs/adr/template/0010). The instrumentations are still 0.x betas
 # released in lockstep with the SDK, so both are capped at the next minor and move together.
 dependencies = [
     "fastapi>=0.140.0,<0.142.0",
