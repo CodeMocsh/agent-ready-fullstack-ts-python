@@ -70,7 +70,7 @@ backend_pid=$!
 # socket while the worker crash-loops, so an unbounded curl waits for a reply that
 # is never written and neither exit below is ever taken.
 deadline=$(($(date +%s) + 30))
-until curl -fsS --max-time 2 "http://localhost:$BACKEND_PORT/tasks" >/dev/null 2>&1; do
+until curl -fsS --max-time 2 "http://localhost:$BACKEND_PORT/health" >/dev/null 2>&1; do
     if ! kill -0 "$backend_pid" 2>/dev/null; then
         echo "dev: the backend exited during startup; run 'make dev-backend' to see why" >&2
         exit 1

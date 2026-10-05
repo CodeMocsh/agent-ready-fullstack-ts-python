@@ -11,6 +11,7 @@ from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, ST
 from app.migrate import OWNER_URL_ENV
 from app.store import Connections
 from app.store.conn import SCHEMA_ENV
+from app.store.migrate import known_version
 from app.store.pg import AcquireTimedOut, PostgresDatabase, Timeouts
 from app.wiring import build
 from tests.integration.conftest import Provisioned
@@ -53,7 +54,7 @@ async def test_a_transaction_left_idle_is_ended_by_postgres_and_its_connection_r
         with pytest.raises(driver().InterfaceError):
             await conn.execute("SELECT 1")
 
-    assert await one_connection.store("a-tenant").list() == []
+    assert await one_connection.check() == known_version()
 
 
 async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
@@ -61,7 +62,7 @@ async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
 ) -> None:
     async with one_connection.connection():
         with pytest.raises(AcquireTimedOut, match="all 1 stayed in use"):
-            await one_connection.store("a-tenant").list()
+            await one_connection.check()
 
 
 async def test_a_connection_lent_out_is_counted_as_used_until_it_comes_back(

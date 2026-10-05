@@ -2,7 +2,8 @@
 
 The router carries `tenant_for`, so every route included here resolves a tenant before its
 handler runs (`docs/adr/template/0008`). A module under this package declares a bare `APIRouter()` and is
-included here; `tests/routes/test_guarantee.py` fails on a route that answers without a tenant.
+included here; the route guarantee's test, which ships with the identity stub, fails on a
+route that answers without a tenant.
 """
 
 from fastapi import APIRouter, Depends

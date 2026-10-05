@@ -187,8 +187,8 @@ Each of these is something a reasonable edit undoes without anything failing unt
   `app/errors.py`: raise it, and name it in `responses(...)` on the route.
 - A route lives under the `app/routes/` module for what its caller presents, never beside
   routes that ask for something else.
-- `frontend/tests/api/contract.test.ts` runs against the mock handlers and against the
-  real backend. Assert shapes, status codes and the `detail` a refusal carries — never
+- Every `frontend/tests/api/*contract.test.ts` runs against the mock handlers and against
+  the real backend. Assert shapes, status codes and the `detail` a refusal carries — never
   seed data, which the two implementations differ on by design.
 
 **Tests**

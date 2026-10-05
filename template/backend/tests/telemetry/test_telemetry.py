@@ -28,6 +28,7 @@ from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
+from tests.widgets import with_widgets
 
 STATE_CANARY = "canary6f1e2d"
 CALLER_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
@@ -76,7 +77,7 @@ def instrumented(
     monkeypatch: pytest.MonkeyPatch, *, trust: bool, ratio: float = 1.0
 ) -> Iterator[Instrumented]:
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    app = create_app()
+    app = with_widgets(create_app())
 
     @app.get("/raises")
     async def raises() -> None:
@@ -140,13 +141,13 @@ def everything_in(span: ReadableSpan) -> str:
 def test_a_request_is_one_server_span_named_by_its_route_with_only_declared_attributes(
     untrusting: Instrumented,
 ) -> None:
-    untrusting.client.patch("/tasks/does-not-exist", json={"done": True})
+    untrusting.client.get("/widgets/does-not-exist")
 
     [span] = untrusting.servers()
 
-    assert span.name == "PATCH /tasks/{id}"
+    assert span.name == "GET /widgets/{id}"
     assert span.attributes is not None
-    assert span.attributes["http.route"] == "/tasks/{id}"
+    assert span.attributes["http.route"] == "/widgets/{id}"
     assert span.attributes["http.response.status_code"] == 404
     assert set(span.attributes) <= telemetry.SPAN_ATTRIBUTES
     assert span.events == ()
@@ -155,13 +156,13 @@ def test_a_request_is_one_server_span_named_by_its_route_with_only_declared_attr
 def test_the_request_duration_is_recorded_by_route_template_with_no_exemplar(
     untrusting: Instrumented,
 ) -> None:
-    untrusting.client.get("/tasks")
+    untrusting.client.get("/widgets")
 
     points = untrusting.points()
     durations = [dict(p.attributes or {}) for n, p in points if n == "http.server.request.duration"]
 
     assert durations == [
-        {"http.request.method": "GET", "http.route": "/tasks", "http.response.status_code": 200}
+        {"http.request.method": "GET", "http.route": "/widgets", "http.response.status_code": 200}
     ]
     for _, point in points:
         assert set(point.attributes or {}) <= telemetry.METRIC_ATTRIBUTES
@@ -172,8 +173,8 @@ def test_nothing_the_request_carried_leaves_in_a_span_or_a_metric(
     untrusting: Instrumented,
 ) -> None:
     untrusting.client.post(
-        f"/tasks?note={CANARY}",
-        json={"title": CANARY},
+        f"/widgets?note={CANARY}",
+        json={"name": CANARY},
         headers={
             "x-note": CANARY,
             "baggage": f"user={CANARY}",
@@ -182,8 +183,8 @@ def test_nothing_the_request_carried_leaves_in_a_span_or_a_metric(
             "tracestate": TRACESTATE,
         },
     )
-    untrusting.client.patch(f"/tasks/{CANARY}", json={"done": True})
-    untrusting.client.post("/tasks", json={"title": {"nested": CANARY}})
+    untrusting.client.get(f"/widgets/{CANARY}")
+    untrusting.client.post("/widgets", json={"name": {"nested": CANARY}})
     untrusting.client.get(f"/no-route/{CANARY}")
     untrusting.client.get("/raises")
     untrusting.client.get("/describes")
@@ -214,7 +215,7 @@ def test_an_exception_is_named_by_its_status_and_never_by_its_message(
 def test_a_caller_from_outside_starts_a_new_trace_and_is_kept_as_a_link(
     untrusting: Instrumented,
 ) -> None:
-    untrusting.client.get("/tasks", headers={"traceparent": TRACEPARENT})
+    untrusting.client.get("/widgets", headers={"traceparent": TRACEPARENT})
 
     [span] = untrusting.servers()
 
@@ -226,7 +227,7 @@ def test_a_caller_from_outside_starts_a_new_trace_and_is_kept_as_a_link(
 
 
 def test_a_trusted_caller_is_continued_in_the_same_trace(trusting: Instrumented) -> None:
-    trusting.client.get("/tasks", headers={"traceparent": TRACEPARENT, "tracestate": TRACESTATE})
+    trusting.client.get("/widgets", headers={"traceparent": TRACEPARENT, "tracestate": TRACESTATE})
 
     [span] = trusting.servers()
 
@@ -240,8 +241,8 @@ def test_a_trusted_caller_is_continued_in_the_same_trace(trusting: Instrumented)
 def test_a_trusted_caller_decides_whether_its_trace_is_sampled(
     trusting_unsampled: Instrumented,
 ) -> None:
-    trusting_unsampled.client.get("/tasks", headers={"traceparent": TRACEPARENT})
-    trusting_unsampled.client.get("/tasks")
+    trusting_unsampled.client.get("/widgets", headers={"traceparent": TRACEPARENT})
+    trusting_unsampled.client.get("/widgets")
 
     [span] = trusting_unsampled.servers()
 
@@ -252,7 +253,7 @@ def test_every_log_line_written_in_a_sampled_request_names_its_trace_and_span(
     untrusting: Instrumented, logged: Logged
 ) -> None:
     logged()
-    untrusting.client.get("/tasks")
+    untrusting.client.get("/widgets")
 
     [span] = untrusting.servers()
     [line] = [one for one in logged() if one["message"] == "request completed"]
@@ -265,7 +266,7 @@ def test_a_request_sampled_out_exports_no_span_and_logs_no_trace_but_is_still_me
     unsampled: Instrumented, logged: Logged
 ) -> None:
     logged()
-    unsampled.client.get("/tasks")
+    unsampled.client.get("/widgets")
 
     lines = logged()
 
@@ -277,8 +278,8 @@ def test_a_request_sampled_out_exports_no_span_and_logs_no_trace_but_is_still_me
 def test_an_attribute_left_out_is_reported_once_by_name_and_never_by_value(
     untrusting: Instrumented, logged: Logged
 ) -> None:
-    untrusting.client.get(f"/tasks?note={CANARY}")
-    untrusting.client.get(f"/tasks?note={CANARY}")
+    untrusting.client.get(f"/widgets?note={CANARY}")
+    untrusting.client.get(f"/widgets?note={CANARY}")
     untrusting.finished()
 
     dropped = [one["attribute"] for one in logged() if one["message"] == "span attribute dropped"]
@@ -293,26 +294,29 @@ def test_a_probe_is_neither_traced_nor_measured_and_a_route_named_like_one_is(
 ) -> None:
     untrusting.client.get("/health")
     untrusting.client.get("/ready")
-    untrusting.client.patch("/tasks/health", json={"done": True})
-    untrusting.client.get("/tasks")
+    untrusting.client.get("/widgets/health")
+    untrusting.client.get("/widgets")
 
     routes = {attrs["http.route"] for attrs in untrusting.durations()}
 
-    assert sorted(one.name for one in untrusting.servers()) == ["GET /tasks", "PATCH /tasks/{id}"]
-    assert routes == {"/tasks", "/tasks/{id}"}
+    assert sorted(one.name for one in untrusting.servers()) == ["GET /widgets", "GET /widgets/{id}"]
+    assert routes == {"/widgets", "/widgets/{id}"}
 
 
 @pytest.mark.parametrize("path", ["/health", "/ready"])
 def test_a_probe_under_the_one_origin_prefix_is_a_probe_too(path: str) -> None:
     assert re.search(telemetry.PROBES, f"http://testserver{serve.PREFIX}{path}")
-    assert not re.search(telemetry.PROBES, f"http://testserver{serve.PREFIX}/tasks{path}")
+    assert not re.search(telemetry.PROBES, f"http://testserver{serve.PREFIX}/widgets{path}")
 
 
 @pytest.mark.usefixtures("untrusting")
 def test_a_second_app_in_the_same_process_refuses_to_be_instrumented() -> None:
     with pytest.raises(RuntimeError, match="already instrumented"):
         telemetry.instrument(
-            create_app(), telemetry_settings(), InMemorySpanExporter(), InMemoryMetricReader()
+            with_widgets(create_app()),
+            telemetry_settings(),
+            InMemorySpanExporter(),
+            InMemoryMetricReader(),
         )
 
 
@@ -320,10 +324,10 @@ def test_an_app_with_no_endpoint_is_not_instrumented(
     monkeypatch: pytest.MonkeyPatch, logged: Logged
 ) -> None:
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    app = create_app()
+    app = with_widgets(create_app())
 
     with TestClient(app) as client:
-        client.get("/tasks")
+        client.get("/widgets")
 
     assert app.state.instruments is None
     assert all("trace_id" not in line for line in logged())
@@ -346,9 +350,9 @@ def test_a_collector_that_hangs_slows_no_request_and_holds_shutdown_to_two_timeo
     monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", str(EXPORT_TIMEOUT_SECONDS))
 
-    with TestClient(create_app()) as client:
+    with TestClient(with_widgets(create_app())) as client:
         started = time.monotonic()
-        answered = client.get("/tasks")
+        answered = client.get("/widgets")
         answering = time.monotonic() - started
         stopping = time.monotonic()
     stopped = time.monotonic() - stopping
@@ -388,8 +392,8 @@ def test_an_app_given_an_endpoint_exports_traces_and_metrics_to_it_over_otlp(
     monkeypatch.setenv(OTLP_ENDPOINT_ENV, endpoint)
     monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
 
-    with TestClient(create_app()) as client:
-        client.get("/tasks")
+    with TestClient(with_widgets(create_app())) as client:
+        client.get("/widgets")
 
     assert "/v1/traces" in received
     assert "/v1/metrics" in received

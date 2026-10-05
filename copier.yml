@@ -86,8 +86,13 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/mocks/tasks.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/mocks/store.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/api/tasks.contract.test.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks-client-events.live.spec.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tenant_scoping.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/integration/test_tasks_on_postgres.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/routes/test_guarantee.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may
   # delete this one; it is excluded on update rather than skipped, so it never comes back.
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"

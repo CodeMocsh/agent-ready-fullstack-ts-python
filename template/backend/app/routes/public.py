@@ -1,6 +1,7 @@
 """The routes that may answer without resolving a tenant.
 
-Which ones is named in `tests/routes/test_guarantee.py` rather than marked here.
+Which ones is named in `PUBLIC_ROUTES` in the route guarantee's test, which ships with the
+identity stub, rather than marked here.
 `docs/adr/template/0008` says why an exemption is a list and never a decorator.
 """
 

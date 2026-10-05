@@ -24,7 +24,7 @@ from app.identity import (
 )
 from app.main import create_app
 from tests.conftest import Logged
-from tests.doubles import failing, refusing, refusing_async, resolving_async
+from tests.identity.doubles import failing, refusing, refusing_async, resolving_async
 
 SEAM = "app.identity.tenant_for"
 """What the probe reads. Patched there rather than where it is imported, because

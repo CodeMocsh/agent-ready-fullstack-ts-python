@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from tests.conftest import Logged
 from tests.doubles import CANARY
+from tests.widgets import with_widgets
 
 SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
@@ -29,7 +30,7 @@ SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 @pytest.fixture
 def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    return create_app()
+    return with_widgets(create_app())
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ def completed(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def test_every_line_is_one_json_object_with_the_fields_every_cloud_reads(
     client: TestClient, logged: Logged
 ) -> None:
-    client.get("/tasks")
+    client.get("/widgets")
 
     lines = logged()
 
@@ -74,12 +75,12 @@ def test_the_boot_lines_are_in_the_same_format(app: FastAPI, logged: Logged) -> 
 def test_a_request_is_logged_once_by_its_route_template_and_the_id_it_answered_with(
     client: TestClient, logged: Logged
 ) -> None:
-    answered = client.patch("/tasks/does-not-exist", json={"done": True})
+    answered = client.get("/widgets/does-not-exist")
 
     [line] = completed(logged())
 
-    assert line["http.request.method"] == "PATCH"
-    assert line["http.route"] == "/tasks/{id}"
+    assert line["http.request.method"] == "GET"
+    assert line["http.route"] == "/widgets/{id}"
     assert line["http.response.status_code"] == 404
     assert line["request_id"] == answered.headers["x-request-id"]
     assert line["duration_ms"] >= 0
@@ -101,14 +102,14 @@ def test_a_request_id_the_client_sent_is_kept(client: TestClient, logged: Logged
     join up."""
     sent = uuid4().hex
 
-    answered = client.get("/tasks", headers={"x-request-id": sent})
+    answered = client.get("/widgets", headers={"x-request-id": sent})
 
     assert answered.headers["x-request-id"] == sent
     assert completed(logged())[0]["request_id"] == sent
 
 
 def test_a_request_id_that_is_not_one_is_replaced(client: TestClient, logged: Logged) -> None:
-    answered = client.get("/tasks", headers={"x-request-id": CANARY})
+    answered = client.get("/widgets", headers={"x-request-id": CANARY})
 
     assert answered.headers["x-request-id"] != CANARY
     assert CANARY not in json.dumps(logged())
@@ -118,9 +119,9 @@ def test_nothing_the_request_carried_reaches_the_log(client: TestClient, logged:
     """The body, the query string, a header, a path parameter and a refused body -- each the
     way a real leak has happened. The count is asserted as well, because an empty log passes
     the absence check just as happily as a clean one."""
-    client.post(f"/tasks?note={CANARY}", json={"title": CANARY}, headers={"x-note": CANARY})
-    client.patch(f"/tasks/{CANARY}", json={"done": True})
-    client.post("/tasks", json={"title": {"nested": CANARY}})
+    client.post(f"/widgets?note={CANARY}", json={"name": CANARY}, headers={"x-note": CANARY})
+    client.get(f"/widgets/{CANARY}")
+    client.post("/widgets", json={"name": {"nested": CANARY}})
     client.get(f"/no-route/{CANARY}")
 
     lines = logged()
@@ -167,7 +168,7 @@ def test_uvicorn_access_records_never_reach_the_log(logged: Logged) -> None:
     """The record uvicorn builds carries the path with its query string. `request completed`
     replaces it."""
     logging.getLogger("uvicorn.access").info(
-        '%s - "GET /tasks?note=%s HTTP/1.1" 200', "::1", CANARY
+        '%s - "GET /widgets?note=%s HTTP/1.1" 200', "::1", CANARY
     )
 
     assert logged() == []

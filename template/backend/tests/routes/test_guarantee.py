@@ -13,48 +13,23 @@ not an audit of every handler.
 
 import re
 from collections.abc import Iterator
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
 from app.identity import tenant_for
 from app.main import create_app
-from tests.doubles import REFUSAL, refusing
-
-UNKNOWN = "does-not-exist"
-"""What a `{path_param}` becomes when a route is driven generically. It never reaches a
-handler: the refusal is raised resolving the router's dependency, before anything looks at a
-path parameter or a body."""
+from tests import widgets
+from tests.identity.doubles import REFUSAL, refusing
+from tests.routes.walk import UNKNOWN, endpoints_of, routes_of
 
 ANY_BODY: dict[str, str] = {}
 """Sent to every route, including the ones that would reject it. A body that fails validation
 would be a `422`, and a `422` here would mean the tenant was resolved first — so an empty
 object is deliberately the wrong shape for every route that takes one."""
-
-
-def generated_by_fastapi(app: FastAPI) -> frozenset[str]:
-    """The paths FastAPI adds itself, asked of the app rather than spelled here.
-
-    Filtered rather than listed as public, because nobody in a generated project writes them
-    and naming them beside a route somebody did write invites the two to be read as the same
-    kind of decision. A project that does not want its schema readable turns it off at
-    `create_app`, and this follows without an edit.
-
-    **Exact paths, and never a prefix.** This was `startswith(("/openapi", "/docs", "/redoc"))`,
-    which quietly exempted `/docs-internal` and `/openapi-status` -- licence by spelling, and
-    the very thing the `PUBLIC_ROUTES` docstring below refuses. Reading the four values off the
-    app is both exact and correct when a project renames them.
-    """
-    named = (
-        app.openapi_url,
-        app.docs_url,
-        app.redoc_url,
-        app.swagger_ui_oauth2_redirect_url,
-    )
-    return frozenset(one for one in named if one)
 
 
 PUBLIC_ROUTES: tuple[tuple[str, str], ...] = (
@@ -72,68 +47,6 @@ The list earns its keep in both directions: `test_no_route_outside_the_public_li
 when a route escapes into it, and `test_the_public_list_is_exactly_...` fails when a route is
 deleted and leaves its licence behind.
 """
-
-
-def routes_of(app: FastAPI) -> list[tuple[str, str]]:
-    """Every route this app declares, as `(method, path)` with the parameters filled in.
-
-    **`include_router` does not flatten, and reading `app.routes` alone finds nothing.** Since
-    Starlette 1.6 an included router is left in place as an `_IncludedRouter`, which carries
-    neither `methods` nor `routes` — so a walk that asks only those two questions skips every
-    route in the application and returns an empty list. Every assertion below then passes
-    against nothing, which is why `test_the_walk_finds_the_routes_this_app_actually_declares`
-    exists: it caught exactly this, on the first run, in a suite that was otherwise green.
-    The routes are reached through `original_router`, and the prefix handed to `include_router`
-    through `include_context` — the one the router was built with is already in the path.
-
-    A route with no HTTP methods is skipped here rather than guessed at, and
-    `test_no_route_shape_escapes_being_driven` refuses one instead — a websocket cannot be
-    driven as `(method, path)`, and dropping it quietly is how a guarantee stops covering a
-    route without saying so.
-
-    It does **not** see into a mount whose application is not a router — Starlette answers `[]`
-    there, indistinguishable from an empty router — so
-    `test_every_mount_is_one_this_walk_can_see_into` is what stops a surface being added out of
-    this function's reach.
-    """
-    built: list[tuple[str, str]] = []
-    for path, route in endpoints_of(app):
-        methods: set[str] | None = getattr(route, "methods", None)
-        if methods is None:
-            continue
-        filled = re.sub(r"\{[^}]+\}", UNKNOWN, path)
-        built.extend((method, filled) for method in sorted(methods - {"HEAD", "OPTIONS"}))
-    return sorted(built)
-
-
-def endpoints_of(app: FastAPI) -> Iterator[tuple[str, Any]]:
-    """Every route that ends in a handler, as `(path, route)` with the prefixes composed.
-
-    The walk itself, kept apart from `routes_of` because two questions are asked of it: what a
-    caller can reach, and what the handler behind it does. The second needs the route object.
-
-    **A container is one that has `routes`, not one that lacks `methods`.** Asking for `methods`
-    first looked equivalent and was not: an `APIWebSocketRoute` has neither, so it was treated
-    as a container, descended into for the `()` it does not have, and dropped -- the one route
-    shape the guarantee never saw. Asking what a thing *contains* is the question that
-    distinguishes them, and it leaves every endpoint shape in the walk whether or not this
-    file knows how to drive it. `test_no_route_shape_escapes_being_driven` is what refuses the
-    ones it cannot.
-    """
-    generated = generated_by_fastapi(app)
-    pending: list[tuple[str, object]] = [("", one) for one in app.routes]
-    while pending:
-        prefix, route = pending.pop()
-        carrier = getattr(route, "original_router", route)
-        context = getattr(route, "include_context", None)
-        under = prefix + str(getattr(context, "prefix", ""))
-        nested = getattr(carrier, "routes", None)
-        if nested is not None:
-            pending.extend((under, one) for one in nested)
-            continue
-        path = under + str(getattr(carrier, "path", ""))
-        if path not in generated:
-            yield path, carrier
 
 
 class Refusing(NamedTuple):
@@ -177,11 +90,12 @@ def test_the_walk_finds_the_routes_this_app_actually_declares() -> None:
     """The three tests below all pass against a `routes_of` that returns nothing, and so does a
     suite where the walk quietly stopped descending into routers. This is what makes their
     silence mean something."""
-    found = routes_of(create_app())
+    app = create_app()
+    found = {path for _, path in routes_of(app)}
+    declared = {re.sub(r"\{[^}]+\}", UNKNOWN, path) for path in app.openapi()["paths"]}
 
-    assert ("GET", "/tasks") in found
-    assert ("DELETE", f"/tasks/{UNKNOWN}") in found
-    assert ("GET", "/health") in found
+    assert declared <= found
+    assert "/health" in found
 
 
 def test_no_route_outside_the_public_list_answers_without_a_tenant(refused: Refusing) -> None:
@@ -208,7 +122,9 @@ def test_a_refused_request_says_so_in_the_contract_s_own_shape(refused: Refusing
     """A refusal a client can act on: the declared status, the header that names the scheme, and
     an `ErrorBody` rather than whatever a bare exception renders as. Without the handler in
     `app/main.py` this is a `500`, which a client retries."""
-    answer = refused.client.get("/tasks")
+    refused.app.include_router(widgets.router, dependencies=[Depends(tenant_for)])
+
+    answer = refused.client.get("/widgets")
 
     assert answer.status_code == 401
     assert answer.headers["www-authenticate"] == "Bearer"

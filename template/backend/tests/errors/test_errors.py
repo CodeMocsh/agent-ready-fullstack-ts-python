@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from app import errors, refusal
 from app.main import create_app
 from app.refusal import ApiError, responses
-from tests.routes.test_guarantee import endpoints_of
+from tests.routes.walk import endpoints_of
 
 SOURCE = Path(__file__).resolve().parents[2] / "app"
 

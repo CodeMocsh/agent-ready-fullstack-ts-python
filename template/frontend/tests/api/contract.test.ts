@@ -21,7 +21,7 @@ function postClientEvents(body: unknown): Promise<Response> {
 
 const REFUSED: [string, unknown][] = [
   ["a kind nobody declared", { events: [{ ...DECLARED, kind: "debug" }] }],
-  ["free text in the route", { events: [{ ...DECLARED, route: "/tasks/a sentence" }] }],
+  ["free text in the route", { events: [{ ...DECLARED, route: "/widgets/a sentence" }] }],
   ["a route past its length", { events: [{ ...DECLARED, route: `/${"a".repeat(200)}` }] }],
   ["free text as the error name", { events: [{ ...DECLARED, error: "a sentence" }] }],
   ["an error name past its length", { events: [{ ...DECLARED, error: "E".repeat(101) }] }],
@@ -45,7 +45,7 @@ describe(`client events contract (${againstLiveBackend ? "live backend" : "mock 
   it("accepts every field at its fullest", async () => {
     const fullest = {
       kind: "mutation",
-      route: "/tasks/$id",
+      route: "/widgets/$id",
       error: "ApiError",
       status: 599,
       request_id: "0f8c2c1b9d2e4b6f8a1c3e5d7f9b0a2c",
