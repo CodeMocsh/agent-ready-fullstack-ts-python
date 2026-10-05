@@ -75,8 +75,9 @@ commented-out code. Shebangs and TypeScript `///` directives are executable dire
 not comments.
 
 Express intent through names, structure, types, and tests. Rationale goes in the commit
-message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
-so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
+message. Only an architectural decision also goes in `docs/adr/`, and most decisions are not
+one -- [what earns a file](docs/adr/README.md). This relocates rationale rather than removing
+it, so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
 explanation.
 
 **An ADR cites nothing by section number.** Name the thing — the route, the function,
