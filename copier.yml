@@ -64,6 +64,16 @@ example_resource:
     project has replaced it.
   default: true
 
+# The same, for the identity stub: `app/identity.py`, which resolves every request to the
+# sentinel tenant, and its tests. A project that has replaced it with real authentication
+# answers false once, and an update stops bringing the stub back.
+identity_stub:
+  type: bool
+  help: >-
+    Keep updating the identity stub (`app/identity.py`) on `copier update`? Answer no once your
+    project authenticates requests itself.
+  default: true
+
 _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
@@ -72,6 +82,8 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.live.spec.ts{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity.py{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may
   # delete this one; it is excluded on update rather than skipped, so it never comes back.
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"

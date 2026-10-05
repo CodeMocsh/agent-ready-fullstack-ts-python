@@ -84,6 +84,9 @@ What to expect, because it is not all free:
   `uvx --exclude-newer "14 days" copier@9.17.1 update --data example_resource=false`. From then
   on an update leaves the example resource's own files alone, and does not re-add any you
   deleted. Everything else keeps updating.
+- **Stop receiving the identity stub once you authenticate.** Answer once:
+  `uvx --exclude-newer "14 days" copier@9.17.1 update --data identity_stub=false`, and an update
+  leaves `app/identity.py` and its tests alone.
 - **Files you rewrote come back as conflicts.** The modules under `app/models/` and
   `app/routes/tenant/` are the first any real project replaces. You are porting a pattern rather than accepting a patch.
 - **Regenerate the contract and the complexity baseline afterwards.** `openapi.json`,
