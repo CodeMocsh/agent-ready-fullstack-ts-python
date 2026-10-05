@@ -412,20 +412,22 @@ def test_a_pass_is_remembered_for_exactly_the_tree_the_gate_read(tmp_path: Path)
     assert run("git", "ls-files", "--stage") == index, "fingerprinting the tree staged something"
 
 
-THE_MACHINE_LOCK = 'lock="/tmp/pre-commit-gate-$(id -u).lock"'
+THE_LOCK = re.compile(r'^lock="/tmp/[a-z0-9-]+-pre-commit-\$\(id -u\)\.lock"$', re.MULTILINE)
+THE_BUDGET = re.compile(r"^BUDGET=[0-9]+$", re.MULTILINE)
 
 
-def a_clone_with_a_gate(tmp_path: Path, recipe: str) -> Path:
+def a_clone_with_a_gate(tmp_path: Path, recipe: str, budget: int = 600) -> Path:
     """A git checkout with both halves "installed", the runner and its helpers copied in, and a
     `gate` target that runs `recipe`. The lock is moved into `tmp_path`, so a gate already
-    holding the machine's lock -- the one running this test -- does not hold this one."""
+    holding this project's lock -- the one running this test -- does not hold this one."""
     clone = tmp_path / "clone"
     (clone / "devtools").mkdir(parents=True)
     runner = RUNNER.read_text(encoding="utf-8")
-    assert THE_MACHINE_LOCK in runner, "the runner no longer takes the lock this test moves"
-    (clone / "devtools" / "gate.sh").write_text(
-        runner.replace(THE_MACHINE_LOCK, f'lock="{tmp_path}/gate.lock"'), encoding="utf-8"
-    )
+    assert THE_LOCK.search(runner), "the runner no longer takes the lock this test moves"
+    assert THE_BUDGET.search(runner), "the runner no longer sets the budget this test moves"
+    runner = THE_LOCK.sub(f'lock="{tmp_path}/gate.lock"', runner)
+    runner = THE_BUDGET.sub(f"BUDGET={budget}", runner)
+    (clone / "devtools" / "gate.sh").write_text(runner, encoding="utf-8")
     for helper in (WORKTREE_TREE, HOLD):
         (clone / "devtools" / helper.name).write_text(helper.read_text(encoding="utf-8"))
     (clone / "frontend" / "node_modules").mkdir(parents=True)
@@ -489,6 +491,53 @@ def test_a_red_gate_is_remembered_as_nothing(tmp_path: Path):
 
     assert first.returncode != 0 and second.returncode != 0
     assert times_the_gate_ran(clone) == 2
+
+
+def test_a_green_run_over_budget_fails_and_is_still_remembered_as_passed(tmp_path: Path):
+    """Over budget is a regression to find, not a reason to run the same tree again: the retried
+    commit of that tree skips the gate."""
+    clone = a_clone_with_a_gate(tmp_path, "echo ran >> ran.log", budget=-1)
+
+    first = run_the_gate(clone)
+    second = run_the_gate(clone)
+
+    assert first.returncode != 0
+    assert "Over budget" in first.stderr
+    assert second.returncode == 0, second.stderr
+    assert times_the_gate_ran(clone) == 1
+
+
+def test_a_gate_that_waited_its_turn_is_not_charged_for_the_wait(tmp_path: Path):
+    """The clock starts once the lock is held, so a queue does not push a green run over budget."""
+    import pytest
+
+    clone = a_clone_with_a_gate(tmp_path, "echo ran >> ran.log", budget=1)
+    lock = tmp_path / "gate.lock"
+    holder = subprocess.Popen(
+        ["sh", "-c", f'exec 9>>"$1"; perl {HOLD} "$1"; echo held; read _', "sh", str(lock)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert holder.stdout is not None and holder.stdin is not None
+    assert holder.stdout.readline() == "held\n"
+    tools = clone.parent / "bin"
+    waiting = subprocess.Popen(
+        ["sh", "devtools/gate.sh"],
+        cwd=clone,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"},
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        waiting.wait(timeout=2)
+    holder.stdin.close()
+    holder.wait(timeout=10)
+    _, err = waiting.communicate(timeout=30)
+
+    assert "waiting for the gate already running" in err
+    assert waiting.returncode == 0, err
 
 
 def test_make_install_arms_the_hook():

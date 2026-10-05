@@ -1,7 +1,4 @@
 #!/bin/sh
-# The tree this checkout's working directory would commit: tracked edits and untracked files
-# alike, and nothing git ignores. Read through a copy of the index, so fingerprinting the tree
-# stages nothing.
 set -eu
 
 scratch="$(mktemp -d)"

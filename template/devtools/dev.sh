@@ -11,7 +11,6 @@ set -eu
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 export BACKEND_PORT FRONTEND_PORT
-# The development loop, which may run on the in-memory substrate. Unset is production.
 export APP_ENV=development
 
 # Job control, so vite runs as a foreground job of its own and keeps the terminal. It is

@@ -1087,6 +1087,8 @@ need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
 # interoperating, and it reaches the hook through the gate rather than by name.
 need_grep 'make -s pre-commit' .githooks/pre-commit
 need_grep 'make -s gate' devtools/gate.sh
+# The lock is this project's, so two projects on one machine do not queue behind each other.
+need_grep 'lock="/tmp/smoke-test-pre-commit-' devtools/gate.sh
 need_grep 'test-contract' Makefile
 
 echo "==> assert the quality gates"

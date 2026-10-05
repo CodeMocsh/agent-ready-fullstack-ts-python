@@ -1,0 +1,101 @@
+#!/bin/sh
+# The gate, before the commit rather than after the push. `make gate` is the list of
+# checks; this script decides whether this clone can run it, and it is what both
+# `make pre-commit` and .githooks/pre-commit run, so a gate started either way queues
+# behind any other of this project and a tree that already passed is not checked twice.
+#
+# A half that is not installed is skipped rather than failing the commit, because a
+# clone that has installed only one of them is a legitimate way to work here. That
+# is also the one dangerous thing in this file: a run where everything skipped exits
+# 0 and looks exactly like a run where everything passed. So a partial run says what
+# it did not do, on stderr, every time. Read it: the workflow runs `make gate` after a
+# push, and nothing before it, so a half a partial run skipped is unchecked until then.
+#
+# The whole run is timed and the time is printed, because a gate reaches minutes by
+# degrees with nobody watching. BUDGET is a smoke alarm rather than
+# a target: it is a few times what the gate costs, so a loaded laptop does not trip it
+# and a regression that doubles the bill does. Raise it in a commit that says what got
+# slower and why that is the right trade.
+set -eu
+
+BUDGET=60
+
+cd "$(git rev-parse --show-toplevel)"
+
+# git runs this hook with GIT_DIR and GIT_INDEX_FILE pointing at the commit being made, and every
+# `git` a test starts inherits them -- so a test's `git init --bare` in a temporary directory
+# reinitialised this repository as bare, for every worktree sharing it. The gate reads the
+# repository the ordinary way; nothing it starts may be handed this one.
+unset $(git rev-parse --local-env-vars)
+
+has_frontend=0
+has_backend=0
+if command -v pnpm >/dev/null 2>&1 && [ -d frontend/node_modules ]; then
+    has_frontend=1
+fi
+if command -v uv >/dev/null 2>&1 && [ -d backend/.venv ]; then
+    has_backend=1
+fi
+
+if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
+    passed="$(git rev-parse --git-path gate-passed)"
+    before="$(sh devtools/worktree-tree.sh)"
+    if [ -f "$passed" ] && [ "$(cat "$passed")" = "$before" ]; then
+        echo "pre-commit: tree $before already passed the gate in this checkout; not running it again" >&2
+        exit 0
+    fi
+fi
+
+lock="/tmp/{{ package_name }}-pre-commit-$(id -u).lock"
+exec 9>>"$lock"
+perl devtools/hold-the-gate.pl "$lock"
+
+started=$(date +%s)
+
+report_the_time() {
+    elapsed=$(( $(date +%s) - started ))
+    echo "" >&2
+    echo "pre-commit: ${elapsed}s of a ${BUDGET}s budget" >&2
+    if [ "$elapsed" -gt "$BUDGET" ]; then
+        echo "  Over budget. Something got slower; find it before it becomes normal." >&2
+        echo "  \`time make pre-commit\` prints the phases. BUDGET lives in devtools/gate.sh." >&2
+        return 1
+    fi
+    return 0
+}
+
+if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
+    make -s gate 9>&- || exit 1
+    if [ "$(sh devtools/worktree-tree.sh)" = "$before" ]; then
+        echo "$before" >"$passed"
+    fi
+    report_the_time || exit 1
+    exit 0
+fi
+
+# Below here the gate cannot run as one, because two of its members -- the
+# contract suite and the artifact check -- are about the two halves agreeing and
+# have nothing to compare against. What is left runs directly.
+failed=0
+
+if [ "$has_frontend" = 1 ]; then
+    pnpm -C frontend lint:check 9>&- || failed=1
+    pnpm -C frontend test 9>&- || failed=1
+fi
+
+if [ "$has_backend" = 1 ]; then
+    (cd backend && uv run --no-sync python devtools/lint.py --check) 9>&- || failed=1
+    (cd backend && uv run --no-sync pytest -q) 9>&- || failed=1
+fi
+
+echo "" >&2
+echo "pre-commit: PARTIAL RUN -- this commit was not checked by the whole gate." >&2
+[ "$has_frontend" = 1 ] || echo "  frontend        SKIPPED (no pnpm, or run 'make install')" >&2
+[ "$has_backend" = 1 ] || echo "  backend         SKIPPED (no uv, or run 'make install')" >&2
+echo "  openapi-check   SKIPPED (needs both halves)" >&2
+echo "  contract suite  SKIPPED (needs both halves)" >&2
+echo "Run 'make install', then 'make pre-commit', to check it properly." >&2
+
+report_the_time || failed=1
+
+exit "$failed"

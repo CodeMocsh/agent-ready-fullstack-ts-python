@@ -1,6 +1,2 @@
 #!/bin/sh
-# The gate, before the commit rather than after the push. `make pre-commit` runs it through
-# devtools/gate.sh, which decides whether this clone can run it.
-set -eu
-cd "$(git rev-parse --show-toplevel)"
 exec make -s pre-commit

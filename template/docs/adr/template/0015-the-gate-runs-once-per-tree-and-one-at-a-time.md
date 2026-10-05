@@ -53,3 +53,18 @@ project, because a second project contends for the same cores.
   lock, and the partial run — because each one decides whether the next runs at all.
 - The helper keeps the name `worktree-tree.sh`, which the sibling project uses, so the next
   `copier update` there adds nothing beside it.
+
+## Amended 2026-10-04: one lock per project, and a budget
+
+- **The lock is the project's, not the machine's**: `/tmp/<package_name>-pre-commit-<uid>.lock`.
+  The argument above was cores. In practice two different projects rarely gate at once, and
+  when they do, queueing one behind the other costs a person more than the contention does. Two
+  worktrees of one project still queue.
+- **The run is timed against `BUDGET`**, and a green run over it fails after its pass is
+  recorded, so retrying the commit costs nothing. The option rejected above was rejected for
+  its number; the number is now the template's own: 60 seconds, about three times the
+  13–22 seconds `make gate` took on the machine this was measured on. A project whose gate
+  grows raises it in a commit that says why.
+
+`devtools/gate.sh` is rendered (`gate.sh.jinja`) for the lock name. Where it differs from the
+sibling project's script only in wording, it now uses that project's wording.
