@@ -143,6 +143,7 @@ frontend/             everything pnpm touches
   src/client-events.ts reports a failure the browser saw to the backend's log
   tests/              mirrors src/
   e2e/                Playwright; *.live.spec.ts needs a running backend
+  e2e/signed-in.ts    how a live spec signs in -- yours
   devtools/           the frontend's own gates, and the scanner they share
 
 backend/              everything uv touches
@@ -158,7 +159,8 @@ backend/              everything uv touches
   app/lifespan.py     what this process runs; reads no variable
   app/serve.py        the one-origin entrypoint: app.main plus the frontend bundle
   app/identity.py     which tenant a request is -- ships as a stub returning "default"
-  app/log.py          every line the application logs, and the only importer of logging
+  app/log.py          how the application logs, and the template's own lines
+  app/log_lines.py    every other line the application logs -- yours
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/integration/, which is a tier
@@ -263,8 +265,8 @@ Each of these is something a reasonable edit undoes without anything failing unt
 
 **Backend**
 
-- **Log through a function in `app/log.py`.** ruff refuses `logging` and `structlog` outside
-  `app/log.py` and `tests/log/`, and `print` outside `devtools/`. A field is a parameter
+- **Log through a function in `app/log_lines.py`.** ruff refuses `logging` and `structlog`
+  outside it, `app/log.py` and `tests/log/`, and `print` outside `devtools/`. A field is a parameter
   somebody declared, so never pass a body, a path, a query string or an exception's message.
   `tests/log/test_log.py` holds a canary to that.
 - **A span attribute leaves the process only if `SPAN_ATTRIBUTES` in `app/telemetry.py` names

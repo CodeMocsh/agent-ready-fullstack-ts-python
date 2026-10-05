@@ -1,5 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { CANARY, nextClientEvent, REQUEST_ID } from "./client-events";
+import { expect, test } from "./signed-in";
 
 async function tasksAnswer(page: Page, status: number, body: unknown): Promise<void> {
   await page.route("**/api/tasks", (route) =>

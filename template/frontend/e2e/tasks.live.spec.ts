@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./signed-in";
 
 test("adds a task against the backend half", async ({ page }) => {
   await page.goto("./");

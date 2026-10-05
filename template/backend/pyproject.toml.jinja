@@ -113,7 +113,7 @@ line-length = 100
 # logger directly, and the module-level handle every real project uses is invisible to it.
 # The TRY and LOG rules below would then pass on the one file that actually logs -- a green
 # check that inspected nothing. Name the handle here whenever you add one.
-logger-objects = ["app.log._LOG"]
+logger-objects = ["app.log._LOG", "app.log_lines._LOG"]
 
 select = [
     "E", # https://docs.astral.sh/ruff/rules/#error-e
@@ -148,7 +148,7 @@ select = [
     # is per-file-ignores below, which is a line somebody reviews rather than a decision
     # taken silently at the point of pain.
     "BLE", # https://docs.astral.sh/ruff/rules/#flake8-blind-except-ble
-    # Every line the application logs is declared in app/log.py, which is what keeps a
+    # Every line the application logs is declared in app/log.py or app/log_lines.py, which is what keeps a
     # request's values out of the log: a field is a parameter somebody wrote down there.
     # The banned imports below are that rule mechanised.
     "TID251", # https://docs.astral.sh/ruff/rules/banned-api/
@@ -188,6 +188,7 @@ ignore = [
 "tests/**" = ["S101", "S105"]
 # The one module that writes the log, and the tests that read it.
 "app/log.py" = ["TID251"]
+"app/log_lines.py" = ["TID251"]
 "tests/log/**" = ["TID251"]
 # The one module that instruments the app, and the tests that read what it exports.
 "app/telemetry.py" = ["TID251"]
@@ -197,8 +198,8 @@ ignore = [
 "devtools/**" = ["T20"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
-"logging".msg = "Log through a function in app/log.py, which declares every field a line can carry."
-"structlog".msg = "Log through a function in app/log.py, which declares every field a line can carry."
+"logging".msg = "Log through a function in app/log_lines.py, which declares every field a line can carry."
+"structlog".msg = "Log through a function in app/log_lines.py, which declares every field a line can carry."
 "opentelemetry".msg = "Instrument in app/telemetry.py, which declares every attribute a span or metric can carry."
 
 [tool.ruff.lint.isort]
