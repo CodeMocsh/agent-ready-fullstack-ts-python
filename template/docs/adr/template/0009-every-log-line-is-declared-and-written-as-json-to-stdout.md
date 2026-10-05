@@ -1,7 +1,7 @@
 # Every log line is declared, and written as JSON to stdout
 
-`app/log.py` is the only module that may import `logging` or `structlog`. Each line the
-application writes is a function there, and the function's parameters are the fields the line
+`app/log.py` and `app/log_lines.py` are the only modules that may import `logging` or
+`structlog`. Each line the application writes is a function in one of them, and the function's parameters are the fields the line
 may carry. The browser reports a failure to `POST /client-events` as a typed event with no free
 text, and the backend writes it to the same log.
 
@@ -36,7 +36,7 @@ identifier or a number.
 
 ## Consequences
 
-- A new log line is a new function in `app/log.py`.
+- A new log line is a new function in `app/log_lines.py`.
 - An exception's message is written as the library wrote it. A Postgres unique violation names
   the conflicting value.
 - `tenant_id` is not on `request completed`: `tenant_for` is synchronous, so what it binds does

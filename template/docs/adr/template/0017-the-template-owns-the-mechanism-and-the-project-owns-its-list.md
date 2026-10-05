@@ -10,10 +10,17 @@ which the template writes once and an update never touches.
 | `app/environment.py` — what its production refuses | `app/deployment.py` — the variables, `refuse_in_production` |
 | `tests/tiers.py` — its tiers | `tests/tier.py` — what a tier is |
 | `tests/models/layers.py` — its model layering | `tests/models/test_layering.py` |
+| `app/request_line.py` — the fields it names on `request completed` | `app/log.py` — `name_on_request_line` |
+| `app/log_lines.py` — its own log lines | `app/log.py` — the format, the request line, the template's lines |
+| `frontend/e2e/signed-in.ts` — how its live specs sign in | the live specs that use its `test` |
 
 `copier.yml` lists the project's modules under `_skip_if_exists`. The project's tests of what its
 production refuses, `tests/environment/test_environment.py`, are excluded on update instead:
 nothing imports a test, so a project may delete it, and `_skip_if_exists` would bring it back.
+
+`app/log_lines.py` is the one project module no template code imports, and ruff allows
+`structlog` there as in `app/log.py`. `frontend/e2e/signed-in.ts` does nothing under the identity
+stub; a project that authenticates signs in there.
 
 ## Why
 
@@ -47,10 +54,5 @@ same line.
 - `app/errors.py` re-exports `ApiError` and `responses`, and `app/environment.py` re-exports the
   mechanism, so a project's own code keeps importing from the module it always did. The
   template's own code imports from the mechanism module.
-
-## Amended 2026-10-05: `app/request_line.py`, the fields of `request completed`
-
-`app/request_line.py` is the project's list of the fields it names on `request completed`
-beyond `tenant_id`. `app/log.py` is the mechanism that reads it, and `_skip_if_exists` carries
-it like the others. `docs/adr/template/0009` says why the line carries them.
-
+- A project that deletes `app/log_lines.py` gets it back, empty, on the next update. Leaving the
+  project to create it instead leaves no place an agent finds before it reaches for `app/log.py`.
