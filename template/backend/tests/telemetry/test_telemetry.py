@@ -157,6 +157,23 @@ def test_a_span_names_the_version_every_log_line_names(
     assert {line["service.version"] for line in logged()} == {"1.4.2+build.7"}
 
 
+@pytest.mark.parametrize(
+    "path", ["/widgets/does-not-exist", "/shelves/top/widgets/does-not-exist", "/no-route"]
+)
+def test_the_log_and_the_span_name_one_request_by_the_same_route(
+    untrusting: Instrumented, logged: Logged, path: str
+) -> None:
+    """Two readers of one route: the instrumentation for the span, `app.log` for the line. A
+    route that reads one way in the trace and another in the log cannot be joined across them."""
+    untrusting.client.get(path)
+
+    [server] = untrusting.servers()
+    [line] = [one for one in logged() if one["message"] == "request completed"]
+
+    assert server.attributes is not None
+    assert line["http.route"] == server.attributes.get("http.route")
+
+
 def test_a_request_is_one_server_span_named_by_its_route_with_only_declared_attributes(
     untrusting: Instrumented,
 ) -> None:
