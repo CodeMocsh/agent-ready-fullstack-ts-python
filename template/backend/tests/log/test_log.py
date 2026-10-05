@@ -141,6 +141,18 @@ def test_a_request_is_logged_once_by_its_route_template_and_the_id_it_answered_w
     assert line["duration_ms"] >= 0
 
 
+def test_a_request_to_a_prefixed_router_is_logged_by_the_whole_template(
+    client: TestClient, logged: Logged
+) -> None:
+    """The route a router declares is only the end of the template: the prefix it was included
+    under is the rest, and a line without it names a route nobody serves."""
+    client.get("/shelves/top/widgets/does-not-exist")
+
+    [line] = completed(logged())
+
+    assert line["http.route"] == "/shelves/{shelf}/widgets/{id}"
+
+
 def test_each_request_is_logged_with_the_tenant_it_resolved(
     guarded: FastAPI, logged: Logged
 ) -> None:

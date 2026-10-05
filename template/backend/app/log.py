@@ -20,7 +20,9 @@ from typing import Final, TextIO, final, override
 import structlog
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from fastapi import FastAPI, Request, Response
+from fastapi.routing import iter_route_contexts
 from opentelemetry import trace
+from starlette.routing import Match
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 from app.deployment import ACKNOWLEDGED_ENV
@@ -231,12 +233,27 @@ _ENRICHED: Final[list[Processor]] = [
 ]
 
 
+def _route_answering(request: Request) -> str | None:
+    """The whole template of the route `request` reaches, every prefix it was included under
+    first, or `None` when no route answers it. Matched as the OpenTelemetry instrumentation
+    matches it, so the line and the server span name one route."""
+    partial: str | None = None
+    for route in iter_route_contexts(request.app.routes):
+        match, _ = route.matches(request.scope)
+        if match is Match.FULL:
+            return route.path
+        if match is Match.PARTIAL and partial is None:
+            partial = route.path
+    return partial
+
+
 async def _completed(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     """Times the request and logs it. A request that raises is logged as a `500`, which is what
     the server answers once the exception has passed through here."""
     started = time.perf_counter()
+    route = _route_answering(request)
     status = 500
     named: dict[str, str] = {}
     request.state.request_line = named
@@ -247,7 +264,7 @@ async def _completed(
     finally:
         request_completed(
             request.method,
-            getattr(request.scope.get("route"), "path_format", None),
+            route,
             status,
             round((time.perf_counter() - started) * 1000, 1),
             named,
