@@ -72,6 +72,12 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.live.spec.ts{% endif %}"
+  # Generated from the project's own code, so an update never touches them and the project
+  # regenerates them afterwards: `make openapi` writes the first two, `make lint` the third.
+  # A merged copy of any of them describes neither tree.
+  - "{% if _copier_operation == 'update' %}openapi.json{% endif %}"
+  - "{% if _copier_operation == 'update' %}frontend/src/api/schema.ts{% endif %}"
+  - "{% if _copier_operation == 'update' %}backend/.complexity-baseline.json{% endif %}"
 
 # Computed, never asked. The frontend package.json needs an SPDX expression, and npm
 # spells "no license" as UNLICENSED.
