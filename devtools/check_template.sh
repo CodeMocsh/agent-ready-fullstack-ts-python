@@ -537,7 +537,7 @@ PY
     # example, so a copy without it is a project that does not import.
     # The paths are read out of copier.yml, the one place that lists them.
     NO_EXAMPLE="$(sh "$RENDER" --into "$WORK/no-example" -- --data example_resource=false)"
-    EXAMPLE_FILES="$(sed -n "s/.*_copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
+    EXAMPLE_FILES="$(sed -n "s/.*not example_resource and _copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
     [ -n "$EXAMPLE_FILES" ] || fail "copier.yml names no example file, so this check would pass over nothing"
     for kept in $EXAMPLE_FILES; do
         [ -f "$NO_EXAMPLE/$kept" ] || fail "a copy with example_resource=false left out $kept"

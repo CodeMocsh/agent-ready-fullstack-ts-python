@@ -174,6 +174,9 @@ Each of these is something a reasonable edit undoes without anything failing unt
 - `openapi.json` and `frontend/src/api/schema.ts` are generated from
   `backend/app/`. Change the backend, run `make openapi`, commit all three. Never hand-edit
   either artifact, and never hand-merge one: take a side and regenerate.
+- **After `copier update`, run `make openapi` and `make lint`.** An update never touches
+  `openapi.json`, `schema.ts` or `backend/.complexity-baseline.json`, because each is generated
+  from your code; those two targets write them again.
 - Declare every status code a route can return, with a `model` for anything that has a
   body. An undeclared code is invisible to the other half. A refusal is a class in
   `app/errors.py`: raise it, and name it in `responses(...)` on the route.

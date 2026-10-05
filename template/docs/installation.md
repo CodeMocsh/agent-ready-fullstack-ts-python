@@ -67,6 +67,7 @@ is what lets a later template change reach a project generated months ago:
 uvx --exclude-newer "14 days" copier@9.17.1 update
 make install
 make openapi
+make lint
 make schema
 make pre-commit
 ```
@@ -85,8 +86,11 @@ What to expect, because it is not all free:
   deleted. Everything else keeps updating.
 - **Files you rewrote come back as conflicts.** The modules under `app/models/` and
   `app/routes/tenant/` are the first any real project replaces. You are porting a pattern rather than accepting a patch.
-- **Regenerate the contract afterwards.** `openapi.json` and `frontend/src/api/schema.ts` are
-  generated from your code, so merging them is meaningless.
+- **Regenerate the contract and the complexity baseline afterwards.** `openapi.json`,
+  `frontend/src/api/schema.ts` and `backend/.complexity-baseline.json` are generated from your
+  code, so an update never touches them. `make openapi` rewrites the first two and `make lint`
+  the third; if `make lint` reports that complexity rose past the tolerance, the template's
+  code is why, and the message says how to record it.
 - **Regenerate the schema artifacts too.** `deploy/schema.sql` and `backend/.schema-baseline.json`
   are generated from your `ddl.py`, which by then holds your entries as well as the template's.
   A merged copy of either describes neither project, and `make pre-commit` says so. `make schema`
