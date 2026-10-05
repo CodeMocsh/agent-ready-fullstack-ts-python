@@ -1,4 +1,4 @@
-import type { CreateTaskBody, Task, UpdateTaskBody } from "@/api/types";
+import type { CreateTaskBody, Task, UpdateTaskBody } from "@/api/tasks";
 
 const SEED: readonly Task[] = [
   { id: "1", title: "Read AGENTS.md", done: true },

@@ -82,6 +82,10 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.live.spec.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/api/tasks.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/mocks/tasks.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/mocks/store.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/api/tasks.contract.test.ts{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may

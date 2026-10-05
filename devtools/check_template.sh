@@ -1101,7 +1101,8 @@ need_grep 'separate_input_output_schemas=False' backend/app/main.py
 # compiler API it uses no longer exists.
 need_grep 'pnpm dlx openapi-typescript@' frontend/package.json
 need frontend/tests/api/contract.test.ts
-need_grep 'CONTRACT_TARGET' frontend/tests/api/contract.test.ts
+need_grep 'CONTRACT_TARGET' frontend/tests/api/target.ts
+need_grep 'againstLiveBackend' frontend/tests/api/contract.test.ts
 # Starting the mock worker during the live run would intercept the very requests
 # that run exists to make, and the suite would pass while proving nothing.
 need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
