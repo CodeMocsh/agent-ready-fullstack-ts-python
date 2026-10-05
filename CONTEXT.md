@@ -28,6 +28,12 @@ is what `copier update` reads. It is fine to call one "the app"; `app/` is only 
 directory name.
 _Avoid_: rendered template, output, instance
 
+**Example resource**:
+`tasks`, the one resource the template ships so every layer of a generated project has
+something real to carry. The store, the schema and the frontend are built on it, so a copy
+always includes it; `example_resource=false` only stops `copier update` bringing it.
+_Avoid_: demo, sample, worked example
+
 **Half**:
 One of the two independently-operable stacks of the generated project, `frontend/` or
 `backend/`. Each can be installed, linted, tested, and built without the other's toolchain

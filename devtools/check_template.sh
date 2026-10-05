@@ -530,6 +530,20 @@ for label, got, want in (
     if got != want:
         die(f"{label} came out as {got!r}, not {want!r}")
 PY
+
+    echo "==> assert a fresh copy ships the example whatever example_resource says"
+    # example_resource=false stops `copier update` touching the example's files. It must not
+    # stop a copy shipping them: the store, the schema and the frontend are built on the
+    # example, so a copy without it is a project that does not import.
+    # The paths are read out of copier.yml, the one place that lists them.
+    NO_EXAMPLE="$(sh "$RENDER" --into "$WORK/no-example" -- --data example_resource=false)"
+    EXAMPLE_FILES="$(sed -n "s/.*_copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
+    [ -n "$EXAMPLE_FILES" ] || fail "copier.yml names no example file, so this check would pass over nothing"
+    for kept in $EXAMPLE_FILES; do
+        [ -f "$NO_EXAMPLE/$kept" ] || fail "a copy with example_resource=false left out $kept"
+    done
+    grep -q '^example_resource: false$' "$NO_EXAMPLE/.copier-answers.yml" \
+        || fail "example_resource=false is not recorded, so the next update would bring the example back"
 fi
 
 echo "==> assert the agent guard"
