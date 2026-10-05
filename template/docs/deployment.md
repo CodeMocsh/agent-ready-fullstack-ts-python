@@ -10,6 +10,12 @@ SPA fallback. If it is served from a subpath, pass `--base=/that/path/` to `vite
 
 The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
 
+**An unset `APP_ENV` is production**, and production refuses to start without `DATABASE_URL`,
+because the in-memory substrate loses every row when the process exits. `make dev`, the
+contract suite and the tests set `APP_ENV=development`; a deployment sets nothing, or
+`APP_ENV=production`. Any other value is refused. `app/environment.py` holds the rule and
+[adr/0014](adr/0014-the-environment-is-read-in-one-place-and-run-in-another.md) says why.
+
 Something has to strip the `/api` prefix, because the backend serves bare paths. In development
 the Vite proxy does it. In a deployment, one of three:
 

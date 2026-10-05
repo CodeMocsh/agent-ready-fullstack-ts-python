@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.wiring import (
+from app.environment import (
     HEADERS_ENV,
     NOT_READ,
     OTLP_ENDPOINT_ENV,
@@ -11,10 +11,8 @@ from app.wiring import (
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
-    TelemetryMisconfigured,
-    TelemetrySettings,
-    build_telemetry,
 )
+from app.wiring import TelemetryMisconfigured, TelemetrySettings, build_telemetry
 
 ENDPOINT = "http://collector:4318"
 

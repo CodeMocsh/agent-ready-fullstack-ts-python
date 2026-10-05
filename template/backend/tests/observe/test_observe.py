@@ -11,9 +11,9 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.environment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from app.telemetry import METRIC_ATTRIBUTES, SPAN_ATTRIBUTES
-from app.wiring import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from tests.doubles import CANARY
 
 STATE_CANARY = "canary6f1e2d"

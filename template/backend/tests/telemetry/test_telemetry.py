@@ -24,8 +24,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from app import serve, telemetry
+from app.environment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.main import create_app
-from app.wiring import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
 

@@ -1,23 +1,17 @@
-"""The one swap point: which substrate this process gets, and which frontend.
+"""What this deployment configured: which substrate this process gets, which frontend, and
+where its telemetry goes. Everything here reads the environment and builds from it.
 
-`build()` is where the environment is read, and it reads every variable this process uses
-rather than letting them be picked up further down. That is what lets one process hold two
-substrates at once — what the contract suite does — and what keeps a test from mutating
-`os.environ` to choose one.
+Two questions live elsewhere. `app/environment.py` names the variables and says whether this
+configuration is legitimate at all; `app/lifespan.py` runs what this builds and reads nothing.
+`docs/adr/0014`.
 
-**`build_bundle()` is the same idea for the one-origin entrypoint**, and only `app.serve`
-calls it. It lives here rather than there so that everything this deployment reads out of its
-environment is in one file, which is what makes the list reviewable.
+**No `DATABASE_URL` means the in-memory substrate**, which only the development loop may run:
+`refuse_development_settings` refuses it in production. Nothing here degrades from Postgres to
+memory on an error. A malformed `DATABASE_URL` fails at boot.
 
-**No `DATABASE_URL` means the in-memory substrate**, so a fresh clone runs with no
-infrastructure. That is a default, not a fallback: nothing here degrades from Postgres to
-memory on an error, because a deployment that silently came up on memory has data that will
-not be there tomorrow. A malformed `DATABASE_URL` fails at boot.
-
-**And the application refuses to hold the owner credential.** Seeing `DATABASE_OWNER_URL` is
-a refusal rather than a warning, for the reason `FORCE ROW LEVEL SECURITY` beats `ENABLE`: a
-separation that depends on nobody making a mistake is not a separation. A single container
-that migrates and then serves drops it between the two — `env -u DATABASE_OWNER_URL uvicorn`.
+**And the application refuses to hold the owner credential.** Seeing `DATABASE_OWNER_URL` is a
+refusal rather than a warning. A single container that migrates and then serves drops it
+between the two -- `env -u DATABASE_OWNER_URL uvicorn`.
 """
 
 import os
@@ -25,19 +19,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from app.environment import (
+    ACKNOWLEDGED_ENV,
+    BUNDLE_ENV,
+    DATABASE_URL_ENV,
+    NEEDS_THE_ENDPOINT,
+    NOT_READ,
+    OTLP_ENDPOINT_ENV,
+    PROTOCOL_ENV,
+    SAMPLING_RATIO_ENV,
+    SEMCONV_ENV,
+    SERVICE_NAME_ENV,
+    STABLE_SEMCONV,
+    TRUST_INBOUND_CONTEXT_ENV,
+    stated,
+)
 from app.identity import SENTINEL_TENANT
 from app.migrate import OWNER_URL_ENV
 from app.store import Database
 from app.store.conn import SCHEMA_ENV
 from app.store.memory import MemoryDatabase
-
-DATABASE_URL_ENV: Final = "DATABASE_URL"
-BUNDLE_ENV: Final = "FRONTEND_BUNDLE"
-ACKNOWLEDGED_ENV: Final = "UNAUTHENTICATED_IS_INTENTIONAL"
-"""Set by a deployment that means to serve everybody, so it is told at `INFO` rather than
-warned on every boot. It changes a log level and nothing else -- `docs/adr/0008`.
-"""
-
 
 DENIALS: Final = frozenset({"", "0", "false", "no", "off"})
 """Spellings of "no" that must not read as an acknowledgement.
@@ -52,45 +53,6 @@ def unauthenticated_is_acknowledged() -> bool:
     """Whether this deployment has said out loud that it serves everybody on purpose."""
     return os.environ.get(ACKNOWLEDGED_ENV, "").strip().lower() not in DENIALS
 
-
-OTLP_ENDPOINT_ENV: Final = "OTEL_EXPORTER_OTLP_ENDPOINT"
-SERVICE_NAME_ENV: Final = "OTEL_SERVICE_NAME"
-SAMPLING_RATIO_ENV: Final = "OTEL_TRACES_SAMPLER_ARG"
-TRUST_INBOUND_CONTEXT_ENV: Final = "TRUST_INBOUND_TRACE_CONTEXT"
-SEMCONV_ENV: Final = "OTEL_SEMCONV_STABILITY_OPT_IN"
-STABLE_SEMCONV: Final = "http,database"
-PROTOCOL_ENV: Final = "OTEL_EXPORTER_OTLP_PROTOCOL"
-HEADERS_ENV: Final = "OTEL_EXPORTER_OTLP_HEADERS"
-
-NEEDS_THE_ENDPOINT: Final = (
-    SERVICE_NAME_ENV,
-    SAMPLING_RATIO_ENV,
-    TRUST_INBOUND_CONTEXT_ENV,
-    HEADERS_ENV,
-)
-"""Variables that mean something only once the endpoint is named."""
-
-NOT_READ: Final = (
-    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-    "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
-    "OTEL_TRACES_SAMPLER",
-    "OTEL_TRACES_EXPORTER",
-    "OTEL_METRICS_EXPORTER",
-    "OTEL_PROPAGATORS",
-    "OTEL_SDK_DISABLED",
-    "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST",
-    "OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE",
-)
-"""Variables the SDK would honour and this process does not. Refused alongside the endpoint."""
-
-TELEMETRY_ENV: Final = (
-    OTLP_ENDPOINT_ENV,
-    PROTOCOL_ENV,
-    SEMCONV_ENV,
-    *NEEDS_THE_ENDPOINT,
-    *NOT_READ,
-)
-"""Every variable `build_telemetry` reads."""
 
 AFFIRMATIONS: Final = frozenset({"1", "true", "yes", "on"})
 
@@ -148,52 +110,48 @@ def build_telemetry() -> TelemetrySettings | None:
     an endpoint that is not a URL, an unparsable ratio or trust flag, or a semantic-convention
     choice other than `STABLE_SEMCONV`.
     """
-    endpoint = _named(OTLP_ENDPOINT_ENV).rstrip("/")
+    endpoint = stated(OTLP_ENDPOINT_ENV).rstrip("/")
     if endpoint == "":
         _refuse_any_of(
             NEEDS_THE_ENDPOINT, f"and {OTLP_ENDPOINT_ENV} unset: nothing would be exported"
         )
         return None
     _refuse_any_of(NOT_READ, "and this process does not read it")
-    if _named(PROTOCOL_ENV) not in ("", "http/protobuf"):
+    if stated(PROTOCOL_ENV) not in ("", "http/protobuf"):
         raise TelemetryMisconfigured(
-            f"{PROTOCOL_ENV}={_named(PROTOCOL_ENV)!r}: this process exports over http/protobuf "
+            f"{PROTOCOL_ENV}={stated(PROTOCOL_ENV)!r}: this process exports over http/protobuf "
             f"only. Point it at the Collector's HTTP port."
         )
-    if _named(SEMCONV_ENV) not in ("", STABLE_SEMCONV):
+    if stated(SEMCONV_ENV) not in ("", STABLE_SEMCONV):
         raise TelemetryMisconfigured(
-            f"{SEMCONV_ENV}={_named(SEMCONV_ENV)!r}: the declared attributes are the stable "
+            f"{SEMCONV_ENV}={stated(SEMCONV_ENV)!r}: the declared attributes are the stable "
             f"conventions' names, so this process sets {STABLE_SEMCONV!r} itself. Unset it."
         )
     if not endpoint.startswith(("http://", "https://")):
         raise TelemetryMisconfigured(
             f"{OTLP_ENDPOINT_ENV}={endpoint!r} is not an http:// or https:// URL."
         )
-    if _named(SERVICE_NAME_ENV) == "":
+    if stated(SERVICE_NAME_ENV) == "":
         raise TelemetryMisconfigured(
             f"{OTLP_ENDPOINT_ENV} is set and {SERVICE_NAME_ENV} is not. Every span and metric "
             f"is filed under the service name, so name this one."
         )
     return TelemetrySettings(
         endpoint=endpoint,
-        service=_named(SERVICE_NAME_ENV),
+        service=stated(SERVICE_NAME_ENV),
         sampling_ratio=_sampling_ratio(),
         trust_inbound_context=_trusts_inbound_context(),
     )
 
 
-def _named(variable: str) -> str:
-    return os.environ.get(variable, "").strip()
-
-
 def _refuse_any_of(variables: tuple[str, ...], because: str) -> None:
-    said = [one for one in variables if _named(one)]
+    said = [one for one in variables if stated(one)]
     if said:
         raise TelemetryMisconfigured(f"{', '.join(said)} set, {because}. Unset it.")
 
 
 def _trusts_inbound_context() -> bool:
-    said = _named(TRUST_INBOUND_CONTEXT_ENV).lower()
+    said = stated(TRUST_INBOUND_CONTEXT_ENV).lower()
     if said in AFFIRMATIONS:
         return True
     if said in DENIALS:
@@ -204,7 +162,7 @@ def _trusts_inbound_context() -> bool:
 
 
 def _sampling_ratio() -> float:
-    said = _named(SAMPLING_RATIO_ENV)
+    said = stated(SAMPLING_RATIO_ENV)
     if said == "":
         return EVERY_TRACE
     refusal = TelemetryMisconfigured(

@@ -654,8 +654,8 @@ PY
 # project from piling every file at the top of tests/, and it is what the tier targets
 # select on. test_gate.py stays at the top because it covers no source: it reads this
 # Makefile, the hook and the workflow.
-for folder in devtools errors identity integration log main models observe routes serve \
-              store telemetry wiring; do
+for folder in devtools environment errors identity integration lifespan log main models \
+              observe routes serve store telemetry wiring; do
     need "backend/tests/$folder/__init__.py"
 done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and
@@ -930,6 +930,12 @@ need backend/app/errors.py
 need backend/tests/errors/test_errors.py
 need backend/app/deps.py
 need backend/app/wiring.py
+need backend/app/environment.py
+need backend/app/lifespan.py
+# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/0014.
+need_grep 'refuse_development_settings' backend/app/lifespan.py
+need_grep 'APP_ENV=development' devtools/dev.sh
+need_grep 'APP_ENV=development' devtools/contract-test.sh
 need backend/tests/routes/test_tasks.py
 # The one-origin entrypoint, for a deployment with no proxy to strip the /api prefix.
 # It mounts app.main and delegates that app's lifespan, because Starlette does not run a
@@ -976,7 +982,8 @@ for adr in 0001-two-substrates-behind-one-contract \
            0008-a-route-cannot-escape-the-identity-seam \
            0011-routes-are-split-by-what-a-caller-presents \
            0012-a-refusal-is-a-class-declared-once \
-           0013-the-models-are-a-layering-written-down; do
+           0013-the-models-are-a-layering-written-down \
+           0014-the-environment-is-read-in-one-place-and-run-in-another; do
     need "docs/adr/$adr.md"
 done
 
@@ -1841,8 +1848,9 @@ fi
 
 # DATABASE_URL is dropped so this is the in-memory substrate: the contract suite asserts
 # shapes and status codes rather than rows, and a Postgres that happened to be exported
-# would make this step depend on a daemon the gate does not require.
-env -u DATABASE_URL FRONTEND_BUNDLE="$OUT/frontend/dist" \
+# would make this step depend on a daemon the gate does not require. Production refuses
+# that substrate, so this says it is the development loop.
+env -u DATABASE_URL APP_ENV=development FRONTEND_BUNDLE="$OUT/frontend/dist" \
     backend/.venv/bin/python -m uvicorn --app-dir backend \
     --factory app.serve:build_server --port "$BACKEND_PORT" --log-level warning \
     >"$WORK/serve.log" 2>&1 &

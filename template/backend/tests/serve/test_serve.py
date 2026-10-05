@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import serve
+from app.environment import BUNDLE_ENV
 from app.main import create_app
 from app.serve import (
     ASSETS,
@@ -26,7 +27,7 @@ from app.serve import (
     Scope,
     create_server,
 )
-from app.wiring import BUNDLE_ENV, BundleMissing, build_bundle
+from app.wiring import BundleMissing, build_bundle
 
 SHELL = "<!doctype html><title>the shell</title>"
 SCRIPT = "export const built = 1;\n"
