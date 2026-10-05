@@ -16,15 +16,28 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.testclient import TestClient
 
+from app import log
+from app.deployment import RESOURCE_ATTRIBUTES_ENV
+from app.identity import Unauthenticated, tenant_for
 from app.main import create_app
+from app.routes import tenant
 from tests.conftest import Logged
 from tests.doubles import CANARY
-from tests.widgets import with_widgets
+from tests.widgets import router as widgets_router, with_widgets
 
 SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+TENANT_HEADER = "x-test-tenant"
+
+
+def tenant_from_header(request: Request) -> str:
+    """A seam that resolves the tenant `TENANT_HEADER` names, and refuses a request naming none."""
+    named = request.headers.get(TENANT_HEADER)
+    if named is None:
+        raise Unauthenticated("this request names no tenant")
+    return named
 
 
 @pytest.fixture
@@ -39,6 +52,24 @@ def client(app: FastAPI, logged: Logged) -> Iterator[TestClient]:
     with TestClient(app) as fresh:
         logged()
         yield fresh
+
+
+@pytest.fixture
+def guarded(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    """The app, also serving the widgets and `/raises` under whatever the shipped tenant
+    requirement carries, with `tenant_from_header` as its seam."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    app = create_app()
+    failing = APIRouter()
+
+    @failing.get("/raises")
+    async def raises() -> None:
+        raise RuntimeError("the handler failed")
+
+    for router in (widgets_router, failing):
+        app.include_router(router, dependencies=tenant.router.dependencies)
+    app.dependency_overrides[tenant_for] = tenant_from_header
+    return app
 
 
 def completed(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -58,6 +89,26 @@ def test_every_line_is_one_json_object_with_the_fields_every_cloud_reads(
         assert line["time"].endswith("Z")
         assert isinstance(line["message"], str)
         assert isinstance(line["logger"], str)
+
+
+@pytest.mark.parametrize(
+    ("said", "version"),
+    [("service.version=1.4.2", "1.4.2"), ("deployment.environment.name=prod", None)],
+)
+def test_every_line_names_the_version_the_deployment_gave_and_none_when_it_gave_none(
+    logged: Logged, monkeypatch: pytest.MonkeyPatch, said: str, version: str | None
+) -> None:
+    """What lets a session that spans a deploy be read: each line says which build wrote it."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
+
+    with TestClient(with_widgets(create_app())) as client:
+        client.get("/widgets")
+
+    lines = logged()
+
+    assert completed(lines)
+    assert {line["service.version"] for line in lines} == {version}
 
 
 def test_the_boot_lines_are_in_the_same_format(app: FastAPI, logged: Logged) -> None:
@@ -84,6 +135,73 @@ def test_a_request_is_logged_once_by_its_route_template_and_the_id_it_answered_w
     assert line["http.response.status_code"] == 404
     assert line["request_id"] == answered.headers["x-request-id"]
     assert line["duration_ms"] >= 0
+
+
+def test_each_request_is_logged_with_the_tenant_it_resolved(
+    guarded: FastAPI, logged: Logged
+) -> None:
+    """What lets one tenant's requests be read apart from another's. A request that resolved a
+    tenant names it whatever it answered; one that resolved none -- a public route, or the seam
+    refusing -- names none."""
+    with TestClient(guarded, raise_server_exceptions=False) as client:
+        logged()
+        client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
+        client.get("/widgets", headers={TENANT_HEADER: "tenant-b"})
+        client.get("/widgets/does-not-exist", headers={TENANT_HEADER: "tenant-a"})
+        client.get("/raises", headers={TENANT_HEADER: "tenant-b"})
+        client.get("/widgets")
+        client.get("/health")
+
+    lines = completed(logged())
+
+    assert [
+        (line["http.route"], line["http.response.status_code"], line["tenant_id"]) for line in lines
+    ] == [
+        ("/widgets", 200, "tenant-a"),
+        ("/widgets", 200, "tenant-b"),
+        ("/widgets/{id}", 404, "tenant-a"),
+        ("/raises", 500, "tenant-b"),
+        ("/widgets", 401, None),
+        ("/health", 200, None),
+    ]
+
+
+def test_a_field_the_project_declares_is_on_every_request_line(
+    guarded: FastAPI, logged: Logged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project that resolves more than a tenant names it the same way, once it declares it."""
+    monkeypatch.setattr(log, "PROJECT_FIELDS", frozenset({"user.id"}))
+
+    def tenant_and_user(request: Request) -> str:
+        log.name_on_request_line(request, "user.id", "user-1")
+        return tenant_from_header(request)
+
+    guarded.dependency_overrides[tenant_for] = tenant_and_user
+    with TestClient(guarded) as client:
+        logged()
+        client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
+        client.get("/health")
+
+    lines = completed(logged())
+
+    assert [(line["tenant_id"], line["user.id"]) for line in lines] == [
+        ("tenant-a", "user-1"),
+        (None, None),
+    ]
+
+
+def test_a_field_nobody_declared_is_refused_rather_than_logged(
+    guarded: FastAPI, logged: Logged
+) -> None:
+    def naming_an_email(request: Request) -> str:
+        log.name_on_request_line(request, "email", CANARY)
+        return tenant_from_header(request)
+
+    guarded.dependency_overrides[tenant_for] = naming_an_email
+    with TestClient(guarded) as client, pytest.raises(log.UndeclaredRequestField):
+        client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
+
+    assert CANARY not in json.dumps(logged())
 
 
 def test_a_request_no_route_answers_is_logged_without_a_route(

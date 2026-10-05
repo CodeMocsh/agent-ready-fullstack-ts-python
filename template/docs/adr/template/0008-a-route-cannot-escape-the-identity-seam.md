@@ -120,3 +120,10 @@ once the stub was replaced. `tests/routes/test_guarantee.py` and the doubles it 
 update bringing them, beside `app/identity.py`. The route walk they used moved to
 `tests/routes/walk.py`, which imports nothing about identity, so the suites that walk the routes
 keep working in a project that replaced the stub.
+
+## Amended 2026-10-05: the router carries `resolved_tenant`
+
+The router is `APIRouter(dependencies=[Depends(resolved_tenant)])`, not `Depends(tenant_for)`.
+`app/deps.py::resolved_tenant` depends on `tenant_for` and names the tenant on the request's
+log line, which `docs/adr/template/0009` records. The decision is unchanged: the router carries
+the seam, and an override of `tenant_for` still reaches every route under it.

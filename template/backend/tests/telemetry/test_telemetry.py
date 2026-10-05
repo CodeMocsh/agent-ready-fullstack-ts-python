@@ -24,7 +24,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from app import serve, telemetry
-from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
+from app.deployment import OTLP_ENDPOINT_ENV, RESOURCE_ATTRIBUTES_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
@@ -136,6 +136,25 @@ def everything_in(span: ReadableSpan) -> str:
             ],
         }
     )
+
+
+@pytest.fixture
+def versioned(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
+    """A version that needs decoding: the one two readers of the variable could read apart."""
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, "service.version=1.4.2%2Bbuild.7")
+    yield from instrumented(monkeypatch, trust=False)
+
+
+def test_a_span_names_the_version_every_log_line_names(
+    versioned: Instrumented, logged: Logged
+) -> None:
+    """Two readers of one variable: the SDK for the spans, `app.wiring` for the log."""
+    versioned.client.get("/widgets")
+
+    [server] = versioned.servers()
+
+    assert server.resource.attributes["service.version"] == "1.4.2+build.7"
+    assert {line["service.version"] for line in logged()} == {"1.4.2+build.7"}
 
 
 def test_a_request_is_one_server_span_named_by_its_route_with_only_declared_attributes(

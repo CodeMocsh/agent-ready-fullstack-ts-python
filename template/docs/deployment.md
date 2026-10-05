@@ -114,9 +114,18 @@ line is declared.
 | `severity` | `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
 | `message` | a constant sentence; values go in fields of their own |
 | `logger` | `app` for this project's lines, a library's name for its own |
+| `service.version` | the `service.version` in `OTEL_RESOURCE_ATTRIBUTES`; null when it names none |
 | `request_id` | while a request is served; the response carries it as `X-Request-ID` |
 | `trace_id`, `span_id` | while a traced request is served; the ids its spans carry |
 | `exception` | the whole traceback, when there is one |
+| `tenant_id` | on `request completed`; null on a public route, or when the identity seam refused |
+
+A field declared in `app/request_line.py`, such as `user.id`, is on `request completed` too, and
+null when the request did not name it.
+
+**Set `OTEL_RESOURCE_ATTRIBUTES=service.version=<your build>` on every deployment**, with or
+without a Collector. A session that spans a deploy is read by version, and a line with none
+cannot be placed. An entry that is not `key=value` refuses to start.
 
 **What each cloud does with it:**
 
@@ -153,7 +162,8 @@ refuses to start. Beside the endpoint, so does a variable the SDK would honour a
 process does not -- a
 per-signal endpoint, a sampler, exporter or propagator choice, `OTEL_SDK_DISABLED`, header
 capture, or a protocol other than `http/protobuf`. The SDK reads `OTEL_RESOURCE_ATTRIBUTES` for
-labels such as `deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
+`service.version`, the same value every log line carries, and for labels such as
+`deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
 `_CERTIFICATE` for a Collector that needs them.
 
 **Run the Collector beside the application, and point it at your destination.**

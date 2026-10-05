@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+from urllib.parse import unquote
 
 from app.deployment import (
     ACKNOWLEDGED_ENV,
@@ -30,6 +31,7 @@ from app.deployment import (
     NOT_READ,
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
+    RESOURCE_ATTRIBUTES_ENV,
     SAMPLING_RATIO_ENV,
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
@@ -110,6 +112,28 @@ def build_bundle() -> Path:
             f"that strips the prefix instead."
         )
     return Path(named)
+
+
+SERVICE_VERSION: Final = "service.version"
+
+
+def build_service_version() -> str | None:
+    """The `service.version` in `OTEL_RESOURCE_ATTRIBUTES`, decoded as the SDK decodes it, or
+    `None` when the deployment names none. Read whether or not telemetry is on. Refuses to start
+    on an entry that is not `key=value`."""
+    said = stated(RESOURCE_ATTRIBUTES_ENV)
+    if said == "":
+        return None
+    attributes: dict[str, str] = {}
+    for entry in said.split(","):
+        key, equals, value = entry.partition("=")
+        if equals == "" or key.strip() == "":
+            raise TelemetryMisconfigured(
+                f"{RESOURCE_ATTRIBUTES_ENV} holds {entry.strip()!r}, which is not key=value. "
+                f"Separate entries with commas and nothing else."
+            )
+        attributes[key.strip()] = unquote(value.strip())
+    return attributes.get(SERVICE_VERSION)
 
 
 def build_telemetry() -> TelemetrySettings | None:

@@ -111,6 +111,7 @@ _exclude:
 _skip_if_exists:
   - backend/app/errors.py
   - backend/app/environment.py
+  - backend/app/request_line.py
   - backend/tests/tiers.py
   - backend/tests/models/layers.py
 
