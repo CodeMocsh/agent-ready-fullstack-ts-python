@@ -20,23 +20,33 @@ record. **If unsure, it is a commit message.**
 
 ## How
 
-One file per decision, `NNNN-a-sentence-saying-what-was-decided.md`, numbered in order and
-never renumbered. Yours go in this directory. `template/` holds the decisions that came with
-the template and is numbered on its own, so a template update never lands a number beside one
-of yours; cite one of those as `docs/adr/template/NNNN`. `docs/adr/template/0016` says why.
+One file per decision: `NNNN-a-sentence-saying-what-was-decided.md`. Yours go in this
+directory. `template/` holds the records that came with the template, with numbers of their own.
+Cite one of those as `docs/adr/template/NNNN`. `docs/adr/template/0016` says why.
 
-The title is the decision, in the present tense, as a claim — *"Row-level security is on for
-every table, and forced"*, not *"RLS decision"*. Then the reasoning, a
-**Considered options** section naming what was rejected and why, and a **Consequences** section
-for what this costs and what it makes impossible.
+Every record has the same parts:
 
-**Cite nothing by section number, and count nothing that lives elsewhere.** Name the thing —
-the route, the function, the rule, the invariant — and let the reader grep. A section number
-points into one revision of one document, and a decision outlives the document whose structure
-it borrowed. A count of how many rules or files or questions exist somewhere else is wrong the
-first time that number changes, and nothing fails when it does.
+- `# NNNN. The decision as a claim`, in the present tense. *"Row-level security is on for every
+  table, and forced"*, not *"RLS decision"*.
+- A `Date:` line.
+- `## Status`: accepted or not, and which earlier records this one replaces.
+- `## Context`: the forces, and why the obvious design does not work here.
+- `## Decision`: the rules. Each rule names the code that holds it: a function, a file, a test.
+- `## Considered options`: only the options somebody will propose again, and why not.
+- `## Consequences`: what the decision costs, and what it makes impossible.
 
-A decision is never quietly edited to match a change of mind. Write a new one that supersedes
-it, or amend it with a dated note saying what changed and what forced it. The old reasoning is
-the part with the value: it says what was believed at the time, which is exactly what someone
-reopening the question needs.
+**Write in Simplified Technical English.** Put one idea in each sentence. Keep most sentences to 20
+words or fewer. Use the active voice and the present tense. Use the words in `CONTEXT.md`, and use
+one word for one meaning. Do not use idioms or metaphors.
+
+**A record states the decision as it is now.** When the decision changes, change the record. Git
+holds the earlier text. Do not add dated amendments, and do not tell the history of the decision.
+
+**Numbers are a reading order.** Records are numbered from 0001 with no gaps, in the order a
+newcomer should read them. When records merge, go away or move, renumber them, and update every
+citation in the tree in the same change. A citation in git history, an old commit or a transcript
+may then point at a different record. That is accepted: the tree is the source of truth.
+
+**Cite nothing by section number, and count nothing that lives elsewhere.** Name the thing: the
+route, the function, the rule or the invariant. A section number points into one revision of one
+document. A count of things that live somewhere else is wrong the first time that number changes.
