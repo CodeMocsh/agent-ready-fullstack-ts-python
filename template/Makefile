@@ -20,7 +20,7 @@ export UV_EXCLUDE_NEWER
 
 .DEFAULT_GOAL := default
 
-.PHONY: default install hooks pre-commit lint lint-check test test-fast test-contract \
+.PHONY: default install hooks pre-commit gate lint lint-check test test-fast test-contract \
         test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
         dev dev-frontend observe observe-test \
         dev-backend openapi \
@@ -43,12 +43,17 @@ install:
 hooks:
 	@sh devtools/install-hooks.sh
 
-# The gate. This one line is what .githooks/pre-commit runs, what CI runs, and the
-# place a new check goes -- backend/tests/test_gate.py fails if the three stop
-# agreeing. Checks live here rather than in CI because a check here costs seconds
-# and the same check discovered on GitHub costs a billed minute plus the round trip
-# to find out which of your last four commits broke it.
-pre-commit: lint-check openapi-check test
+# The gate. `gate` is the list and the place a new check goes; `pre-commit` is how it is
+# run, by the hook, by CI and by hand alike: queued behind any other gate on this machine,
+# and skipped for a tree that already passed -- devtools/gate.sh.
+# backend/tests/test_gate.py fails if the list, the runner and the hook stop agreeing.
+# Checks live here rather than in CI because a check here costs seconds and the same
+# check discovered on GitHub costs a billed minute plus the round trip to find out which
+# of your last four commits broke it.
+pre-commit:
+	@sh devtools/gate.sh
+
+gate: lint-check openapi-check test
 
 lint:
 	pnpm -C frontend lint
