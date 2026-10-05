@@ -1,8 +1,8 @@
 # Decisions
 
-This is where a design decision lives. `AGENTS.md` bans comments and sends rationale to two
-places: the commit message for why a change was made, and this directory for why the design is
-the way it is — the part that will still matter when the commit is not the thing anyone finds.
+This is where an architectural decision lives, as the test below defines one. `AGENTS.md` bans
+comments and sends rationale to the commit message, and most decisions need nothing more.
+**A decision record is for a decision, not for an explanation.**
 
 ## What belongs here
 
@@ -12,16 +12,24 @@ Nygard, who introduced this format in 2011, names where the expense shows up —
 quality the system is held to, a dependency, an interface, or the way the thing is built. A
 choice that touches none of those is an implementation detail, however hard it was to get right.
 
-In practice a decision earns a file when **a reasonable person would undo it** — when the code
-looks like it could be simpler, and the reason it is not lives outside the file. Typically:
+A decision is architectural, and earns a file, only if it does at least one of these:
 
-- Something verified against a real system that contradicts the obvious reading. "We tried the
-  obvious thing and it silently did nothing" is the highest-value entry there is.
-- A constraint one half imposes on the other, or on a tool neither owns.
-- An option that was considered and rejected, where the rejected one is what someone will
-  propose next.
+- **It fixes structure** across modules, or across the two halves.
+- **It fixes a quality the system is held to**: tenancy and security, availability, cost, or
+  how the system is released and deployed.
+- **It takes on a dependency or a contract** that would take a quarter to swap out.
 
-Anything an agent can work out from the diff does not belong here. Neither does a preference.
+These do not, however much thought they took:
+
+- UI layout, copy, and the name of a screen, a field or a facet.
+- How one component or one module behaves, or the shape inside it.
+- A convention a gate already enforces. The gate is the record.
+- A workaround for a bug in a tool.
+
+Those go in the commit message, plus a docstring or a test where they constrain how something
+may be used. Under the comment ban the reason for a choice always lives outside the file, so
+"the reason is not in the code" is never enough on its own. **If unsure, it is a commit
+message.**
 
 ## How
 

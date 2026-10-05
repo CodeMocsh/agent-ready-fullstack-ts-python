@@ -5,6 +5,7 @@
 ## Why the simpler version does not work
 
 <!-- The only part a machine cannot check and a reviewer cannot reconstruct from the diff.
-     If a reasonable person would undo this change, it needs a record in docs/adr/ too.
+     If this is an architectural decision, as docs/adr/README.md defines one, it needs a
+     record there too. Most changes are not one.
 
      Nothing else belongs here: the gate answers everything a checklist would ask. -->

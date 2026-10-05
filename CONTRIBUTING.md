@@ -47,7 +47,7 @@ until it says what you meant.
 - **A commit message carrying the rationale.** Comments are banned in source, so the reasoning
   has to land somewhere. The title is a claim in the present tense; read `git log` for the
   shape.
-- **A decision record, if a reasonable person would undo it.** The test is the cost of change,
+- **A decision record, only for an architectural decision.** The test is the cost of change,
   and [docs/adr/README.md](docs/adr/README.md) draws the line. Most changes need no record.
 - **The vocabulary in [CONTEXT.md](CONTEXT.md).** One term per concept, and that term every
   time — in prose, in a symbol name, and in the text of a failure.

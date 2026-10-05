@@ -12,11 +12,11 @@ Nygard, who introduced this format in 2011, names where the expense shows up —
 quality the system is held to, a dependency, an interface, or the way the thing is built. A
 choice that touches none of those is an implementation detail, however hard it was to get right.
 
-In practice a decision earns a file when **a reasonable person would undo it** — when the setup
-looks like it could be simpler, and the reason it is not lives outside the file. The
-highest-value entry is something verified against a real system that contradicts the obvious
-reading: we tried the obvious thing and it silently did nothing. A rejected option belongs here
-too, especially the one someone will propose next.
+A decision earns a file only if it fixes the shape of the generator or of what it renders, a
+quality the template is held to, or a dependency or contract it would take a quarter to swap.
+Naming, wording, one script's behaviour and a convention a gate already enforces do not. The
+highest-value record is one verified against a real system that contradicts the obvious
+reading.
 
 If you could choose differently next week and nothing outside that file would notice, the
 reasoning goes in the commit message. Detail an agent can work out from the diff goes in
