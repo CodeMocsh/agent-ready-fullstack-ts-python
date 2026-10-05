@@ -2380,6 +2380,26 @@ printf '%s\n' "$out" | grep -q 'baseline tightened'
 python3 -c "$compare" backend/.complexity-baseline.json 2.9 lt \
     || fail "backend lint reported tightening but left the baseline on disk"
 
+echo "==> the tree fingerprint sees a same-size edit made in the instant after a write"
+# Git trusts a file's size and timestamps unless the index was written no earlier than the file,
+# and an index copied without its own timestamp looks newer than every entry. The edit is missed
+# about once in a hundred tries, so one try proves nothing: this makes three hundred, and the
+# copy without its timestamp missed three of them. backend/tests/test_gate.py covers the
+# fingerprint's other cases.
+race="$(mktemp -d)"
+(
+    cd "$race"
+    git init -q
+    for _ in $(seq 1 300); do
+        printf 'one\n' >kept.txt
+        git add kept.txt
+        before="$(sh "$OUT/devtools/worktree-tree.sh")"
+        printf 'two\n' >kept.txt
+        [ "$(sh "$OUT/devtools/worktree-tree.sh")" != "$before" ] || exit 1
+    done
+) || { rm -rf "$race"; fail "devtools/worktree-tree.sh kept the tree of a file edited in the same instant"; }
+rm -rf "$race"
+
 echo "==> the gate runner skips a tree that already passed"
 # Recorded here rather than earned by a full `make pre-commit`, which would run every step
 # above a second time. What this proves is the path a commit after a green run takes in a real
