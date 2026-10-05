@@ -52,6 +52,27 @@ package_license:
     - Proprietary
     - None
 
+# Whether `copier update` keeps bringing the example resource, `tasks`. A project that has
+# replaced the example answers false once, and from then on an update neither changes its own
+# files at those paths nor re-adds the ones it deleted. A fresh copy always ships the example:
+# the rest of the template is built on it, so the answer only takes effect on an update.
+# docs/adr/0004-the-example-is-declined-on-update-and-never-on-copy.md says what was tried.
+example_resource:
+  type: bool
+  help: >-
+    Keep updating the example resource (`tasks`) on `copier update`? Answer no once your
+    project has replaced it.
+  default: true
+
+_exclude:
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tasks.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/components/task-list.tsx{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.live.spec.ts{% endif %}"
+
 # Computed, never asked. The frontend package.json needs an SPDX expression, and npm
 # spells "no license" as UNLICENSED.
 package_license_spdx:

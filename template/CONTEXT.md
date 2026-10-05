@@ -56,6 +56,11 @@ What a caller must present before a route's handler runs: nothing, or a tenant. 
 module or package under `app/routes/`, and its router carries it.
 _Avoid_: surface, access level, guard.
 
+**Example resource**:
+`tasks`: the one resource the template ships, so every layer has something real to carry. A
+project replaces it, then answers `example_resource=false` so `copier update` stops bringing it.
+_Avoid_: demo, sample, worked example.
+
 **Refusal**:
 A way a route answers no. Each one is a class in `app/errors.py` that carries its status and
 its sentence.
