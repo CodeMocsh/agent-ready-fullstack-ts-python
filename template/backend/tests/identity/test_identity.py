@@ -15,7 +15,7 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from app.environment import ACKNOWLEDGED_ENV
+from app.deployment import ACKNOWLEDGED_ENV
 from app.identity import (
     SENTINEL_TENANT,
     Unauthenticated,

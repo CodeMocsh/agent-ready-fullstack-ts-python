@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from app.environment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
+from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
 from app.migrate import OWNER_URL_ENV
 from app.store import Connections
 from app.store.conn import SCHEMA_ENV

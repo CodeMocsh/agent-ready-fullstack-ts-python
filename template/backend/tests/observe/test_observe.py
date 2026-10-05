@@ -11,7 +11,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.environment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
+from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from app.telemetry import METRIC_ATTRIBUTES, SPAN_ATTRIBUTES
 from tests.doubles import CANARY

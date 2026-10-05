@@ -21,6 +21,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from tests.tier import Tier
 from tests.tiers import TIERS, python_tiers
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -75,6 +76,18 @@ def recipe_of(target: str) -> list[str]:
 
 def runs_something(target: str) -> bool:
     return bool(recipe_of(target)) or any(runs_something(p) for p in prerequisites_of(target))
+
+
+def test_every_tier_is_the_template_s_tier():
+    """`tests/tiers.py` is the project's and an update never touches it, so a project generated
+    before `tests/tier.py` existed still defines its own `Tier` there, and stops receiving the
+    template's changes to it."""
+    own = [tier.runs for tier in TIERS if type(tier) is not Tier]
+
+    assert own == [], (
+        f"{own} are built on a Tier that tests/tiers.py defines itself. Delete it, and import "
+        f"Tier and PYTEST_ROOT from tests.tier instead."
+    )
 
 
 def test_the_gate_is_the_named_list():

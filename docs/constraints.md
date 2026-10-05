@@ -6,7 +6,7 @@ it is a rejected option, or it is a rule about editing the template rather than 
 
 Anything with a home keeps it. `render.sh` explains the unrendered-token assertion,
 `pnpm-workspace.yaml` explains every supply-chain setting it carries, `check_template.sh`
-explains each assertion where it makes it, and `backend/tests/tiers.py` explains why the gate
+explains each assertion where it makes it, and `backend/tests/tier.py` explains why the gate
 fetches no browser.
 
 ## Where Jinja may be used

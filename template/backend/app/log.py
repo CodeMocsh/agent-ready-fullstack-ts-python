@@ -23,7 +23,7 @@ from fastapi import FastAPI, Request, Response
 from opentelemetry import trace
 from structlog.typing import EventDict, Processor, WrappedLogger
 
-from app.environment import ACKNOWLEDGED_ENV
+from app.deployment import ACKNOWLEDGED_ENV
 from app.models import ClientEvent
 
 _LOG: Final = structlog.stdlib.get_logger("app")

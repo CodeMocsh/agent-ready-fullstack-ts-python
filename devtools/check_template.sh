@@ -673,8 +673,8 @@ PY
 # project from piling every file at the top of tests/, and it is what the tier targets
 # select on. test_gate.py stays at the top because it covers no source: it reads this
 # Makefile, the hook and the workflow.
-for folder in devtools environment errors identity integration lifespan log main models \
-              observe routes serve store telemetry wiring; do
+for folder in deployment devtools environment errors identity integration lifespan log main \
+              models observe routes serve store telemetry wiring; do
     need "backend/tests/$folder/__init__.py"
 done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and
@@ -951,6 +951,10 @@ need backend/tests/errors/test_errors.py
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
+need backend/app/deployment.py
+need backend/app/refusal.py
+need backend/tests/tier.py
+need backend/tests/models/layers.py
 need backend/app/lifespan.py
 # Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0014.
 need_grep 'refuse_development_settings' backend/app/lifespan.py
@@ -1007,7 +1011,8 @@ for adr in 0001-two-substrates-behind-one-contract \
            0013-the-models-are-a-layering-written-down \
            0014-the-environment-is-read-in-one-place-and-run-in-another \
            0015-the-gate-runs-once-per-tree-and-one-at-a-time \
-           0016-the-template-s-decisions-are-numbered-apart-from-yours; do
+           0016-the-template-s-decisions-are-numbered-apart-from-yours \
+           0017-the-template-owns-the-mechanism-and-the-project-owns-its-list; do
     need "docs/adr/template/$adr.md"
 done
 

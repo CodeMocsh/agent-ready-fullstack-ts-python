@@ -35,8 +35,8 @@ from typing import Any, Final
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
-from app.errors import NoSuchAsset
 from app.main import create_app
+from app.refusal import NoSuchAsset
 from app.wiring import BundleMissing, build_bundle
 
 INDEX: Final = "index.html"
