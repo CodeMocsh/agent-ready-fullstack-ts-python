@@ -305,6 +305,65 @@ python3 "$REPO/devtools/links.py" "$OUT" \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     || fail "the generated project names a document that does not exist, or orphans one."
 
+echo "==> assert decision records are numbered from 0001 with no gaps"
+# Numbers are a reading order -- docs/adr/README.md. A gap is a record removed or moved
+# without the renumbering the rule asks for, and a repeat is two branches that both took a
+# number. Both fail here, in the change that made them.
+numbered_without_gaps() {
+    expected=1
+    for record in "$1"/[0-9][0-9][0-9][0-9]-*.md; do
+        [ -e "$record" ] || return 0
+        want="$(printf '%04d' "$expected")"
+        [ "$(basename "$record" | cut -c1-4)" = "$want" ] \
+            || fail "$1: record $want is next, and $(basename "$record") is there. Renumber, and update every citation in the tree in the same change."
+        expected=$((expected + 1))
+    done
+}
+GAPPED="$(mktemp -d)"
+touch "$GAPPED/0001-a.md" "$GAPPED/0003-c.md"
+if (numbered_without_gaps "$GAPPED") 2>/dev/null; then
+    fail "numbered_without_gaps passed a gap, so the sweep below would prove nothing."
+fi
+rm -rf "$GAPPED"
+for records in "$REPO/docs/adr" "$OUT/docs/adr/template" "$OUT/docs/adr"; do
+    numbered_without_gaps "$records"
+done
+
+echo "==> assert a test the template owns stands without the identity stub"
+# identity_stub=false hands app/identity.py, its tests and the tenant routes' guarantee to a
+# project that replaces the seam, under whatever names it chooses. A test the template keeps
+# updating that reaches for the seam, the tenant requirement or the stub's doubles fails to
+# import there, on the first update after it lands. copier.yml names the stub's files.
+python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || fail "a test the template owns depends on the identity stub"
+import ast
+import re
+import sys
+from pathlib import Path
+
+copier, backend = Path(sys.argv[1]).read_text(), Path(sys.argv[2])
+owned = set(re.findall(r"not (?:identity_stub|example_resource) and _copier_operation == 'update' %\}backend/([^{]+)\{%", copier))
+if not owned:
+    sys.exit("check: copier.yml names no file for identity_stub, so this check would pass over nothing")
+REACHES = ("tenant_for", "app.routes.tenant", "tests.identity")
+found = []
+for test in sorted((backend / "tests").rglob("*.py")):
+    if str(test.relative_to(backend)) in owned:
+        continue
+    for node in ast.walk(ast.parse(test.read_text())):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names = [node.module, *(f"{node.module}.{one.name}" for one in node.names), *(one.name for one in node.names)]
+        elif isinstance(node, ast.Import):
+            names = [one.name for one in node.names]
+        else:
+            continue
+        hits = [name for name in names if name in REACHES or name.startswith(("app.routes.tenant.", "tests.identity."))]
+        if hits:
+            found.append(f"{test.relative_to(backend)}:{node.lineno} imports {hits[0]}")
+for line in found:
+    print(f"check: {line}, which a project that replaced the identity seam does not have", file=sys.stderr)
+sys.exit(1 if found else 0)
+PY
+
 echo "==> assert every workflow is valid, here and in what ships"
 # A workflow cannot report its own breakage. A malformed check.yml does not fail the
 # check -- it fails to start, and the pull request shows nothing where the gate should
@@ -622,7 +681,7 @@ need_no_grep '^gate:.*db-test' Makefile
 need_no_grep '^gate:.*observe-test' Makefile
 need_no_grep '^gate:.*test-contract-db' Makefile
 # `pre-commit` runs the list through devtools/gate.sh, which queues one gate per machine and
-# skips a tree that already passed -- docs/adr/template/0015.
+# skips a tree that already passed -- docs/adr/template/0014.
 need_exec devtools/gate.sh
 need_exec devtools/worktree-tree.sh
 need_exec devtools/hold-the-gate.pl
@@ -944,12 +1003,12 @@ need backend/app/main.py
 need backend/app/models/__init__.py
 need backend/app/models/shared.py
 need_absent backend/app/models.py
-# The layering is a written list, and this test is what holds it -- docs/adr/template/0013.
+# The layering is a written list, and this test is what holds it -- docs/adr/template/0007.
 need backend/tests/models/test_layering.py
 need backend/app/routes/public.py
 need backend/app/routes/tenant/__init__.py
 need_absent backend/app/routes.py
-# Every refusal is a class, declared from that class -- docs/adr/template/0012. The test is what holds it.
+# Every refusal is a class, declared from that class -- docs/adr/template/0006. The test is what holds it.
 need backend/app/errors.py
 need backend/tests/errors/test_errors.py
 need backend/app/deps.py
@@ -962,7 +1021,7 @@ need backend/app/refusal.py
 need backend/tests/tier.py
 need backend/tests/models/layers.py
 need backend/app/lifespan.py
-# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0014.
+# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0010.
 need_grep 'refuse_development_settings' backend/app/lifespan.py
 need_grep 'APP_ENV=development' devtools/dev.sh
 need_grep 'APP_ENV=development' devtools/contract-test.sh
@@ -1006,19 +1065,19 @@ need CONTEXT.md
 for adr in 0001-two-substrates-behind-one-contract \
            0002-tenant-isolation-is-forced-and-always-on \
            0003-the-application-never-applies-ddl \
-           0005-a-test-never-decides-whether-to-run \
-           0006-the-one-origin-entrypoint-is-the-edge \
-           0007-the-spec-describes-what-the-service-actually-does \
-           0008-a-route-cannot-escape-the-identity-seam \
-           0009-every-log-line-is-declared-and-written-as-json-to-stdout \
-           0010-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns \
-           0011-routes-are-split-by-what-a-caller-presents \
-           0012-a-refusal-is-a-class-declared-once \
-           0013-the-models-are-a-layering-written-down \
-           0014-the-environment-is-read-in-one-place-and-run-in-another \
-           0015-the-gate-runs-once-per-tree-and-one-at-a-time \
-           0016-the-template-s-decisions-are-numbered-apart-from-yours \
-           0017-the-template-owns-the-mechanism-and-the-project-owns-its-list; do
+           0004-a-route-cannot-escape-the-identity-seam \
+           0005-routes-are-split-by-what-a-caller-presents \
+           0006-a-refusal-is-a-class-declared-once \
+           0007-the-models-are-a-layering-written-down \
+           0008-the-spec-describes-what-the-service-actually-does \
+           0009-the-one-origin-entrypoint-is-the-edge \
+           0010-the-environment-is-read-in-one-place-and-run-in-another \
+           0011-every-log-line-is-declared-and-written-as-json-to-stdout \
+           0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns \
+           0013-a-test-never-decides-whether-to-run \
+           0014-the-gate-runs-once-per-tree-and-one-at-a-time \
+           0015-the-template-owns-the-mechanism-and-the-project-owns-its-list \
+           0016-the-template-s-decisions-are-numbered-apart-from-yours; do
     need "docs/adr/template/$adr.md"
 done
 

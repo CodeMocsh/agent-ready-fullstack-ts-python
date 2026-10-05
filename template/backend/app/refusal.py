@@ -3,10 +3,10 @@ sentence, and `responses(...)`, which builds a route's declaration from the same
 
 The template owns this module and updates it. The refusals themselves are the project's, in
 `app/errors.py`. `tests/errors/test_errors.py` fails when a route raises one it does not
-declare. `docs/adr/template/0012` and `docs/adr/template/0017`.
+declare. `docs/adr/template/0006` and `docs/adr/template/0015`.
 
 A misconfigured deployment raises from `app/wiring.py` and stops the process. A request with no
-tenant raises `Unauthenticated` from `app/identity.py`, which `docs/adr/template/0008` keeps out
+tenant raises `Unauthenticated` from `app/identity.py`, which `docs/adr/template/0004` keeps out
 of the spec.
 """
 

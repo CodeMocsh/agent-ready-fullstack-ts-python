@@ -3,7 +3,7 @@ closed after the last, and the instruments that observe it.
 
 `app/wiring.py` answers *what did this deployment configure*; this answers *what is this process
 running*, and reads no variable. A `build_` function that reads none belongs here.
-`docs/adr/template/0014`.
+`docs/adr/template/0010`.
 
 Verified, never applied: DDL is a release step (`make migrate`) and this process holds no
 rights to it. A skipped release step is a failed startup rather than a failed request.
@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 async def _say_what_this_deployment_authenticates(substrate: str) -> None:
     """Log whether the identity seam authenticates, at `WARNING` only when nobody has said that
-    serving everybody is deliberate. `docs/adr/template/0008`."""
+    serving everybody is deliberate. `docs/adr/template/0004`."""
     tenant = await resolved_without_a_credential()
     if tenant is None:
         log.identity_verified()

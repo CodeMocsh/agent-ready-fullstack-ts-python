@@ -5,7 +5,7 @@ writes it once and an update never touches it.
 `app/log.py` is the mechanism, and every line written here reaches stdout through it. Write
 through `_LOG`, which it hears at `INFO`; a logger by any other name is heard only at `WARNING`
 and above. Name a value by an id, never by a name, an email or anything a person typed.
-`docs/adr/template/0009` and `docs/adr/template/0017`.
+`docs/adr/template/0011` and `docs/adr/template/0015`.
 """
 
 from typing import Final

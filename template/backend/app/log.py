@@ -11,7 +11,7 @@ holds the template's lines; the project's own are in `app/log_lines.py`. Every f
 carry is a parameter of a function in one of the two, or, on `request completed`, `TENANT_ID`
 or a field `app/request_line.py` declares. Records from libraries pass through the same
 formatter with the message they wrote, and are heard only at `WARNING` and above.
-`docs/adr/template/0009` holds the reasoning.
+`docs/adr/template/0011` holds the reasoning.
 """
 
 import logging
@@ -116,7 +116,7 @@ def name_on_request_line(request: Request, field: str, value: str) -> None:
 
     Raises `UndeclaredRequestField` for a field that is not `TENANT_ID` and not in
     `app/request_line.py`, and `AttributeError` for a request `instrument` is not serving.
-    `docs/adr/template/0009`.
+    `docs/adr/template/0011`.
     """
     if field not in request_line_fields():
         raise UndeclaredRequestField(

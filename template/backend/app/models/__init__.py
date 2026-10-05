@@ -1,8 +1,8 @@
 """The shapes the contract is made of. Change one and run `make openapi`.
 
 Import every shape as `from app.models import X`. The modules are layered: `shared` imports
-nothing, and `LAYERS` in `tests/models/test_layering.py` says what each other module may import.
-`docs/adr/template/0013`.
+nothing, and `LAYERS` in `tests/models/layers.py` says what each other module may import.
+`docs/adr/template/0007`.
 """
 
 from app.models.client_events import (

@@ -10,20 +10,19 @@ import asyncio
 import json
 import logging
 from collections.abc import Iterator
-from typing import Any
+from typing import Annotated, Any
 from uuid import uuid4
 
 import httpx
 import pytest
 import uvicorn
-from fastapi import APIRouter, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app import log
 from app.deployment import RESOURCE_ATTRIBUTES_ENV
-from app.identity import Unauthenticated, tenant_for
+from app.identity import Unauthenticated
 from app.main import create_app
-from app.routes import tenant
 from tests.conftest import Logged
 from tests.doubles import CANARY
 from tests.widgets import router as widgets_router, with_widgets
@@ -38,6 +37,13 @@ def tenant_from_header(request: Request) -> str:
     if named is None:
         raise Unauthenticated("this request names no tenant")
     return named
+
+
+def named_tenant(request: Request, tenant: Annotated[str, Depends(tenant_from_header)]) -> str:
+    """The tenant `tenant_from_header` resolved, named on the request line the way the shipped
+    seam names its own."""
+    log.name_on_request_line(request, log.TENANT_ID, tenant)
+    return tenant
 
 
 @pytest.fixture
@@ -56,8 +62,7 @@ def client(app: FastAPI, logged: Logged) -> Iterator[TestClient]:
 
 @pytest.fixture
 def guarded(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    """The app, also serving the widgets and `/raises` under whatever the shipped tenant
-    requirement carries, with `tenant_from_header` as its seam."""
+    """The app, also serving the widgets and `/raises` behind `named_tenant`."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     failing = APIRouter()
@@ -67,8 +72,7 @@ def guarded(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
         raise RuntimeError("the handler failed")
 
     for router in (widgets_router, failing):
-        app.include_router(router, dependencies=tenant.router.dependencies)
-    app.dependency_overrides[tenant_for] = tenant_from_header
+        app.include_router(router, dependencies=[Depends(named_tenant)])
     return app
 
 
@@ -188,7 +192,7 @@ def test_a_field_the_project_declares_is_on_every_request_line(
         log.name_on_request_line(request, "user.id", "user-1")
         return tenant_from_header(request)
 
-    guarded.dependency_overrides[tenant_for] = tenant_and_user
+    guarded.dependency_overrides[tenant_from_header] = tenant_and_user
     with TestClient(guarded) as client:
         logged()
         client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
@@ -209,7 +213,7 @@ def test_a_field_nobody_declared_is_refused_rather_than_logged(
         log.name_on_request_line(request, "email", CANARY)
         return tenant_from_header(request)
 
-    guarded.dependency_overrides[tenant_for] = naming_an_email
+    guarded.dependency_overrides[tenant_from_header] = naming_an_email
     with TestClient(guarded) as client, pytest.raises(log.UndeclaredRequestField):
         client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
 

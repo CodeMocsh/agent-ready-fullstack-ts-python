@@ -19,7 +19,7 @@ module no test can reach.
 
 **This module is also the edge**, because nothing is in front of it. It carries what a proxy
 would have carried — `SECURITY_HEADERS` and `MAX_BODY_BYTES` below — and `app.main` carries
-neither, deliberately: two policies disagreeing is worse than either alone. `docs/adr/template/0006`
+neither, deliberately: two policies disagreeing is worse than either alone. `docs/adr/template/0009`
 holds that reasoning and the options it rejected, including why the refusals this module
 issues are absent from `openapi.json`.
 
@@ -93,7 +93,7 @@ SECURITY_HEADERS: Final = {
 """What the edge would have set, and therefore what this module sets.
 
 Three of these carry a caveat that will cost an afternoon if it is met without warning, and
-each is argued in `docs/adr/template/0006`:
+each is argued in `docs/adr/template/0009`:
 
 - `script-src 'self'` holds only while the build emits no inline script. Something that needs
   one gets a nonce or a hash, never `'unsafe-inline'`.

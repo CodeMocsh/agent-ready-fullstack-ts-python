@@ -4,7 +4,7 @@ A tier is a set of tests that needs something a laptop may not have -- a daemon,
 login, a model. It is not in `make pre-commit`, because a gate that fetches a browser is a
 gate people learn to commit around, and it is never a reason to write a skip: a skipped test
 exits 0 and reads exactly like a test that passed, while a tier that was not selected is
-reported as not run. `docs/adr/template/0005` holds that reasoning and the options it rejected.
+reported as not run. `docs/adr/template/0013` holds that reasoning and the options it rejected.
 
 **Each one is named for what it needs, not for who starts it.** `tests/integration` needs a
 server; `e2e` needs a browser. Who types the command is the least stable thing about a tier --
@@ -14,7 +14,7 @@ taken: in testing vocabulary a manual test is one a person performs by hand, and
 here is automated.
 
 The template owns this module and updates it. Which tiers this project has is the project's,
-in `tests/tiers.py`, which the template writes once. `docs/adr/template/0017`.
+in `tests/tiers.py`, which the template writes once. `docs/adr/template/0015`.
 
 One declaration in `tests/tiers.py`, four readers: `conftest.py` prints what a run left out,
 `test_gate.py` checks that the folder still holds tests and that nothing there creeps into the
