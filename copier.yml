@@ -72,12 +72,26 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.live.spec.ts{% endif %}"
+  # The project's tests of what its production refuses. Nothing imports a test, so a project may
+  # delete this one; it is excluded on update rather than skipped, so it never comes back.
+  - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"
   # Generated from the project's own code, so an update never touches them and the project
   # regenerates them afterwards: `make openapi` writes the first two, `make lint` the third.
   # A merged copy of any of them describes neither tree.
   - "{% if _copier_operation == 'update' %}openapi.json{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/src/api/schema.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/.complexity-baseline.json{% endif %}"
+
+# Written once and then the project's: an update adds one that is missing and never touches
+# one that exists. Each holds only a project's own list -- its refusals, what its production
+# refuses, its tiers, its model layering -- and the mechanism that reads it is a module the
+# template keeps updating. docs/adr/template/0017. A project cannot delete one of these, because
+# the template's code imports each, so `_skip_if_exists` never re-adds one somebody removed.
+_skip_if_exists:
+  - backend/app/errors.py
+  - backend/app/environment.py
+  - backend/tests/tiers.py
+  - backend/tests/models/layers.py
 
 # Computed, never asked. The frontend package.json needs an SPDX expression, and npm
 # spells "no license" as UNLICENSED.

@@ -9,16 +9,14 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import ClassVar, NamedTuple
 
-from app import errors
-from app.errors import ApiError, responses
+from fastapi import HTTPException
+
+from app import errors, refusal
 from app.main import create_app
+from app.refusal import ApiError, responses
 from tests.routes.test_guarantee import endpoints_of
 
 SOURCE = Path(__file__).resolve().parents[2] / "app"
-
-OUTSIDE_THE_CONTRACT = frozenset({"NoSuchAsset"})
-"""Refusals raised only by a route that is not in `openapi.json`: `app/serve.py` answering for
-the built frontend."""
 
 
 def _error_classes() -> dict[str, type[ApiError]]:
@@ -147,7 +145,7 @@ def test_no_refusal_is_declared_and_unreachable() -> None:
     for _, node in _nodes():
         declared |= _named_in(node)
 
-    unreachable = sorted(set(ERRORS) - declared - OUTSIDE_THE_CONTRACT)
+    unreachable = sorted(set(ERRORS) - declared)
 
     assert unreachable == [], (
         f"{unreachable} are defined in app/errors.py and named by no route. Declare them where "
@@ -155,20 +153,24 @@ def test_no_refusal_is_declared_and_unreachable() -> None:
     )
 
 
-def test_nothing_outside_app_errors_builds_an_http_exception() -> None:
-    """A bare `HTTPException` is a refusal neither test above can see."""
+def test_nothing_in_app_builds_an_http_exception() -> None:
+    """A bare `HTTPException` is a refusal neither test above can see. `ApiError` subclasses it
+    rather than building one, so nothing in `app/` is exempt."""
     bare = sorted(
         f"{path.relative_to(SOURCE.parent)}:{getattr(node, 'lineno', 0)}"
         for path, node in _nodes()
-        if path.name != "errors.py"
-        and isinstance(node, ast.Call)
-        and _name_of(node.func) == "HTTPException"
+        if isinstance(node, ast.Call) and _name_of(node.func) == "HTTPException"
     )
 
     assert bare == [], (
         f"{bare} build an HTTPException directly. Declare the refusal as a class in "
         f"app/errors.py, raise that, and name it in responses(...) on the route."
     )
+
+
+class _NoSuchItem(ApiError):
+    status: ClassVar[int] = 404
+    description: ClassVar[str] = "No such item"
 
 
 class _NoSuchList(ApiError):
@@ -184,7 +186,25 @@ class _ListArchived(ApiError):
 def test_refusals_sharing_a_status_are_one_declaration_naming_both() -> None:
     """OpenAPI holds one description per status, so a route that answers `404` for two reasons
     says both in it rather than losing one."""
-    declared = responses(errors.NoSuchTask, _NoSuchList, _ListArchived)
+    declared = responses(_NoSuchItem, _NoSuchList, _ListArchived)
 
-    assert declared[404]["description"] == "Task not found, or no such list"
+    assert declared[404]["description"] == "No such item, or no such list"
     assert declared[409]["description"] == "That list is archived"
+
+
+def test_every_refusal_in_app_errors_is_built_on_app_refusal() -> None:
+    """`app/errors.py` is the project's and an update never touches it, so a project generated
+    before `app/refusal.py` existed still defines its own `ApiError` there. Its refusals then
+    pass every test above by being invisible to them."""
+    own = sorted(
+        name
+        for name, value in vars(errors).items()
+        if isinstance(value, type)
+        and issubclass(value, HTTPException)
+        and not issubclass(value, refusal.ApiError)
+    )
+
+    assert own == [], (
+        f"app/errors.py defines {own} on its own HTTPException. Delete its ApiError, _joined and "
+        f"responses, and import ApiError and responses from app.refusal instead."
+    )

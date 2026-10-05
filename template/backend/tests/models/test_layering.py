@@ -7,20 +7,13 @@ from pathlib import Path
 import pytest
 
 from app import models
+from tests.models.layers import LAYERS
 
 PACKAGE = Path(models.__file__).parent
 
 THE_PACKAGE = "__init__"
 """What `from app.models import X` reaches from inside the package. Never below anything: the
 package imports every module, so a module importing it is a cycle."""
-
-LAYERS: dict[str, frozenset[str]] = {
-    "shared": frozenset(),
-    "tasks": frozenset(),
-    "client_events": frozenset(),
-}
-"""The modules each module under `app/models/` may import, and no others. Each entry lists only
-the imports that module makes today. `docs/adr/template/0013`."""
 
 
 def _modules() -> list[str]:

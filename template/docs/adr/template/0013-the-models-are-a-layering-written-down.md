@@ -38,3 +38,9 @@ decision and is really an oversight.
 - Today no module imports another, so every entry in `LAYERS` is empty and the test holds
   trivially. It starts to bite at the first import between two modules, which is when a
   layering can first go wrong.
+
+## Amended 2026-10-04: `LAYERS` moved to `tests/models/layers.py`
+
+The project owns that module, and the template writes it once; `tests/models/test_layering.py`
+keeps the tests and reads `LAYERS` from it.
+[0017](0017-the-template-owns-the-mechanism-and-the-project-owns-its-list.md).

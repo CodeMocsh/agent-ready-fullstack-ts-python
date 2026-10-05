@@ -39,3 +39,11 @@ is still wrong, and that branch is the one that fails in production.
   more in its body passes a detail; one that needs a different status is a different class.
 - A refusal raised outside the contract — `NoSuchAsset`, from `app/serve.py` — is named in
   `OUTSIDE_THE_CONTRACT` in the test, as a reviewable line.
+
+## Amended 2026-10-04: the mechanism moved to `app/refusal.py`
+
+`ApiError`, `responses(...)` and the template's own `NoSuchAsset` now live in `app/refusal.py`,
+which the template keeps updating. `app/errors.py` holds only the project's refusals and
+re-exports `ApiError` and `responses`. The test that refused an `HTTPException` built outside
+`app/errors.py` now refuses one built anywhere in `app/`, because `ApiError` subclasses it
+rather than building one. [0017](0017-the-template-owns-the-mechanism-and-the-project-owns-its-list.md).

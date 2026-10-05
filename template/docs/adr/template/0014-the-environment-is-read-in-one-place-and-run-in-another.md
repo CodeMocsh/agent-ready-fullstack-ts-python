@@ -46,3 +46,11 @@ forgotten variable is checked rather than waved through.
 - A new development-only convenience adds a finding to `refuse_development_settings`. Every
   finding is reported at once, so a deploy is fixed in one round.
 - `docs/deployment.md` names `APP_ENV`.
+
+## Amended 2026-10-04: the names and the mechanism moved to `app/deployment.py`
+
+`app/deployment.py` now names every variable the template reads and holds `in_development` and
+`refuse_in_production`. `app/environment.py` is the project's: it holds
+`refuse_development_settings`, which says what this project's production refuses, and
+re-exports the mechanism. Where this record says `app/environment.py` names every variable, read
+`app/deployment.py`. [0017](0017-the-template-owns-the-mechanism-and-the-project-owns-its-list.md).

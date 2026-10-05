@@ -3,7 +3,7 @@ it refuses to start on."""
 
 import pytest
 
-from app.environment import (
+from app.deployment import (
     ACQUIRE_TIMEOUT_ENV,
     DATABASE_URL_ENV,
     HEADERS_ENV,

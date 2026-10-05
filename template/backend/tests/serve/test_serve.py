@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import serve
-from app.environment import BUNDLE_ENV
+from app.deployment import BUNDLE_ENV
 from app.main import create_app
 from app.serve import (
     ASSETS,

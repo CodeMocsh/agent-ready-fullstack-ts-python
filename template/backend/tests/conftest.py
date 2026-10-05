@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from app.environment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV, TIMEOUTS_ENV
+from app.deployment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV, TIMEOUTS_ENV
 
 os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
 
