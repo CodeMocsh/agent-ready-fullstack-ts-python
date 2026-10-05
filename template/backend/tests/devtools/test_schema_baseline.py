@@ -2,7 +2,7 @@
 
 `make schema` regenerates it. Writing the current hashes wholesale would re-record an edited
 body on the way past, and `test_no_shipped_entry_body_has_changed` would never fire again. Why
-the baseline exists is in `docs/adr/0003-the-application-never-applies-ddl.md`.
+the baseline exists is in `docs/adr/template/0003-the-application-never-applies-ddl.md`.
 """
 
 import json

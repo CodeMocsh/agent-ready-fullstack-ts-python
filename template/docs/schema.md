@@ -15,7 +15,7 @@ a single SQL statement, every one idempotent and additive.
   nothing else, so the process that verifies the schema cannot forge its own answer.
 - **The application never applies DDL.** It compares the keys in `applied_once` against the keys
   it carries, and refuses to serve when they differ in either direction —
-  [adr/0003](adr/0003-the-application-never-applies-ddl.md).
+  [adr/template/0003](adr/template/0003-the-application-never-applies-ddl.md).
 - **`deploy/schema.sql`** is the same statements as a script, for a deployment whose own tooling
   owns the DDL. Regenerate with `make schema`.
 - **`backend/.schema-baseline.json`** records a hash of each entry body. Editing or removing an
@@ -35,7 +35,7 @@ a single SQL statement, every one idempotent and additive.
   it at deploy. This project checks the same thing at commit time instead, in
   `.schema-baseline.json`, which fires earlier and needs no database — and which only sees your
   working tree. That trade is recorded in
-  [adr/0003](adr/0003-the-application-never-applies-ddl.md).
+  [adr/template/0003](adr/template/0003-the-application-never-applies-ddl.md).
 
 ## Why it is this small
 
@@ -46,7 +46,7 @@ tenant relies on are both there. That no entry is destructive, so an older insta
 through a rollout. Read `backend/tests/store/test_schema.py` for what is asserted today.
 
 Those are what make "tenant isolation is forced and always on"
-([adr/0002](adr/0002-tenant-isolation-is-forced-and-always-on.md)) a mechanism rather than a
+([adr/template/0002](adr/template/0002-tenant-isolation-is-forced-and-always-on.md)) a mechanism rather than a
 claim. They are cheap because a list is cheap to read.
 
 ## When to leave

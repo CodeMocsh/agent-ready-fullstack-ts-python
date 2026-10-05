@@ -605,7 +605,7 @@ need_no_grep '^gate:.*db-test' Makefile
 need_no_grep '^gate:.*observe-test' Makefile
 need_no_grep '^gate:.*test-contract-db' Makefile
 # `pre-commit` runs the list through devtools/gate.sh, which queues one gate per machine and
-# skips a tree that already passed -- docs/adr/0015.
+# skips a tree that already passed -- docs/adr/template/0015.
 need_exec devtools/gate.sh
 need_exec devtools/worktree-tree.sh
 need_exec devtools/hold-the-gate.pl
@@ -851,7 +851,7 @@ need_no_grep 'localhost:5173' frontend/playwright.live.config.ts
 # that the something is this build. A stranger's server on the port absorbs the suite.
 need_grep 'reuseExistingServer: false' frontend/playwright.config.ts
 # The live spec must name no seed row at all. Those exist only because the in-memory
-# substrate put them there -- docs/adr/0001 says Postgres starts empty on purpose -- so an
+# substrate put them there -- docs/adr/template/0001 says Postgres starts empty on purpose -- so an
 # assertion on one passes against the default `make dev` and fails against a real database,
 # on a fixture nothing in this half declares. It creates what it asserts instead.
 #
@@ -885,7 +885,7 @@ if named:
     print(f"check: {live} names a seed row: {named}", file=sys.stderr)
     print("check: those rows exist only on the in-memory substrate. Postgres starts",
           file=sys.stderr)
-    print("check: empty on purpose (docs/adr/0001), so the spec must create what it",
+    print("check: empty on purpose (docs/adr/template/0001), so the spec must create what it",
           file=sys.stderr)
     print("check: asserts rather than assume a fixture this half never declares.",
           file=sys.stderr)
@@ -926,19 +926,19 @@ need backend/app/main.py
 need backend/app/models/__init__.py
 need backend/app/models/shared.py
 need_absent backend/app/models.py
-# The layering is a written list, and this test is what holds it -- docs/adr/0013.
+# The layering is a written list, and this test is what holds it -- docs/adr/template/0013.
 need backend/tests/models/test_layering.py
 need backend/app/routes/public.py
 need backend/app/routes/tenant/__init__.py
 need_absent backend/app/routes.py
-# Every refusal is a class, declared from that class -- docs/adr/0012. The test is what holds it.
+# Every refusal is a class, declared from that class -- docs/adr/template/0012. The test is what holds it.
 need backend/app/errors.py
 need backend/tests/errors/test_errors.py
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
 need backend/app/lifespan.py
-# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/0014.
+# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0014.
 need_grep 'refuse_development_settings' backend/app/lifespan.py
 need_grep 'APP_ENV=development' devtools/dev.sh
 need_grep 'APP_ENV=development' devtools/contract-test.sh
@@ -949,7 +949,7 @@ need backend/tests/routes/test_tasks.py
 need backend/app/serve.py
 need backend/tests/serve/test_serve.py
 # Two substrates behind one contract, and one suite over both. A store package with only
-# one implementation in it is a shape nothing checks -- see docs/adr/0001.
+# one implementation in it is a shape nothing checks -- see docs/adr/template/0001.
 need backend/app/store/__init__.py
 need backend/app/store/memory.py
 need backend/app/store/pg.py
@@ -986,12 +986,15 @@ for adr in 0001-two-substrates-behind-one-contract \
            0006-the-one-origin-entrypoint-is-the-edge \
            0007-the-spec-describes-what-the-service-actually-does \
            0008-a-route-cannot-escape-the-identity-seam \
+           0009-every-log-line-is-declared-and-written-as-json-to-stdout \
+           0010-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns \
            0011-routes-are-split-by-what-a-caller-presents \
            0012-a-refusal-is-a-class-declared-once \
            0013-the-models-are-a-layering-written-down \
            0014-the-environment-is-read-in-one-place-and-run-in-another \
-           0015-the-gate-runs-once-per-tree-and-one-at-a-time; do
-    need "docs/adr/$adr.md"
+           0015-the-gate-runs-once-per-tree-and-one-at-a-time \
+           0016-the-template-s-decisions-are-numbered-apart-from-yours; do
+    need "docs/adr/template/$adr.md"
 done
 
 echo "==> assert tenant isolation is wired, not just described"

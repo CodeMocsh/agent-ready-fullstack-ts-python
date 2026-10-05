@@ -106,7 +106,9 @@ The concept is what the template is sure of. The word is yours.
 
 ## Decisions
 
-`docs/adr/` holds the design decisions that would otherwise look like they could be simpler —
-the store's two substrates, forced tenant isolation, why the application never applies DDL.
-Each file's name is the decision it records, so the directory listing is the index. Its
+`docs/adr/` holds the design decisions that would otherwise look like they could be simpler.
+`docs/adr/template/` holds the ones that came with the template — the store's two substrates,
+forced tenant isolation, why the application never applies DDL — and `copier update` keeps
+them there. Yours go in `docs/adr/` itself, numbered from `0001`. Each file's name is the
+decision it records, so the directory listing is the index. Its
 [README](docs/adr/README.md) says what belongs there and how to write one.

@@ -1,11 +1,11 @@
 """Every way this service says no, once each: a class carrying its own status and sentence.
 
 A route raises the class and names it in `responses(...)` on its decorator.
-`tests/errors/test_errors.py` fails when the two disagree. `docs/adr/0012`.
+`tests/errors/test_errors.py` fails when the two disagree. `docs/adr/template/0012`.
 
 Only what a caller can provoke belongs here. A misconfigured deployment raises from
 `app/wiring.py` and stops the process. A request with no tenant raises `Unauthenticated` from
-`app/identity.py`, which `docs/adr/0008` keeps out of the spec.
+`app/identity.py`, which `docs/adr/template/0008` keeps out of the spec.
 """
 
 from typing import Any, ClassVar, final

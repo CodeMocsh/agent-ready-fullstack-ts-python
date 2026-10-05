@@ -8,7 +8,7 @@ the HTTP fields follow the OpenTelemetry semantic conventions.
 **This is the only module that may import `logging` or `structlog`**, and ruff refuses either
 anywhere else in the backend but `tests/log/`. Every field a line can carry is a parameter of a
 function below. Records from libraries pass through the same formatter with the message they
-wrote, and are heard only at `WARNING` and above. `docs/adr/0009` holds the reasoning.
+wrote, and are heard only at `WARNING` and above. `docs/adr/template/0009` holds the reasoning.
 """
 
 import logging

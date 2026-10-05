@@ -14,7 +14,7 @@ them there means changing clouds never touches the application, and one Collecto
 two destinations during a move.
 
 A span keeps only `SPAN_ATTRIBUTES`, and a metric only `METRIC_ATTRIBUTES`, for the reason
-`docs/adr/0009` gives for log lines.
+`docs/adr/template/0009` gives for log lines.
 
 ## Why a caller's trace is a link unless trusted
 

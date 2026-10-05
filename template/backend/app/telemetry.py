@@ -12,7 +12,7 @@ refuses `opentelemetry` anywhere else.
 metric keeps only `METRIC_ATTRIBUTES` and carries no exemplars. A span attribute left out is reported once, by
 name. A caller's trace context
 is continued only when the deployment trusts its callers, and is otherwise a link on a new
-trace. `docs/adr/0010` holds the reasoning.
+trace. `docs/adr/template/0010` holds the reasoning.
 """
 
 import os
