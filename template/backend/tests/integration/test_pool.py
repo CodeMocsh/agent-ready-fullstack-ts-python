@@ -7,8 +7,12 @@ from typing import Any
 
 import pytest
 
+from app.environment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
+from app.migrate import OWNER_URL_ENV
 from app.store import Connections
+from app.store.conn import SCHEMA_ENV
 from app.store.pg import AcquireTimedOut, PostgresDatabase, Timeouts
+from app.wiring import build
 from tests.integration.conftest import Provisioned
 
 SHORT = Timeouts(statement=0.2, idle_in_transaction=0.2, acquire=0.2)
@@ -79,3 +83,24 @@ async def test_a_closed_pool_counts_no_connections(
     assert one_connection.connections() == Connections(
         pool=provisioned.schema, used=0, idle=0, max_size=1
     )
+
+
+async def test_the_bounds_a_deployment_sets_are_the_ones_postgres_holds(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(OWNER_URL_ENV, raising=False)
+    monkeypatch.setenv(DATABASE_URL_ENV, provisioned.app_dsn)
+    monkeypatch.setenv(SCHEMA_ENV, provisioned.schema)
+    monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, "0.25")
+    monkeypatch.setenv(IDLE_IN_TRANSACTION_TIMEOUT_ENV, "0.75")
+    database = build()
+    assert isinstance(database, PostgresDatabase)
+    await database.check()
+    try:
+        async with database.connection() as conn:
+            statement = await conn.fetchval("SHOW statement_timeout")
+            idle = await conn.fetchval("SHOW idle_in_transaction_session_timeout")
+    finally:
+        await database.close()
+
+    assert (statement, idle) == ("250ms", "750ms")

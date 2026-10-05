@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from app.environment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV
+from app.environment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV, TIMEOUTS_ENV
 from tests.tiers import python_tiers
 
 
@@ -47,9 +47,9 @@ def the_development_loop(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def no_collector(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test starts with no telemetry variable set, whatever the shell exports."""
-    for name in TELEMETRY_ENV:
+def nothing_the_shell_exports(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test starts with no telemetry or timeout variable set, whatever the shell exports."""
+    for name in (*TELEMETRY_ENV, *TIMEOUTS_ENV):
         monkeypatch.delenv(name, raising=False)
 
 

@@ -14,6 +14,7 @@ refusal rather than a warning. A single container that migrates and then serves 
 between the two -- `env -u DATABASE_OWNER_URL uvicorn`.
 """
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,8 +22,10 @@ from typing import Final
 
 from app.environment import (
     ACKNOWLEDGED_ENV,
+    ACQUIRE_TIMEOUT_ENV,
     BUNDLE_ENV,
     DATABASE_URL_ENV,
+    IDLE_IN_TRANSACTION_TIMEOUT_ENV,
     NEEDS_THE_ENDPOINT,
     NOT_READ,
     OTLP_ENDPOINT_ENV,
@@ -31,6 +34,8 @@ from app.environment import (
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
     STABLE_SEMCONV,
+    STATEMENT_TIMEOUT_ENV,
+    TIMEOUTS_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
     stated,
 )
@@ -39,6 +44,7 @@ from app.migrate import OWNER_URL_ENV
 from app.store import Database
 from app.store.conn import SCHEMA_ENV
 from app.store.memory import MemoryDatabase
+from app.store.pg import SMALLEST_BOUND, TIMEOUTS, PostgresDatabase, Timeouts
 
 DENIALS: Final = frozenset({"", "0", "false", "no", "off"})
 """Spellings of "no" that must not read as an acknowledgement.
@@ -72,6 +78,11 @@ class TelemetrySettings:
 
 class TelemetryMisconfigured(RuntimeError):
     """The environment says something about telemetry this process will not act on, so it
+    refuses to start."""
+
+
+class TimeoutsMisconfigured(RuntimeError):
+    """A bound on a wait on Postgres is set to something this process will not run with, so it
     refuses to start."""
 
 
@@ -177,6 +188,34 @@ def _sampling_ratio() -> float:
     return ratio
 
 
+def build_timeouts() -> Timeouts:
+    """The bounds on every wait on Postgres: `TIMEOUTS`, with each one a deployment set replaced
+    by its value in seconds. Raises `TimeoutsMisconfigured` on a value that is not a number of
+    seconds of at least `SMALLEST_BOUND`."""
+    return Timeouts(
+        statement=_seconds(STATEMENT_TIMEOUT_ENV, TIMEOUTS.statement),
+        idle_in_transaction=_seconds(IDLE_IN_TRANSACTION_TIMEOUT_ENV, TIMEOUTS.idle_in_transaction),
+        acquire=_seconds(ACQUIRE_TIMEOUT_ENV, TIMEOUTS.acquire),
+    )
+
+
+def _seconds(variable: str, shipped: float) -> float:
+    said = stated(variable)
+    if said == "":
+        return shipped
+    refusal = TimeoutsMisconfigured(
+        f"{variable}={said!r} is not a bound. Give a number of seconds of at least "
+        f"{SMALLEST_BOUND}, or unset it for {shipped}."
+    )
+    try:
+        seconds = float(said)
+    except ValueError as error:
+        raise refusal from error
+    if not (math.isfinite(seconds) and seconds >= SMALLEST_BOUND):
+        raise refusal
+    return seconds
+
+
 def build() -> Database:
     """The substrate this deployment gets, from the environment."""
     if os.environ.get(OWNER_URL_ENV):
@@ -188,7 +227,11 @@ def build() -> Database:
         )
     dsn = os.environ.get(DATABASE_URL_ENV)
     if dsn is None or dsn.strip() == "":
+        said = [one for one in TIMEOUTS_ENV if stated(one)]
+        if said:
+            raise TimeoutsMisconfigured(
+                f"{', '.join(said)} set and {DATABASE_URL_ENV} unset: the in-memory substrate "
+                f"has no wait to bound. Unset it, or set {DATABASE_URL_ENV}."
+            )
         return MemoryDatabase(seed_tenant=SENTINEL_TENANT)
-    from app.store.pg import PostgresDatabase
-
-    return PostgresDatabase(dsn=dsn, schema=os.environ.get(SCHEMA_ENV))
+    return PostgresDatabase(dsn=dsn, schema=os.environ.get(SCHEMA_ENV), timeouts=build_timeouts())

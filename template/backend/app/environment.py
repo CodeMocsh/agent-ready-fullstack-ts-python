@@ -58,6 +58,13 @@ TELEMETRY_ENV: Final = (
 )
 """Every variable `wiring.build_telemetry` reads."""
 
+STATEMENT_TIMEOUT_ENV: Final = "DATABASE_STATEMENT_TIMEOUT"
+IDLE_IN_TRANSACTION_TIMEOUT_ENV: Final = "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT"
+ACQUIRE_TIMEOUT_ENV: Final = "DATABASE_ACQUIRE_TIMEOUT"
+TIMEOUTS_ENV: Final = (STATEMENT_TIMEOUT_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, ACQUIRE_TIMEOUT_ENV)
+"""Every variable `wiring.build_timeouts` reads, each in seconds, and each meaningful only beside
+`DATABASE_URL`."""
+
 ENVIRONMENT_ENV: Final = "APP_ENV"
 DEVELOPMENT: Final = "development"
 PRODUCTION: Final = "production"

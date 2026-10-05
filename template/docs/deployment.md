@@ -86,8 +86,18 @@ Each one answers `500` and writes its traceback to the log. Your platform's requ
 not replace them. It closes the client's connection and leaves the handler running with a
 connection in hand, so a database that stops answering fills the pool.
 
-To change a bound, pass a different `Timeouts` to `PostgresDatabase` in `app/wiring.py`. It
-applies to every route.
+To change a bound, set it in seconds. Each applies to every route, and an unset one keeps the
+value `Timeouts` ships with:
+
+| Variable | Bounds | Ships with |
+|---|---|---|
+| `DATABASE_STATEMENT_TIMEOUT` | one statement | 5 |
+| `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT` | a transaction left open with nothing sent | 10 |
+| `DATABASE_ACQUIRE_TIMEOUT` | the wait for a connection | 5 |
+
+Raise the first two for a process that holds a connection across long work, such as a
+transaction around an advisory lock. The process refuses to start on a value that is not a
+number of seconds of at least a millisecond, and on any of them set without `DATABASE_URL`.
 
 ## Logs
 
