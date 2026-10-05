@@ -43,7 +43,7 @@ _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
 
 
-_SMALLEST: Final = 0.001
+SMALLEST_BOUND: Final = 0.001
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,7 @@ class Timeouts:
     """A request that finds every connection in use waits this long, then `AcquireTimedOut`."""
 
     def __post_init__(self) -> None:
-        if min(self.statement, self.idle_in_transaction, self.acquire) < _SMALLEST:
+        if min(self.statement, self.idle_in_transaction, self.acquire) < SMALLEST_BOUND:
             raise ValueError(f"{self} holds a bound under a millisecond, which Postgres ignores")
 
     @property

@@ -1,18 +1,31 @@
-"""What the environment turns telemetry into, and every configuration it refuses to start on."""
+"""What the environment turns telemetry and the bounds on Postgres into, and every configuration
+it refuses to start on."""
 
 import pytest
 
 from app.environment import (
+    ACQUIRE_TIMEOUT_ENV,
+    DATABASE_URL_ENV,
     HEADERS_ENV,
+    IDLE_IN_TRANSACTION_TIMEOUT_ENV,
     NOT_READ,
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
     SAMPLING_RATIO_ENV,
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
+    STATEMENT_TIMEOUT_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
 )
-from app.wiring import TelemetryMisconfigured, TelemetrySettings, build_telemetry
+from app.store.pg import TIMEOUTS, Timeouts
+from app.wiring import (
+    TelemetryMisconfigured,
+    TelemetrySettings,
+    TimeoutsMisconfigured,
+    build,
+    build_telemetry,
+    build_timeouts,
+)
 
 ENDPOINT = "http://collector:4318"
 
@@ -107,3 +120,35 @@ def test_an_endpoint_without_a_name_refuses_to_start(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(TelemetryMisconfigured, match=SERVICE_NAME_ENV):
         build_telemetry()
+
+
+def test_no_timeout_variable_is_the_shipped_bounds() -> None:
+    assert build_timeouts() == TIMEOUTS
+
+
+def test_each_timeout_a_deployment_sets_is_read_in_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, "30")
+    monkeypatch.setenv(IDLE_IN_TRANSACTION_TIMEOUT_ENV, " 600.5 ")
+    monkeypatch.setenv(ACQUIRE_TIMEOUT_ENV, "0.25")
+
+    assert build_timeouts() == Timeouts(statement=30.0, idle_in_transaction=600.5, acquire=0.25)
+
+
+@pytest.mark.parametrize("said", ["soon", "0", "0.0005", "-1", "nan", "inf", "5s"])
+def test_a_timeout_that_is_not_a_bound_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, said: str
+) -> None:
+    monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, said)
+
+    with pytest.raises(TimeoutsMisconfigured, match=STATEMENT_TIMEOUT_ENV):
+        build_timeouts()
+
+
+def test_a_timeout_without_a_database_refuses_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(DATABASE_URL_ENV, raising=False)
+    monkeypatch.setenv(ACQUIRE_TIMEOUT_ENV, "1")
+
+    with pytest.raises(TimeoutsMisconfigured, match=ACQUIRE_TIMEOUT_ENV):
+        build()
