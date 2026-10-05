@@ -29,7 +29,7 @@ Every record has the same parts:
 - `# NNNN. The decision as a claim`, in the present tense. *"Row-level security is on for every
   table, and forced"*, not *"RLS decision"*.
 - A `Date:` line.
-- `## Status`: accepted or not, and which earlier records this one replaces.
+- `## Status`: accepted or not.
 - `## Context`: the forces, and why the obvious design does not work here.
 - `## Decision`: the rules. Each rule names the code that holds it: a function, a file, a test.
 - `## Considered options`: only the options somebody will propose again, and why not.
@@ -45,7 +45,9 @@ holds the earlier text. Do not add dated amendments, and do not tell the history
 **Numbers are a reading order.** Records are numbered from 0001 with no gaps, in the order a
 newcomer should read them. When records merge, go away or move, renumber them, and update every
 citation in the tree in the same change. A citation in git history, an old commit or a transcript
-may then point at a different record. That is accepted: the tree is the source of truth.
+may then point at a different record. That is accepted: the tree is the source of truth. A shipped
+migration entry cannot change, so a citation inside one can point at the wrong record too. If two
+branches add or move records at once, the later merge renumbers.
 
 **Cite nothing by section number, and count nothing that lives elsewhere.** Name the thing: the
 route, the function, the rule or the invariant. A section number points into one revision of one
