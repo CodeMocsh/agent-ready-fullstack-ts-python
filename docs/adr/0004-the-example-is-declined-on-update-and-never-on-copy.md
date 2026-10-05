@@ -44,3 +44,11 @@ ships them. The answer is recorded, so a project says it once.
   is missing or the answer was not recorded. The update half has no check here: proving it needs
   a tagged template and a project to update, which is the dry run against the first generated
   project, not the gate.
+
+## Amended 2026-10-04: the identity stub is declined the same way
+
+`identity_stub`, default true, does for `app/identity.py` and its tests what
+`example_resource` does for the example resource: false stops an update touching them, and a
+copy always ships them, because the routes and the boot log are built on the seam. The first
+generated project replaced the stub with real authentication, and its tests for the stub
+conflicted with the template's on every update.

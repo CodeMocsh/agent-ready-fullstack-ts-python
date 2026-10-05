@@ -531,19 +531,22 @@ for label, got, want in (
         die(f"{label} came out as {got!r}, not {want!r}")
 PY
 
-    echo "==> assert a fresh copy ships the example whatever example_resource says"
-    # example_resource=false stops `copier update` touching the example's files. It must not
-    # stop a copy shipping them: the store, the schema and the frontend are built on the
-    # example, so a copy without it is a project that does not import.
-    # The paths are read out of copier.yml, the one place that lists them.
-    NO_EXAMPLE="$(sh "$RENDER" --into "$WORK/no-example" -- --data example_resource=false)"
-    EXAMPLE_FILES="$(sed -n "s/.*not example_resource and _copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
-    [ -n "$EXAMPLE_FILES" ] || fail "copier.yml names no example file, so this check would pass over nothing"
-    for kept in $EXAMPLE_FILES; do
-        [ -f "$NO_EXAMPLE/$kept" ] || fail "a copy with example_resource=false left out $kept"
+    echo "==> assert a fresh copy ships every file a question can stop an update bringing"
+    # example_resource=false and identity_stub=false stop `copier update` touching their files.
+    # Neither may stop a copy shipping them: the store, the schema, the frontend and the routes
+    # are built on both, so a copy without them is a project that does not import. The paths
+    # are read out of copier.yml, the one place that lists them.
+    DECLINED="$(sh "$RENDER" --into "$WORK/declined" -- \
+        --data example_resource=false --data identity_stub=false)"
+    for question in example_resource identity_stub; do
+        OWNED="$(sed -n "s/.*not $question and _copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
+        [ -n "$OWNED" ] || fail "copier.yml names no file for $question, so this check would pass over nothing"
+        for kept in $OWNED; do
+            [ -f "$DECLINED/$kept" ] || fail "a copy with $question=false left out $kept"
+        done
+        grep -q "^$question: false$" "$DECLINED/.copier-answers.yml" \
+            || fail "$question=false is not recorded, so the next update would bring its files back"
     done
-    grep -q '^example_resource: false$' "$NO_EXAMPLE/.copier-answers.yml" \
-        || fail "example_resource=false is not recorded, so the next update would bring the example back"
 fi
 
 echo "==> assert the agent guard"

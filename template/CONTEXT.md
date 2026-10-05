@@ -66,6 +66,12 @@ A way a route answers no. Each one is a class in `app/errors.py` that carries it
 its sentence.
 _Avoid_: error response, exception (an exception is how a refusal is raised, not what it is).
 
+**Identity stub**:
+`app/identity.py` as the template ships it: every request resolves to the sentinel tenant. A
+project that authenticates replaces it, then answers `identity_stub=false` so `copier update`
+stops bringing it.
+_Avoid_: fake auth, no-auth mode.
+
 ## Logs
 
 **Log line**:
