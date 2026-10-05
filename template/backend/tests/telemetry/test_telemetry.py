@@ -23,7 +23,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
-from app import serve, telemetry
+from app import log, serve, telemetry
 from app.deployment import OTLP_ENDPOINT_ENV, RESOURCE_ATTRIBUTES_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from tests.conftest import Logged
@@ -279,6 +279,40 @@ def test_every_log_line_written_in_a_sampled_request_names_its_trace_and_span(
 
     assert line["trace_id"] == trace_of(span)
     assert len(line["span_id"]) == 16
+
+
+@pytest.fixture
+def on_gcp(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, "cloud.provider=gcp,cloud.account.id=tasks-prod")
+    yield from instrumented(monkeypatch, trust=False)
+
+
+def test_on_gcp_a_line_names_its_trace_the_way_cloud_logging_links_it(
+    on_gcp: Instrumented, logged: Logged
+) -> None:
+    """Cloud Logging links a line to Cloud Trace by these three fields alone, and never by
+    `trace_id`."""
+    logged()
+    on_gcp.client.get("/widgets")
+
+    [span] = on_gcp.servers()
+    [line] = [one for one in logged() if one["message"] == "request completed"]
+
+    assert line[log.GCP_TRACE] == f"projects/tasks-prod/traces/{trace_of(span)}"
+    assert line[log.GCP_SPAN_ID] == line["span_id"]
+    assert line[log.GCP_TRACE_SAMPLED] is True
+
+
+def test_a_deployment_that_names_no_gcp_project_names_no_vendor_on_a_line(
+    untrusting: Instrumented, logged: Logged
+) -> None:
+    logged()
+    untrusting.client.get("/widgets")
+
+    lines = logged()
+
+    assert [one for one in lines if "trace_id" in one]
+    assert [one for one in lines if "logging.googleapis.com" in json.dumps(one)] == []
 
 
 def test_a_request_sampled_out_exports_no_span_and_logs_no_trace_but_is_still_measured(

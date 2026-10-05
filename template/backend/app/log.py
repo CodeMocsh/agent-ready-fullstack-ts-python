@@ -32,14 +32,22 @@ _LOG: Final = structlog.stdlib.get_logger("app")
 TENANT_ID: Final = "tenant_id"
 """The field naming the tenant a request resolved to, on every `request completed` line."""
 
+GCP_TRACE: Final = "logging.googleapis.com/trace"
+GCP_SPAN_ID: Final = "logging.googleapis.com/spanId"
+GCP_TRACE_SAMPLED: Final = "logging.googleapis.com/trace_sampled"
+
 
 class UndeclaredRequestField(RuntimeError):
     """A field neither `TENANT_ID` nor `app/request_line.py` declares was named on a request."""
 
 
-def configure(service_version: str | None) -> None:
+def configure(service_version: str | None, gcp_project: str | None) -> None:
     """Send every record in this process to stdout as one JSON line, from here on, each naming
     `service_version` under `service.version` -- `None` when the deployment named none.
+
+    With `gcp_project`, a line that names a trace also names it the way Cloud Logging links it
+    to Cloud Trace, under `GCP_TRACE`, `GCP_SPAN_ID` and `GCP_TRACE_SAMPLED`. With `None`, no
+    line names a vendor.
 
     Idempotent, and it touches only what it installed: a handler from an earlier call is
     replaced, and any other handler on the root logger is left alone. Below `WARNING` only
@@ -54,6 +62,7 @@ def configure(service_version: str | None) -> None:
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
                 structlog.processors.format_exc_info,
                 _naming_version(service_version),
+                *([] if gcp_project is None else [_linking_to_cloud_trace(gcp_project)]),
                 _named_for_every_cloud,
                 structlog.processors.JSONRenderer(),
             ],
@@ -211,6 +220,17 @@ def _naming_version(version: str | None) -> Processor:
         return line
 
     return named
+
+
+def _linking_to_cloud_trace(project: str) -> Processor:
+    def linked(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:
+        if "trace_id" in line:
+            line[GCP_TRACE] = f"projects/{project}/traces/{line['trace_id']}"
+            line[GCP_SPAN_ID] = line["span_id"]
+            line[GCP_TRACE_SAMPLED] = True
+        return line
+
+    return linked
 
 
 def _named_for_every_cloud(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:

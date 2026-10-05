@@ -25,6 +25,42 @@ browser — the strongest position under the ePrivacy Directive (EDPB Guidelines
 route is public, so `ClientEvent` is the whole defence: every field is an enum, a bounded
 identifier or a number.
 
+## The request line names its tenant and its build
+
+The tenant requirement's router carries `app/deps.py::resolved_tenant`, which reaches `tenant_for`
+and names the tenant through `app/log.py::name_on_request_line`. That function writes to
+`request.state`, the one place a dependency can leave a value the middleware reads after the
+response; a contextvar set inside the request does not reach it. One tenant's requests can
+be read apart from another's on the log alone.
+
+A request that resolves no tenant is logged with `tenant_id` null: a public route, or a request
+the identity seam refused. A route that answers `404` or `500` after the seam resolved a tenant
+names that tenant.
+
+Every line also carries `service.version`, read by `app/wiring.py::build_service_version` from
+`OTEL_RESOURCE_ATTRIBUTES` -- the variable the OpenTelemetry SDK reads for the spans -- so a span
+and a line name the same build. It is null when the deployment names none.
+
+A project that resolves more than a tenant, such as a user, declares the field in
+`app/request_line.py` and names it the same way. The declaration is what keeps this a declared
+field: a name nobody declared raises `UndeclaredRequestField` rather than reaching the log.
+
+## On GCP, a line names its trace the way Cloud Logging links it
+
+Cloud Logging links a line to Cloud Trace only by `logging.googleapis.com/trace`,
+`logging.googleapis.com/spanId` and `logging.googleapis.com/trace_sampled`, and never by
+`trace_id`. A line that names its trace only the neutral way is a line nobody can open from the
+trace.
+
+A line carries the three Google fields beside `trace_id` and `span_id` only when
+`OTEL_RESOURCE_ATTRIBUTES` names `cloud.provider=gcp` and `cloud.account.id`, read by
+`app/wiring.py::build_gcp_project`. With neither, no line names a vendor. `gcp` naming no project
+refuses to start.
+
+The project is read from the resource attributes, not from a variable of its own. The
+OpenTelemetry SDK and Google's resource detector read the provider and the project there, so a
+span and a line name the same project, and a deployment says it once.
+
 ## Considered options
 
 - **A vendor SDK such as Sentry.** A third party in `connect-src`, and Sentry's JavaScript SDK 11
@@ -39,27 +75,4 @@ identifier or a number.
 - A new log line is a new function in `app/log.py`.
 - An exception's message is written as the library wrote it. A Postgres unique violation names
   the conflicting value.
-- `tenant_id` is not on `request completed`: `tenant_for` is synchronous, so what it binds does
-  not reach the middleware.
 - Not yet: a security-event stream, an audit log, keyed hashing of identifiers, OTLP export.
-
-## Amended 2026-10-05: the request line names its tenant and its build
-
-The consequence above, that `tenant_id` is not on `request completed`, no longer holds. The
-tenant requirement's router carries `app/deps.py::resolved_tenant`, which reaches `tenant_for`
-and names the tenant through `app/log.py::name_on_request_line`. That function writes to
-`request.state`, the one place a dependency can leave a value the middleware reads after the
-response; a contextvar set inside the request does not reach it. One tenant's requests can now
-be read apart from another's on the log alone.
-
-A request that resolves no tenant is logged with `tenant_id` null: a public route, or a request
-the identity seam refused. A route that answers `404` or `500` after the seam resolved a tenant
-names that tenant.
-
-Every line also carries `service.version`, read by `app/wiring.py::build_service_version` from
-`OTEL_RESOURCE_ATTRIBUTES` -- the variable the OpenTelemetry SDK reads for the spans -- so a span
-and a line name the same build. It is null when the deployment names none.
-
-A project that resolves more than a tenant, such as a user, declares the field in
-`app/request_line.py` and names it the same way. The declaration is what keeps this a declared
-field: a name nobody declared raises `UndeclaredRequestField` rather than reaching the log.

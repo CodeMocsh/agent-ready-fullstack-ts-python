@@ -24,6 +24,7 @@ from app.wiring import (
     TelemetrySettings,
     TimeoutsMisconfigured,
     build,
+    build_gcp_project,
     build_service_version,
     build_telemetry,
     build_timeouts,
@@ -153,6 +154,30 @@ def test_resource_attributes_that_are_not_key_value_pairs_refuse_to_start(
 
     with pytest.raises(TelemetryMisconfigured, match=RESOURCE_ATTRIBUTES_ENV):
         build_service_version()
+
+
+@pytest.mark.parametrize(
+    ("said", "project"),
+    [
+        ("", None),
+        ("cloud.provider=gcp,cloud.account.id=tasks-prod", "tasks-prod"),
+        ("cloud.provider=aws,cloud.account.id=123456789012", None),
+        ("cloud.account.id=tasks-prod", None),
+    ],
+)
+def test_the_gcp_project_is_named_only_where_the_provider_is_gcp(
+    monkeypatch: pytest.MonkeyPatch, said: str, project: str | None
+) -> None:
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
+
+    assert build_gcp_project() == project
+
+
+def test_gcp_naming_no_project_refuses_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, "cloud.provider=gcp,service.version=1.4.2")
+
+    with pytest.raises(TelemetryMisconfigured, match="cloud.account.id"):
+        build_gcp_project()
 
 
 def test_no_timeout_variable_is_the_shipped_bounds() -> None:

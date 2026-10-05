@@ -117,6 +117,7 @@ line is declared.
 | `service.version` | the `service.version` in `OTEL_RESOURCE_ATTRIBUTES`; null when it names none |
 | `request_id` | while a request is served; the response carries it as `X-Request-ID` |
 | `trace_id`, `span_id` | while a traced request is served; the ids its spans carry |
+| `logging.googleapis.com/trace`, `/spanId`, `/trace_sampled` | the same trace, the way Cloud Logging links it; only on GCP, below |
 | `exception` | the whole traceback, when there is one |
 | `tenant_id` | on `request completed`; null on a public route, or when the identity seam refused |
 
@@ -130,12 +131,18 @@ cannot be placed. An entry that is not `key=value` refuses to start.
 **What each cloud does with it:**
 
 - **GCP.** Cloud Logging parses each line into `jsonPayload` and reads `severity` and `message`.
-  Error Reporting groups on `exception` at no charge.
+  Error Reporting groups on `exception` at no charge. Cloud Logging links a line to Cloud Trace
+  by the `logging.googleapis.com/` fields alone, so set `cloud.provider=gcp` and
+  `cloud.account.id=<project id>` in `OTEL_RESOURCE_ATTRIBUTES`; `gcp` with no project refuses
+  to start.
 - **AWS.** CloudWatch Logs Insights finds the fields at query time, on the Standard log class
-  only. **A log group keeps its data forever until you set a retention period**, so set one.
+  only. Nothing links a line to X-Ray; find a trace's lines by `trace_id`. X-Ray writes the same
+  id as `1-`, its first 8 hex digits, `-`, and the other 24. **A log group keeps its data forever until you set a retention period**, so set one.
   A data protection policy on the group masks emails, card numbers and credentials as they
   arrive. It is billed per GB scanned, and it is worth having as a second layer.
 - **Azure.** Container Apps stores the line as one string. Read it with `parse_json` in KQL.
+  Application Insights names a trace's id `operation_Id`; join a trace to its lines on
+  `trace_id`.
 
 **Retention is yours to set, and shorter is safer.** The log holds personal data even when
 nobody meant it to: an exception's message is written as the library wrote it. 14 to 30 days

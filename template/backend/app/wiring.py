@@ -115,15 +115,39 @@ def build_bundle() -> Path:
 
 
 SERVICE_VERSION: Final = "service.version"
+CLOUD_PROVIDER: Final = "cloud.provider"
+CLOUD_ACCOUNT: Final = "cloud.account.id"
 
 
 def build_service_version() -> str | None:
     """The `service.version` in `OTEL_RESOURCE_ATTRIBUTES`, decoded as the SDK decodes it, or
     `None` when the deployment names none. Read whether or not telemetry is on. Refuses to start
     on an entry that is not `key=value`."""
+    return _resource_attributes().get(SERVICE_VERSION)
+
+
+def build_gcp_project() -> str | None:
+    """The GCP project Cloud Logging finds each line's trace in: `cloud.account.id` in
+    `OTEL_RESOURCE_ATTRIBUTES` when `cloud.provider` there is `gcp`, and `None` for any other
+    provider or none. Refuses to start on `gcp` with no project, or on an entry that is not
+    `key=value`."""
+    attributes = _resource_attributes()
+    if attributes.get(CLOUD_PROVIDER) != "gcp":
+        return None
+    project = attributes.get(CLOUD_ACCOUNT, "")
+    if project == "":
+        raise TelemetryMisconfigured(
+            f"{RESOURCE_ATTRIBUTES_ENV} says {CLOUD_PROVIDER}=gcp and names no {CLOUD_ACCOUNT}, "
+            f"so no log line can name its trace in Cloud Logging. Add "
+            f"{CLOUD_ACCOUNT}=<the project id>."
+        )
+    return project
+
+
+def _resource_attributes() -> dict[str, str]:
     said = stated(RESOURCE_ATTRIBUTES_ENV)
     if said == "":
-        return None
+        return {}
     attributes: dict[str, str] = {}
     for entry in said.split(","):
         key, equals, value = entry.partition("=")
@@ -133,7 +157,7 @@ def build_service_version() -> str | None:
                 f"Separate entries with commas and nothing else."
             )
         attributes[key.strip()] = unquote(value.strip())
-    return attributes.get(SERVICE_VERSION)
+    return attributes
 
 
 def build_telemetry() -> TelemetrySettings | None:
