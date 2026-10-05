@@ -18,12 +18,14 @@ need a system Python of any particular version:
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-`make`, `git`, `perl` and `python3` complete the set; all four ship with the Xcode command line tools
+`make`, `git`, `curl`, `perl` and `python3` complete the set; all five ship with the Xcode command line tools
 on macOS and with build-essential and the base system on Debian and Ubuntu. `python3` is not
 the application's Python — the one uv installs is. `devtools/dev.sh` and
 `devtools/contract-test.sh` use it to put each half in a process group of its own, which is the
 only way they can stop what they started. `devtools/gate.sh` uses `perl` to take the lock that
 keeps two gates of one project from running at once, because macOS ships no `flock`.
+`make install` uses `curl` to fetch a pinned gitleaks, checked against `devtools/gitleaks.sums`,
+for the secret scan in the gate.
 
 ## Install
 

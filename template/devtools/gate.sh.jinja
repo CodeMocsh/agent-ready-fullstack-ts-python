@@ -78,6 +78,8 @@ fi
 # have nothing to compare against. What is left runs directly.
 failed=0
 
+sh devtools/secrets.sh 9>&- || failed=1
+
 if [ "$has_frontend" = 1 ]; then
     pnpm -C frontend lint:check 9>&- || failed=1
     pnpm -C frontend test 9>&- || failed=1
