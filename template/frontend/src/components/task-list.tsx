@@ -1,8 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { tasksApi } from "@/api/client";
-import type { Task } from "@/api/types";
+import { type Task, tasksApi } from "@/api/tasks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {

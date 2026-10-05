@@ -1,5 +1,5 @@
 import { API_BASE_URL } from "@/api/base";
-import type { ClientEvents, CreateTaskBody, Task, UpdateTaskBody } from "@/api/types";
+import type { ClientEvents } from "@/api/types";
 
 export class ApiError extends Error {
   override readonly name = "ApiError";
@@ -22,7 +22,7 @@ async function detailOf(response: Response): Promise<string | null> {
   return null;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? "GET";
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -41,15 +41,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   return (await response.json()) as T;
 }
-
-export const tasksApi = {
-  list: () => request<Task[]>("/tasks"),
-  create: (body: CreateTaskBody) =>
-    request<Task>("/tasks", { method: "POST", body: JSON.stringify(body) }),
-  update: (id: string, body: UpdateTaskBody) =>
-    request<Task>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  remove: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
-};
 
 export const clientEventsApi = {
   record: (body: ClientEvents) =>
