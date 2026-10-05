@@ -1,13 +1,17 @@
-"""What a run left out, said out loud.
+"""What every suite here is handed, and what a run left out.
 
-`norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
+**The development loop is set before anything imports the app**, so a module that reads
+`APP_ENV` at import reads `development`.
+
+**What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
 is silence: `pytest -q` reports what it collected and has no way to mention what it never
-looked at. This prints the tiers that were not in the run, so a green result never reads as
+looked at. `pytest_terminal_summary` prints the tiers that were not in the run, so a green result never reads as
 "everything passed" when a whole folder was not selected.
 """
 
 import json
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,6 +19,9 @@ from typing import Any
 import pytest
 
 from app.environment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV, TIMEOUTS_ENV
+
+os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
+
 from tests.tiers import python_tiers
 
 
@@ -37,13 +44,6 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
-
-
-@pytest.fixture(autouse=True)
-def the_development_loop(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test is the development loop unless it says otherwise. An unset `APP_ENV` is
-    production, which refuses the in-memory substrate most tests run on."""
-    monkeypatch.setenv(ENVIRONMENT_ENV, DEVELOPMENT)
 
 
 @pytest.fixture(autouse=True)
