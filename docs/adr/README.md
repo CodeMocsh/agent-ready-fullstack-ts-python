@@ -1,26 +1,25 @@
 # Decisions
 
-This is where a design decision about **the template itself** lives — the generator, the shape
+This is where an architectural decision about **the template itself** lives — the generator, the shape
 of what it renders, and the way this repo is checked. Decisions about what a *generated project*
 does live in `template/docs/adr/`, and ship to every project made from it.
 
 ## What belongs here
 
-**The test is the cost of change.** That is the line Grady Booch draws between architecture and
-the rest of design: a decision is significant when reversing it would be expensive. Michael
-Nygard, who introduced this format in 2011, names where the expense shows up — the structure, a
-quality the system is held to, a dependency, an interface, or the way the thing is built. A
-choice that touches none of those is an implementation detail, however hard it was to get right.
+**An ADR records an architectural decision: one a principal architect would want to review,
+because it is expensive to reverse. It fixes the shape of the generator or of what it renders,
+how the template is checked, released or updated, or a dependency or contract the template is
+bound to.** Everything else is a commit message. Detail an agent can work out from the diff goes
+in [../constraints.md](../constraints.md).
 
-A decision earns a file only if it fixes the shape of the generator or of what it renders, a
-quality the template is held to, or a dependency or contract it would take a quarter to swap.
-Naming, wording, one script's behaviour and a convention a gate already enforces do not. The
-highest-value record is one verified against a real system that contradicts the obvious
-reading.
+A decision earns a file only if it does at least one of these:
 
-If you could choose differently next week and nothing outside that file would notice, the
-reasoning goes in the commit message. Detail an agent can work out from the diff goes in
-[../constraints.md](../constraints.md) instead.
+- It fixes the shape of the generator, or of what every generated project gets.
+- It fixes how the template is checked, released or updated.
+- It takes on a dependency or a contract that would take a quarter to swap.
+
+Naming, wording, one script's behaviour and anything a gate already enforces do not. **If
+unsure, it is a commit message.**
 
 ## How
 

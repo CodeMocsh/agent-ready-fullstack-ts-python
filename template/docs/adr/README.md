@@ -1,35 +1,22 @@
 # Decisions
 
-This is where an architectural decision lives, as the test below defines one. `AGENTS.md` bans
-comments and sends rationale to the commit message, and most decisions need nothing more.
-**A decision record is for a decision, not for an explanation.**
+**An ADR records an architectural decision: one a principal architect would want to review,
+because it is expensive to reverse. It fixes the system's structure, a quality the system is held
+to, or a dependency or contract the system is bound to.** Everything else is a commit message.
 
 ## What belongs here
 
-**The test is the cost of change.** That is the line Grady Booch draws between architecture and
-the rest of design: a decision is significant when reversing it would be expensive. Michael
-Nygard, who introduced this format in 2011, names where the expense shows up — the structure, a
-quality the system is held to, a dependency, an interface, or the way the thing is built. A
-choice that touches none of those is an implementation detail, however hard it was to get right.
+A decision earns a file only if it does at least one of these:
 
-A decision is architectural, and earns a file, only if it does at least one of these:
+- It fixes structure across modules, or across the two halves.
+- It fixes a quality the system is held to: tenancy and security, availability, cost, or how
+  the system is released and deployed.
+- It takes on a dependency or a contract that would take a quarter to swap.
 
-- **It fixes structure** across modules, or across the two halves.
-- **It fixes a quality the system is held to**: tenancy and security, availability, cost, or
-  how the system is released and deployed.
-- **It takes on a dependency or a contract** that would take a quarter to swap out.
-
-These do not, however much thought they took:
-
-- UI layout, copy, and the name of a screen, a field or a facet.
-- How one component or one module behaves, or the shape inside it.
-- A convention a gate already enforces. The gate is the record.
-- A workaround for a bug in a tool.
-
-Those go in the commit message, plus a docstring or a test where they constrain how something
-may be used. Under the comment ban the reason for a choice always lives outside the file, so
-"the reason is not in the code" is never enough on its own. **If unsure, it is a commit
-message.**
+Naming, copy, one module's internals and anything a gate already enforces do not. Their reason
+goes in the commit message, and a constraint on how something may be used goes in a docstring or
+a test. Under the comment ban a reason always lives outside the code, so that alone never earns a
+record. **If unsure, it is a commit message.**
 
 ## How
 

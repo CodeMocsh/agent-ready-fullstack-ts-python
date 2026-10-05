@@ -172,9 +172,7 @@ reaches to write something down, and both grow one reasonable-looking paragraph 
 A new rule belongs in this file only if it is a principle. Anything with detail in it goes in
 `docs/` and gets a link from the index below.
 
-**A decision record is for a decision, not for an explanation.** The test is the cost of change:
-a choice earns a file when undoing it later would be expensive, and one you could make
-differently next week is an implementation detail. Most changes need neither —
+**A decision record is for an architectural decision, and most changes are not one** —
 [what earns a file](docs/adr/README.md).
 
 ## Layout
