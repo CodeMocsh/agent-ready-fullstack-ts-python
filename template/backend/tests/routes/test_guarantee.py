@@ -185,14 +185,15 @@ def test_the_walk_finds_the_routes_this_app_actually_declares() -> None:
 
 
 def test_no_route_outside_the_public_list_answers_without_a_tenant(refused: Refusing) -> None:
-    """The guarantee. A new route inherits it by being declared on `router`; one that does not
-    reach the seam at all shows up here as a route that answered."""
+    """The guarantee. A new route inherits it by being included under `app/routes/tenant/`; one
+    that does not reach the seam at all shows up here as a route that answered."""
     escaped = [one for one in answering_without_a_tenant(refused) if one not in PUBLIC_ROUTES]
 
     assert escaped == [], (
         f"{escaped} answered a request whose tenant could not be resolved. Declare the route on "
-        f"`router` in app/routes.py, which carries the dependency -- or, if it reads nothing "
-        f"that belongs to anybody, put it on `public_router` and name it in PUBLIC_ROUTES."
+        f"a router included by app/routes/tenant/, which carries the dependency -- or, if it "
+        f"reads nothing that belongs to anybody, put it in app/routes/public.py and name it in "
+        f"PUBLIC_ROUTES."
     )
 
 

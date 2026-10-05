@@ -32,9 +32,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Final
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
+from app.errors import NoSuchAsset
 from app.main import create_app
 from app.wiring import BundleMissing, build_bundle
 
@@ -159,7 +160,7 @@ def create_server(bundle: Path) -> ASGIApp:
         if found is not None:
             return FileResponse(found)
         if held.startswith(f"{ASSETS}/"):
-            raise HTTPException(status_code=404, detail=f"no such asset: {held}")
+            raise NoSuchAsset(f"no such asset: {held}")
         return FileResponse(index)
 
     return _confined(server)

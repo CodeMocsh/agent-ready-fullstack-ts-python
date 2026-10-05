@@ -37,6 +37,18 @@ that is not the application. `make migrate` is it.
 _Avoid_: auto-migrate, startup migration, boot migration — the application does none of these,
 by design.
 
+## Routes
+
+**Requirement**:
+What a caller must present before a route's handler runs: nothing, or a tenant. Each one is a
+module or package under `app/routes/`, and its router carries it.
+_Avoid_: surface, access level, guard.
+
+**Refusal**:
+A way a route answers no. Each one is a class in `app/errors.py` that carries its status and
+its sentence.
+_Avoid_: error response, exception (an exception is how a refusal is raised, not what it is).
+
 ## Logs
 
 **Log line**:

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app import log, telemetry
 from app.identity import Unauthenticated, resolved_without_a_credential
 from app.models import ErrorBody
-from app.routes import public_router, router
+from app.routes import public, tenant
 from app.wiring import build, build_telemetry, unauthenticated_is_acknowledged
 
 
@@ -67,8 +67,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.router.redirect_slashes = False
-    app.include_router(public_router)
-    app.include_router(router)
+    app.include_router(public.router)
+    app.include_router(tenant.router)
     app.add_exception_handler(Unauthenticated, _refuse)
     log.instrument(app)
     settings = build_telemetry()
