@@ -5,18 +5,20 @@ Everything here reads a file rather than an import: the `Makefile`, the git hook
 and nothing but this file notices when they stop -- a gate that lost a member, a tier nothing
 runs, a test that switched itself off.
 
-**The hook and the workflow run the same target, and that is the point.** The hook checks a
+**The hook and the workflow run the same list, and that is the point.** The hook checks a
 commit on the machine making it; the workflow checks a push against a fresh checkout nobody
 configured, which is what catches a clone where `make hooks` was never run. Neither may grow
 its own list of steps -- `test_a_workflow_runs_the_gate_rather_than_a_copy_of_it` is what
-insists the workflow names the target instead.
+insists the workflow names `make gate` instead.
 
 Two of its helpers are imported by `devtools/check_template.sh` in the generator repository,
-which is why this module imports no third-party package and does its one version-dependent
-import inside the test that needs it.
+which is why this module imports no third-party package at the top and does each such import
+inside the test that needs it.
 """
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 from tests.tiers import TIERS, python_tiers
@@ -25,6 +27,9 @@ ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = ROOT / "Makefile"
 WORKFLOWS = ROOT / ".github" / "workflows"
 HOOK = ROOT / ".githooks" / "pre-commit"
+RUNNER = ROOT / "devtools" / "gate.sh"
+HOLD = ROOT / "devtools" / "hold-the-gate.pl"
+WORKTREE_TREE = ROOT / "devtools" / "worktree-tree.sh"
 PYPROJECT = ROOT / "backend" / "pyproject.toml"
 E2E = ROOT / "frontend" / "e2e"
 BACKEND_TESTS = ROOT / "backend" / "tests"
@@ -73,7 +78,7 @@ def runs_something(target: str) -> bool:
 
 
 def test_the_gate_is_the_named_list():
-    assert prerequisites_of("pre-commit") == THE_GATE
+    assert prerequisites_of("gate") == THE_GATE
 
 
 def test_every_member_of_the_gate_actually_runs_a_command():
@@ -107,7 +112,7 @@ def workflows() -> list[tuple[Path, str]]:
 
 
 def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
-    """A workflow that runs its own list of steps drifts from `make pre-commit` silently, in
+    """A workflow that runs its own list of steps drifts from `make gate` silently, in
     the direction of checking less, and the drift shows up as a green push that a commit would
     have refused. Run the target instead. If it needs to run only part of the gate, make that
     part a target too.
@@ -126,8 +131,8 @@ def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
     )
 
     for path, body in shipped:
-        assert "make pre-commit" in body, (
-            f"{path.relative_to(ROOT)} does not run `make pre-commit`. A workflow that "
+        assert "make gate" in body, (
+            f"{path.relative_to(ROOT)} does not run `make gate`. A workflow that "
             f"re-lists the gate's steps is a second copy of the gate, and the copy is what "
             f"goes stale -- point it at the target, or add a target for the part it runs."
         )
@@ -310,24 +315,180 @@ def test_the_python_tier_is_selected_whole_and_not_by_a_list():
             )
 
 
-def test_the_hook_runs_the_gate():
+def test_the_hook_and_make_pre_commit_run_the_gate_through_one_runner():
+    """A gate started by hand that skipped the runner would take no lock and record no pass."""
     assert "make -s pre-commit" in HOOK.read_text(encoding="utf-8")
+    assert recipe_of("pre-commit") == ["@sh devtools/gate.sh"]
+    assert "make -s gate" in RUNNER.read_text(encoding="utf-8")
 
 
-def test_the_hook_says_so_when_it_could_not_run_the_whole_gate():
-    assert "PARTIAL RUN" in HOOK.read_text(encoding="utf-8")
+def test_the_runner_says_so_when_it_could_not_run_the_whole_gate():
+    assert "PARTIAL RUN" in RUNNER.read_text(encoding="utf-8")
 
 
 OPT_OUT = re.compile(r"--no-verify|\$\{?(?:SKIP|NO_?VERIFY|DISABLE|BYPASS|CI)\b")
 
 
-def test_the_hook_offers_no_way_to_switch_itself_off():
-    found = OPT_OUT.search(HOOK.read_text(encoding="utf-8"))
-    assert found is None, (
-        f"the hook reads {found.group(0)!r}, and a gate with a documented way past it "
-        f"is a suggestion. A check that is not worth running every time belongs "
-        f"outside the gate, not behind a variable."
+def test_the_gate_offers_no_way_to_switch_itself_off():
+    for path in (HOOK, RUNNER):
+        found = OPT_OUT.search(path.read_text(encoding="utf-8"))
+        assert found is None, (
+            f"{path.name} reads {found.group(0)!r}, and a gate with a documented way past it "
+            f"is a suggestion. A check that is not worth running every time belongs "
+            f"outside the gate, not behind a variable."
+        )
+
+
+def test_a_second_gate_waits_for_the_first_and_says_where_it_runs(tmp_path: Path):
+    """Two gates at once oversubscribe every core twice, and each then fails the other's
+    timeouts. The second waits, and says whose turn it is rather than hanging in silence."""
+    import pytest
+
+    lock = tmp_path / "gate.lock"
+    hold_the_lock = f'exec 9>>"$1"; perl {HOLD} "$1"; echo held; read _'
+
+    def gate(checkout: Path, stdin: int) -> "subprocess.Popen[str]":
+        checkout.mkdir()
+        return subprocess.Popen(
+            ["sh", "-c", hold_the_lock, "sh", str(lock)],
+            cwd=checkout,
+            stdin=stdin,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+    first_checkout = (tmp_path / "first").resolve()
+    first = gate(first_checkout, subprocess.PIPE)
+    assert first.stdout is not None and first.stdin is not None
+    assert first.stdout.readline() == "held\n"
+
+    second_checkout = (tmp_path / "second").resolve()
+    second = gate(second_checkout, subprocess.DEVNULL)
+    with pytest.raises(subprocess.TimeoutExpired):
+        second.wait(timeout=0.5)
+    assert lock.read_text() == f"{first_checkout}\n"
+
+    first.stdin.close()
+    first.wait(timeout=10)
+    out, err = second.communicate(timeout=10)
+
+    assert out == "held\n"
+    assert err == f"pre-commit: waiting for the gate already running in {first_checkout}\n"
+    assert lock.read_text() == f"{second_checkout}\n"
+
+
+def test_a_pass_is_remembered_for_exactly_the_tree_the_gate_read(tmp_path: Path):
+    """A recorded pass skips the gate, so any tree it matches that the gate did not read is a way
+    past it: an edit not yet staged, a file not yet added. What git ignores is not the gate's."""
+
+    def run(*command: str) -> str:
+        done = subprocess.run(command, cwd=tmp_path, check=True, capture_output=True, text=True)
+        return done.stdout
+
+    def tree() -> str:
+        return run("sh", str(WORKTREE_TREE)).strip()
+
+    run("git", "init", "-q")
+    (tmp_path / ".gitignore").write_text("ignored/\n")
+    (tmp_path / "kept.py").write_text("one\n")
+    run("git", "add", "kept.py")
+    index = run("git", "ls-files", "--stage")
+
+    fingerprint = tree()
+    assert tree() == fingerprint
+
+    (tmp_path / "ignored").mkdir()
+    (tmp_path / "ignored" / "build.log").write_text("noise\n")
+    assert tree() == fingerprint
+
+    (tmp_path / "kept.py").write_text("two\n")
+    edited = tree()
+    assert edited != fingerprint
+
+    (tmp_path / "added.py").write_text("")
+    assert tree() not in {fingerprint, edited}
+
+    assert run("git", "ls-files", "--stage") == index, "fingerprinting the tree staged something"
+
+
+THE_MACHINE_LOCK = 'lock="/tmp/pre-commit-gate-$(id -u).lock"'
+
+
+def a_clone_with_a_gate(tmp_path: Path, recipe: str) -> Path:
+    """A git checkout with both halves "installed", the runner and its helpers copied in, and a
+    `gate` target that runs `recipe`. The lock is moved into `tmp_path`, so a gate already
+    holding the machine's lock -- the one running this test -- does not hold this one."""
+    clone = tmp_path / "clone"
+    (clone / "devtools").mkdir(parents=True)
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert THE_MACHINE_LOCK in runner, "the runner no longer takes the lock this test moves"
+    (clone / "devtools" / "gate.sh").write_text(
+        runner.replace(THE_MACHINE_LOCK, f'lock="{tmp_path}/gate.lock"'), encoding="utf-8"
     )
+    for helper in (WORKTREE_TREE, HOLD):
+        (clone / "devtools" / helper.name).write_text(helper.read_text(encoding="utf-8"))
+    (clone / "frontend" / "node_modules").mkdir(parents=True)
+    (clone / "backend" / ".venv").mkdir(parents=True)
+    (clone / "Makefile").write_text(f"gate:\n\t@{recipe}\n", encoding="utf-8")
+    (clone / ".gitignore").write_text("ran.log\nnode_modules/\n.venv/\n", encoding="utf-8")
+    (clone / "kept.txt").write_text("one\n", encoding="utf-8")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for tool in ("pnpm", "uv"):
+        (tools / tool).write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        (tools / tool).chmod(0o755)
+    subprocess.run(["git", "init", "-q"], cwd=clone, check=True)
+    return clone
+
+
+def run_the_gate(clone: Path) -> subprocess.CompletedProcess[str]:
+    tools = clone.parent / "bin"
+    return subprocess.run(
+        ["sh", "devtools/gate.sh"],
+        cwd=clone,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"},
+    )
+
+
+def times_the_gate_ran(clone: Path) -> int:
+    ran = clone / "ran.log"
+    return len(ran.read_text().splitlines()) if ran.exists() else 0
+
+
+def test_a_green_gate_is_not_run_again_over_the_same_tree(tmp_path: Path):
+    clone = a_clone_with_a_gate(tmp_path, "echo ran >> ran.log")
+
+    first = run_the_gate(clone)
+    second = run_the_gate(clone)
+
+    assert first.returncode == 0 and second.returncode == 0, first.stderr + second.stderr
+    assert times_the_gate_ran(clone) == 1
+    assert "already passed the gate" in second.stderr
+
+
+def test_an_edit_after_a_green_gate_runs_it_again(tmp_path: Path):
+    clone = a_clone_with_a_gate(tmp_path, "echo ran >> ran.log")
+
+    run_the_gate(clone)
+    (clone / "kept.txt").write_text("two\n", encoding="utf-8")
+    again = run_the_gate(clone)
+
+    assert again.returncode == 0, again.stderr
+    assert times_the_gate_ran(clone) == 2
+
+
+def test_a_red_gate_is_remembered_as_nothing(tmp_path: Path):
+    clone = a_clone_with_a_gate(tmp_path, "echo ran >> ran.log; exit 1")
+
+    first = run_the_gate(clone)
+    second = run_the_gate(clone)
+
+    assert first.returncode != 0 and second.returncode != 0
+    assert times_the_gate_ran(clone) == 2
 
 
 def test_make_install_arms_the_hook():

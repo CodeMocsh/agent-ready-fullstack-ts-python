@@ -588,7 +588,7 @@ done
 
 echo "==> assert the shape of both halves"
 need Makefile
-for target in install hooks pre-commit lint lint-check test test-fast test-contract \
+for target in install hooks pre-commit gate lint lint-check test test-fast test-contract \
               test-e2e test-e2e-live db-test observe observe-test db db-demo migrate roles \
               schema dev \
               dev-frontend dev-backend \
@@ -599,11 +599,16 @@ done
 # generated project's own test_gate.py is what keeps them together from then on. Here
 # we only assert it exists and that the browser tier stayed out of it: a gate that
 # downloads a browser is a gate people learn to commit around.
-need_grep '^pre-commit: lint-check openapi-check test$' Makefile
-need_no_grep '^pre-commit:.*test-e2e' Makefile
-need_no_grep '^pre-commit:.*db-test' Makefile
-need_no_grep '^pre-commit:.*observe-test' Makefile
-need_no_grep '^pre-commit:.*test-contract-db' Makefile
+need_grep '^gate: lint-check openapi-check test$' Makefile
+need_no_grep '^gate:.*test-e2e' Makefile
+need_no_grep '^gate:.*db-test' Makefile
+need_no_grep '^gate:.*observe-test' Makefile
+need_no_grep '^gate:.*test-contract-db' Makefile
+# `pre-commit` runs the list through devtools/gate.sh, which queues one gate per machine and
+# skips a tree that already passed -- docs/adr/0015.
+need_exec devtools/gate.sh
+need_exec devtools/worktree-tree.sh
+need_exec devtools/hold-the-gate.pl
 # The contract suite on Postgres serves as the application role, never as the superuser: a
 # superuser bypasses every policy, so the admin connection would pass against a database
 # carrying no isolation at all.
@@ -631,7 +636,7 @@ need_grep 'not in this run' backend/tests/conftest.py
 # The scan itself comes from the generated project's own test_gate.py rather than being
 # written out again here. A second copy in shell syntax is a copy that drifts, and the half
 # that drifts is the half nobody notices: this runs in `make fast`, where no test does.
-# test_gate.py imports no third-party package and defers its one version-dependent import,
+# test_gate.py imports no third-party package at the top and defers each one it needs,
 # so the host python3 can read it whatever the project's own interpreter is.
 python3 - <<'PY' || fail "the skip scan did not pass; see above"
 import sys
@@ -662,13 +667,14 @@ done
 # `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
 # foreground command returns, which on Ctrl-C it never does.
 need_grep '^SHELL := /bin/bash' Makefile
-# A workflow ships, and it runs `make pre-commit` -- the target the git hook runs, so the
-# two cannot drift. The hook checks the machine that commits; the workflow checks a fresh
+# A workflow ships, and it runs `make gate` -- the list the git hook runs, so the two cannot
+# drift. Not `make pre-commit`, whose runner passes a clone with a half missing. The hook checks the machine that commits; the workflow checks a fresh
 # checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
 # well as in test_gate.py because that test walks the workflows it finds, and a directory
 # that stopped existing is a walk over nothing.
 need .github/workflows/ci.yml
-need_grep 'make pre-commit' .github/workflows/ci.yml
+need_grep 'make gate' .github/workflows/ci.yml
+need_no_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
 # And a second job runs the Postgres tier, because a laptop with no Docker never does. Read
 # with comments stripped: the header names the target while explaining it.
@@ -983,7 +989,8 @@ for adr in 0001-two-substrates-behind-one-contract \
            0011-routes-are-split-by-what-a-caller-presents \
            0012-a-refusal-is-a-class-declared-once \
            0013-the-models-are-a-layering-written-down \
-           0014-the-environment-is-read-in-one-place-and-run-in-another; do
+           0014-the-environment-is-read-in-one-place-and-run-in-another \
+           0015-the-gate-runs-once-per-tree-and-one-at-a-time; do
     need "docs/adr/$adr.md"
 done
 
@@ -1076,6 +1083,7 @@ need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
 # The contract suite is the only check that can fail on the two halves not
 # interoperating, and it reaches the hook through the gate rather than by name.
 need_grep 'make -s pre-commit' .githooks/pre-commit
+need_grep 'make -s gate' devtools/gate.sh
 need_grep 'test-contract' Makefile
 
 echo "==> assert the quality gates"
@@ -2331,5 +2339,15 @@ fi
 printf '%s\n' "$out" | grep -q 'baseline tightened'
 python3 -c "$compare" backend/.complexity-baseline.json 2.9 lt \
     || fail "backend lint reported tightening but left the baseline on disk"
+
+echo "==> the gate runner skips a tree that already passed"
+# Recorded here rather than earned by a full `make pre-commit`, which would run every step
+# above a second time. What this proves is the path a commit after a green run takes in a real
+# project: both halves installed, a record for exactly this tree, and an exit before anything
+# runs. backend/tests/test_gate.py proves the fingerprint changes when the tree does.
+sh devtools/worktree-tree.sh >"$(git rev-parse --git-path gate-passed)"
+out="$(sh devtools/gate.sh 2>&1)" || fail "devtools/gate.sh failed on a tree recorded as passed: $out"
+printf '%s\n' "$out" | grep -q 'already passed the gate' \
+    || fail "devtools/gate.sh ran again over a tree recorded as passed: $out"
 
 echo "==> OK ($VARIANT)"

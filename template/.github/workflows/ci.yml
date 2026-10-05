@@ -1,6 +1,8 @@
 name: CI
 
-# The gate runs `make pre-commit` -- the same target the git hook runs.
+# The gate runs `make gate` -- the list the git hook runs through devtools/gate.sh. Not
+# the pre-commit target: its runner skips a half that is not installed, and here a missing half
+# must fail.
 #
 # Not a list of steps that happens to match the gate. A re-listed copy drifts, always in
 # the direction of checking less, and the drift surfaces as a green push that a commit
@@ -71,7 +73,7 @@ jobs:
           uv python install
           uv sync --all-groups --frozen
 
-      - run: make pre-commit
+      - run: make gate
 
   db:
     runs-on: ubuntu-latest
