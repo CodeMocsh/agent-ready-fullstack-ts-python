@@ -30,9 +30,6 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@"
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 
-# The contract suite runs either substrate, and production refuses the in-memory one.
-export APP_ENV=development
-
 # A free pair, found rather than fixed. This throwaway pair is nobody's dev server and
 # the numbers matter to nothing outside this script, so defaulting to 8000 and 5173 only
 # made the gate fail whenever another checkout of this project was already running one --
@@ -59,6 +56,7 @@ PY
 BACKEND_PORT="${BACKEND_PORT:-${PORTS%% *}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${PORTS##* }}"
 export BACKEND_PORT FRONTEND_PORT
+export APP_ENV=development
 base_url="${CONTRACT_BASE_URL:-http://localhost:$FRONTEND_PORT/api}"
 backend_pid=""
 frontend_pid=""

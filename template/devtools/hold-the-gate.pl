@@ -1,7 +1,4 @@
 #!/usr/bin/perl
-# Waits for the gate lock on file descriptor 9, then writes this checkout's path into it so the
-# next gate to wait can say whose turn it is. Perl because macOS ships no flock(1), and both
-# macOS and Debian ship perl.
 use strict;
 use warnings;
 use Cwd qw(getcwd);
@@ -18,7 +15,7 @@ unless (flock($held, LOCK_EX | LOCK_NB)) {
     my $holder = <$record>;
     print STDERR defined $holder
         ? "pre-commit: waiting for the gate already running in $holder"
-        : "pre-commit: waiting for the gate already running on this machine\n";
+        : "pre-commit: waiting for the gate already running for this project\n";
     flock($held, LOCK_EX) or die "hold-the-gate: cannot lock $lock: $!\n";
 }
 

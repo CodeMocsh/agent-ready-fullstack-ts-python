@@ -23,7 +23,7 @@ on macOS and with build-essential and the base system on Debian and Ubuntu. `pyt
 the application's Python — the one uv installs is. `devtools/dev.sh` and
 `devtools/contract-test.sh` use it to put each half in a process group of its own, which is the
 only way they can stop what they started. `devtools/gate.sh` uses `perl` to take the lock that
-keeps two gates on one machine from running at once, because macOS ships no `flock`.
+keeps two gates of one project from running at once, because macOS ships no `flock`.
 
 ## Install
 

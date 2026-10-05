@@ -193,7 +193,7 @@ Each of these is something a reasonable edit undoes without anything failing unt
   checkout nobody configured. New checks go in `make gate`, never into the workflow: a
   workflow that re-lists the steps is a second copy, and the copy is the one that goes stale.
 - **Run `make pre-commit`, then commit: the gate runs once.** `devtools/gate.sh` queues
-  behind any other gate on the machine and records the tree a green run read, so a commit of
+  behind any other gate of this project and records the tree a green run read, so a commit of
   that same tree passes at once. Edit one byte and the gate runs again.
 - **The tiers are deliberately outside it** — `make test-e2e`, `make test-e2e-live`,
   `make db-test` and `make observe-test` each need something fetched or started first, and a
