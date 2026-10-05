@@ -20,7 +20,7 @@ export UV_EXCLUDE_NEWER
 
 .DEFAULT_GOAL := default
 
-.PHONY: default install hooks pre-commit gate lint lint-check test test-fast test-contract \
+.PHONY: default install hooks pre-commit gate secrets lint lint-check test test-fast test-contract \
         test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
         dev dev-frontend observe observe-test \
         dev-backend openapi \
@@ -32,12 +32,13 @@ install:
 	pnpm -C frontend install
 	cd backend && uv sync --all-groups
 	@$(MAKE) --no-print-directory hooks
-# Fetches the pinned openapi-typescript into pnpm's dlx store, which is the one thing
+# Fetches gitleaks, and the pinned openapi-typescript into pnpm's dlx store: what
 # `make pre-commit` needs and neither half's install brings. Doing it here makes
 # `make install` the only target that has to reach the network -- without it the first
 # commit on a fresh clone goes to the registry, and a commit with no network fails on a
 # check that has nothing to do with connectivity. Last, and after the hooks, so that
-# losing the registry costs you this line rather than an unarmed clone.
+# losing the network costs you these lines rather than an unarmed clone.
+	sh devtools/secrets.sh fetch
 	pnpm -C frontend openapi:types
 
 hooks:
@@ -51,7 +52,10 @@ hooks:
 pre-commit:
 	@sh devtools/gate.sh
 
-gate: lint-check openapi-check test
+gate: secrets lint-check openapi-check test
+
+secrets:
+	@sh devtools/secrets.sh
 
 lint:
 	pnpm -C frontend lint

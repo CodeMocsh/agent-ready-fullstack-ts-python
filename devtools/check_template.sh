@@ -605,7 +605,7 @@ done
 
 echo "==> assert the shape of both halves"
 need Makefile
-for target in install hooks pre-commit gate lint lint-check test test-fast test-contract \
+for target in install hooks pre-commit gate secrets lint lint-check test test-fast test-contract \
               test-e2e test-e2e-live db-test observe observe-test db db-demo migrate roles \
               schema dev \
               dev-frontend dev-backend \
@@ -616,7 +616,7 @@ done
 # generated project's own test_gate.py is what keeps them together from then on. Here
 # we only assert it exists and that the browser tier stayed out of it: a gate that
 # downloads a browser is a gate people learn to commit around.
-need_grep '^gate: lint-check openapi-check test$' Makefile
+need_grep '^gate: secrets lint-check openapi-check test$' Makefile
 need_no_grep '^gate:.*test-e2e' Makefile
 need_no_grep '^gate:.*db-test' Makefile
 need_no_grep '^gate:.*observe-test' Makefile
@@ -1698,6 +1698,18 @@ ls frontend/dist/assets/index-*.css >/dev/null
 # The other thing mock mode leaves behind, and the one no mode turns off by itself: public/
 # is copied into every build, so this file is written and then deleted again by vite.config.ts.
 need_absent frontend/dist/mockServiceWorker.js
+
+echo "==> the secret scan passes the project and refuses a planted token"
+# A scan that never fires passes forever, so a token is planted and has to be refused. It is
+# random, composed at run time, and lives only in this rendered tree.
+run "secret scan" sh devtools/secrets.sh
+PLANTED="planted-$$.txt"
+printf 'token = ghp_%s\n' "$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(36)))')" >"$PLANTED"
+if sh devtools/secrets.sh >/dev/null 2>&1; then
+    rm -f "$PLANTED"
+    fail "devtools/secrets.sh passed a tree holding a GitHub token"
+fi
+rm -f "$PLANTED"
 
 echo "==> assert the contract artifacts are in sync with the code"
 run "make openapi" make openapi

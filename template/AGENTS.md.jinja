@@ -200,6 +200,9 @@ Each of these is something a reasonable edit undoes without anything failing unt
   commit, and `.github/workflows/ci.yml` runs it directly after a push, against a fresh
   checkout nobody configured. New checks go in `make gate`, never into the workflow: a
   workflow that re-lists the steps is a second copy, and the copy is the one that goes stale.
+- **`make secrets` is in the gate.** gitleaks reads the tree the gate certifies. A finding is
+  removed and the secret rotated, or, when it is no secret at all, its fingerprint goes in
+  `.gitleaksignore`.
 - **Run `make pre-commit`, then commit: the gate runs once.** `devtools/gate.sh` queues
   behind any other gate of this project and records the tree a green run read, so a commit of
   that same tree passes at once. Edit one byte and the gate runs again.
@@ -307,7 +310,7 @@ Each of these is something a reasonable edit undoes without anything failing unt
 
 ```bash
 make install        # both halves, then activate the versioned git hooks
-make pre-commit     # the gate: lint-check + openapi-check + test, once per tree
+make pre-commit     # the gate: secrets + lint-check + openapi-check + test, once per tree
 make dev            # both halves: backend :8000, frontend :5173, live mode
 make dev-frontend   # frontend only, mock mode -- no backend required
 make lint           # auto-fix and lint both halves (lint-check is the check-only variant)

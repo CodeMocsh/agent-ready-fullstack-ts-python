@@ -37,7 +37,7 @@ BACKEND_TESTS = ROOT / "backend" / "tests"
 FRONTEND_TESTS = ROOT / "frontend" / "tests"
 FRONTEND_SRC = ROOT / "frontend" / "src"
 
-THE_GATE = ["lint-check", "openapi-check", "test"]
+THE_GATE = ["secrets", "lint-check", "openapi-check", "test"]
 
 OPT_IN_TIER = [tier.target for tier in TIERS]
 """Read from `tiers.py` rather than listed again here. Every one needs something fetched or

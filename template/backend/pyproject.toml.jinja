@@ -154,6 +154,10 @@ select = [
     "TID251", # https://docs.astral.sh/ruff/rules/banned-api/
     # A print is a line on stdout that is not JSON, which breaks every log agent reading it.
     "T20", # https://docs.astral.sh/ruff/rules/#flake8-print-t20
+    # The security rules bandit runs, which is what an auditor asks for by name as static
+    # analysis. The ones off below are off because each fires on every instance of an idiom
+    # this project uses safely rather than on the unsafe spelling of it.
+    "S", # https://docs.astral.sh/ruff/rules/#flake8-bandit-s
 ]
 ignore = [
     "E501", # https://docs.astral.sh/ruff/rules/line-too-long/
@@ -163,6 +167,14 @@ ignore = [
     "W191", "E111", "E114", "E117", "D206", "D300",
     "Q000", "Q001", "Q002", "Q003",
     "COM812", "COM819", "ISC002",
+    # Every subprocess call, whatever it runs: the call is passed a list and never a shell,
+    # and S602 and S604, which refuse `shell=True`, stay on.
+    "S603", # https://docs.astral.sh/ruff/rules/subprocess-without-shell-equals-true/
+    "S607", # https://docs.astral.sh/ruff/rules/start-process-with-partial-path/
+    # Every f-string holding SQL, which in app/store/ is a column list or a table name composed
+    # from module constants and identifiers `resolve_schema` validated. A value reaches a query
+    # only as an asyncpg `$n` parameter.
+    "S608", # https://docs.astral.sh/ruff/rules/hardcoded-sql-expression/
 ]
 
 # `resolved_without_a_credential` asks one question -- does this resolver hand out a tenant to
@@ -172,6 +184,8 @@ ignore = [
 # replacement resolver might raise, which is not knowable from here.
 [tool.ruff.lint.per-file-ignores]
 "app/identity.py" = ["BLE001"]
+# A test asserts, and holds fixture credentials for a database it starts and drops.
+"tests/**" = ["S101", "S105"]
 # The one module that writes the log, and the tests that read it.
 "app/log.py" = ["TID251"]
 "tests/log/**" = ["TID251"]
