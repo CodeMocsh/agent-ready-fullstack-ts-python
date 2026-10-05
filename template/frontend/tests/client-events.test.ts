@@ -25,6 +25,14 @@ async function settled(posted: ClientEvents[], count: number): Promise<void> {
   await expect.poll(() => posted.length).toBe(count);
 }
 
+const A_FAILED_QUERY = {
+  kind: "query",
+  route: expect.any(String),
+  error: "ApiError",
+  status: 404,
+  request_id: REQUEST_ID,
+};
+
 describe("client events", () => {
   let record: RecordClientEvent;
 
@@ -36,14 +44,11 @@ describe("client events", () => {
   it("reports a failed request by its route template, its status and the id it answered with", async () => {
     const posted = capturePosts();
 
-    record("query", new ApiError("Task not found", 404, REQUEST_ID));
+    record("query", new ApiError("Not found", 404, REQUEST_ID));
 
     await settled(posted, 1);
-    expect(posted[0]).toEqual({
-      events: [
-        { kind: "query", route: "/", error: "ApiError", status: 404, request_id: REQUEST_ID },
-      ],
-    });
+    expect(posted[0]).toEqual({ events: [A_FAILED_QUERY] });
+    expect(Object.keys(router.routesById)).toContain(posted[0]?.events[0]?.route);
   });
 
   it("never sends what an error says, only what it is", async () => {

@@ -103,13 +103,13 @@ frontend_pid=$!
 # listening but never replies holds the connection open, and an unbounded curl
 # hangs there rather than reaching the deadline below.
 deadline=$(($(date +%s) + 60))
-until curl -fsS --max-time 2 "$base_url/tasks" >/dev/null 2>&1; do
+until curl -fsS --max-time 2 "$base_url/health" >/dev/null 2>&1; do
     kill -0 "$backend_pid" 2>/dev/null || fail "the backend exited during startup"
     kill -0 "$frontend_pid" 2>/dev/null || fail "the dev server exited during startup"
-    [ "$(date +%s)" -ge "$deadline" ] && fail "$base_url/tasks did not answer within 60s"
+    [ "$(date +%s)" -ge "$deadline" ] && fail "$base_url/health did not answer within 60s"
     sleep 0.5
 done
 
 echo "==> both halves up; $base_url reachable"
 cd "$here/frontend"
-CONTRACT_TARGET=live VITE_API_BASE_URL="$base_url" pnpm exec vitest run tests/api/contract.test.ts
+CONTRACT_TARGET=live VITE_API_BASE_URL="$base_url" pnpm exec vitest run contract.test

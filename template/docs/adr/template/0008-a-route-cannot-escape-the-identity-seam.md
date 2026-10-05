@@ -110,3 +110,13 @@ A route shape the test cannot drive is refused rather than skipped. A websocket 
 methods, so it cannot be driven as `(method, path)`; `test_no_route_shape_escapes_being_driven`
 fails on one instead of dropping it, because a guarantee that quietly stops covering a route is
 worse than one that says it does not.
+
+## Amended 2026-10-04: the guarantee ships with the stub
+
+A project that answered `identity_stub=false` still received `tests/routes/test_guarantee.py`,
+which imports the stub's `tenant_for`, and every suite that shared its helpers failed to import
+once the stub was replaced. `tests/routes/test_guarantee.py` and the doubles it substitutes, now in
+`tests/identity/doubles.py`, test the seam as the stub ships it. `identity_stub=false` stops an
+update bringing them, beside `app/identity.py`. The route walk they used moved to
+`tests/routes/walk.py`, which imports nothing about identity, so the suites that walk the routes
+keep working in a project that replaced the stub.

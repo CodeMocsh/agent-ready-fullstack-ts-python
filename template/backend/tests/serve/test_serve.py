@@ -37,6 +37,16 @@ BESIDE = "secret.txt"
 UNROUTED = "/api/no-route-answers-this"
 
 
+AN_EVENT = {
+    "kind": "uncaught",
+    "route": "/",
+    "error": "TypeError",
+    "status": None,
+    "request_id": None,
+}
+"""A client event the API accepts, for a request that has to reach a route with a body."""
+
+
 @pytest.fixture
 def bundle(tmp_path: Path) -> Path:
     """What `make build` writes, in miniature: a shell and one hashed asset.
@@ -66,18 +76,18 @@ def test_the_mounted_api_gets_its_lifespan(client: TestClient) -> None:
     """The regression this module exists for.
 
     Starlette does not run a mounted application's lifespan, so without the delegation nothing
-    reaches `app.state` and this answers 500. `/tasks` is the probe because it needs the store
+    reaches `app.state` and this answers 500. `/ready` is asked because it needs the database
     to answer at all — a route that only read its own arguments would pass either way.
     """
-    answered = client.get("/api/tasks")
+    answered = client.get("/api/ready")
     assert answered.status_code == 200, answered.text
-    assert isinstance(answered.json(), list)
+    assert answered.json() == {"status": "ready"}
 
 
 def test_the_prefix_is_stripped_before_the_api_matches(client: TestClient) -> None:
-    """`/api/tasks` reaches a route declared as `/tasks`, and the bare path is the frontend's."""
-    assert client.get("/api/tasks").status_code == 200
-    assert client.get("/tasks").text == SHELL
+    """`/api/ready` reaches a route declared as `/ready`, and the bare path is the frontend's."""
+    assert client.get("/api/ready").status_code == 200
+    assert client.get("/ready").text == SHELL
 
 
 def test_an_unknown_api_path_is_refused_rather_than_given_the_shell(client: TestClient) -> None:
@@ -152,7 +162,7 @@ def test_the_shell_carries_the_headers_a_proxy_would_have_set(client: TestClient
 def test_the_api_carries_them_too(client: TestClient) -> None:
     """The wrapper sits outside the mount rather than inside it, so one application of the
     policy covers both halves and the mounted one cannot be left out by being added later."""
-    headers = client.get("/api/tasks").headers
+    headers = client.get("/api/ready").headers
     for header, value in SECURITY_HEADERS.items():
         assert headers[header] == value
 
@@ -190,9 +200,8 @@ def test_a_body_over_the_cap_is_refused_before_the_route_sees_it(client: TestCli
 
 def test_a_body_within_the_cap_reaches_the_route(client: TestClient) -> None:
     """The cap has to let the application through, which is the half a refusal cannot show."""
-    answered = client.post("/api/tasks", json={"title": "a task"})
-    assert answered.status_code == 201, answered.text
-    assert answered.json()["title"] == "a task"
+    answered = client.post("/api/client-events", json={"events": [AN_EVENT]})
+    assert answered.status_code == 204, answered.text
 
 
 def test_a_bodied_request_that_will_not_say_its_length_is_refused(client: TestClient) -> None:
@@ -305,8 +314,8 @@ def test_a_chunked_body_is_refused_whatever_the_method(client: TestClient) -> No
 def test_a_bodiless_request_needs_no_length(client: TestClient) -> None:
     """The requirement is on the methods that carry bodies and on no others, or every read in
     the application would need a header it has no reason to send."""
-    assert client.get("/api/tasks").status_code == 200
-    assert client.delete("/api/tasks/1").status_code in (204, 404)
+    assert client.get("/api/ready").status_code == 200
+    assert client.delete("/api/client-events").status_code == 405
 
 
 def test_a_refusal_still_carries_the_headers(client: TestClient) -> None:
@@ -361,9 +370,10 @@ decorator, and each of those is a way onto the deployment's own origin that the 
 def test_the_server_adds_exactly_the_bundle_surface() -> None:
     """What this module puts in front of the API, named rather than counted.
 
-    `tests/routes/test_guarantee.py` drives every route and demands a refusal, and it cannot be
-    pointed at this application: a mount reports its routes *without* its prefix, so `/tasks`
-    read off the server does not match `/api/tasks` when driven, falls through to the shell
+    The route guarantee, which ships with the identity stub, drives every route and demands a
+    refusal, and it cannot be
+    pointed at this application: a mount reports its routes *without* its prefix, so `/ready`
+    read off the server does not match `/api/ready` when driven, falls through to the shell
     fallback, and is answered `200` with HTML. A route added here is therefore invisible to the
     guarantee, and it would be a route on the deployment's own origin that nothing checks.
 
@@ -396,6 +406,6 @@ def test_the_service_on_its_own_sets_none_of_them(monkeypatch: pytest.MonkeyPatc
     copy from here would silently narrow whatever the deployment's edge allowed."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     with TestClient(create_app()) as bare:
-        headers = bare.get("/tasks").headers
+        headers = bare.get("/ready").headers
     for header in SECURITY_HEADERS:
         assert header not in headers

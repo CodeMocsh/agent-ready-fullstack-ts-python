@@ -4,15 +4,32 @@ value that was sent, and the pool's connections as metrics."""
 import json
 
 import pytest
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
 
 from app import telemetry
+from app.deps import database_of
 from app.main import create_app
+from app.store.pg import PostgresDatabase
 from tests.doubles import CANARY, telemetry_settings
 from tests.integration.conftest import Provisioned
+from tests.widgets import Widget
+
+
+def sending_a_value_to_postgres(app: FastAPI) -> FastAPI:
+    """`app`, also serving `POST /sent`, which hands the body's name to Postgres as a parameter."""
+
+    @app.post("/sent")
+    async def sent(request: Request, body: Widget) -> None:
+        database = database_of(request)
+        assert isinstance(database, PostgresDatabase)
+        async with database.connection() as conn:
+            await conn.fetchval("SELECT $1::text", body.name)
+
+    return app
 
 
 def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
@@ -20,15 +37,13 @@ def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
     monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
-    app = create_app()
+    app = sending_a_value_to_postgres(create_app())
     spans = InMemorySpanExporter()
     instruments = telemetry.instrument(app, telemetry_settings(), spans, InMemoryMetricReader())
 
     try:
         with TestClient(app) as client:
-            created = client.post("/tasks", json={"title": CANARY}).json()
-            client.patch(f"/tasks/{created['id']}", json={"done": True})
-            client.get("/tasks")
+            assert client.post("/sent", json={"name": CANARY}).status_code == 200
         instruments.tracer_provider.force_flush()
     finally:
         instruments.shutdown()
@@ -57,7 +72,7 @@ def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
     )
 
     with TestClient(app) as client:
-        client.get("/tasks")
+        client.get("/ready")
         collected = metrics.get_metrics_data()
 
     assert collected is not None

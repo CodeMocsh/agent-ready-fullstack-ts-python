@@ -1,6 +1,10 @@
 import { http } from "@/mocks/http";
 import { taskStore } from "@/mocks/store";
 
+export function resetTasks(): void {
+  taskStore.reset();
+}
+
 export const taskHandlers = [
   http.get("/tasks", ({ response }) => response(200).json(taskStore.list())),
 

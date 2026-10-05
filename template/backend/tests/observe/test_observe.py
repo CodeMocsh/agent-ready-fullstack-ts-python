@@ -15,6 +15,7 @@ from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from app.telemetry import METRIC_ATTRIBUTES, SPAN_ATTRIBUTES
 from tests.doubles import CANARY
+from tests.widgets import with_widgets
 
 STATE_CANARY = "canary6f1e2d"
 CALLER_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
@@ -96,12 +97,12 @@ def service(otlp: str) -> Iterator[str]:
 
 
 def send_requests() -> None:
-    with TestClient(create_app()) as client:
+    with TestClient(with_widgets(create_app())) as client:
         client.get(
-            f"/tasks?email={CANARY}",
+            f"/widgets?email={CANARY}",
             headers={"traceparent": TRACEPARENT, "tracestate": f"vendor={STATE_CANARY}"},
         )
-        client.patch(f"/tasks/{CANARY}", json={"done": True}, headers={"x-note": CANARY})
+        client.get(f"/widgets/{CANARY}", headers={"x-note": CANARY})
         client.get("/health")
         client.get("/ready")
 
@@ -111,7 +112,7 @@ def test_tempo_keeps_only_declared_attributes_and_nothing_a_request_carried(
 ) -> None:
     found = eventually(lambda: traced(grafana, service), "two traces")
 
-    assert {one["rootTraceName"] for one in found} == {"GET /tasks", "PATCH /tasks/{id}"}
+    assert {one["rootTraceName"] for one in found} == {"GET /widgets", "GET /widgets/{id}"}
     for one in found:
         stored = httpx.get(
             f"{grafana}/api/datasources/proxy/uid/tempo/api/v2/traces/{one['traceID']}"
@@ -128,7 +129,7 @@ def test_tempo_keeps_an_outside_caller_as_a_link_on_a_trace_of_its_own(
     grafana: str, service: str
 ) -> None:
     found = eventually(lambda: traced(grafana, service), "two traces")
-    [listed] = [one for one in found if one["rootTraceName"] == "GET /tasks"]
+    [listed] = [one for one in found if one["rootTraceName"] == "GET /widgets"]
 
     stored = httpx.get(
         f"{grafana}/api/datasources/proxy/uid/tempo/api/v2/traces/{listed['traceID']}"
@@ -146,7 +147,7 @@ def test_prometheus_keeps_the_duration_by_route_template_and_never_a_probe(
 ) -> None:
     found = eventually(lambda: measured(grafana, service), "two duration series")
 
-    assert {one["metric"]["http_route"] for one in found} == {"/tasks", "/tasks/{id}"}
+    assert {one["metric"]["http_route"] for one in found} == {"/widgets", "/widgets/{id}"}
     declared = {name.replace(".", "_") for name in METRIC_ATTRIBUTES}
     for one in found:
         assert set(one["metric"]) - PROMETHEUS_OWN_LABELS <= declared

@@ -20,7 +20,7 @@ from tests.doubles import CANARY
 def an_event(**changed: Any) -> dict[str, Any]:
     return {
         "kind": "query",
-        "route": "/tasks/$id",
+        "route": "/widgets/$id",
         "error": "ApiError",
         "status": 500,
         "request_id": "0f8c2c1b9d2e4b6f8a1c3e5d7f9b0a2c",
@@ -49,7 +49,7 @@ def test_an_event_is_accepted_and_logged_as_the_client_sent_it(
     assert line["severity"] == "WARNING"
     assert line["source"] == "client"
     assert line["kind"] == "query"
-    assert line["route"] == "/tasks/$id"
+    assert line["route"] == "/widgets/$id"
     assert line["error"] == "ApiError"
     assert line["status"] == 500
     assert line["failed_request_id"] == "0f8c2c1b9d2e4b6f8a1c3e5d7f9b0a2c"
@@ -70,7 +70,7 @@ def test_an_event_with_nothing_to_name_is_accepted(client: TestClient, logged: L
     "refused",
     [
         pytest.param(an_event(error=CANARY), id="free text as the error name"),
-        pytest.param(an_event(route=f"/tasks/{CANARY}"), id="free text in the route"),
+        pytest.param(an_event(route=f"/widgets/{CANARY}"), id="free text in the route"),
         pytest.param(an_event(request_id=CANARY), id="free text as the request id"),
         pytest.param(an_event(message=CANARY), id="a field nobody declared"),
         pytest.param(an_event(kind="debug"), id="a kind nobody declared"),
