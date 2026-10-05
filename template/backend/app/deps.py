@@ -1,4 +1,5 @@
-"""What a route is handed. One dependency, and it resolves nothing on its own.
+"""What a route is handed: the tenant it resolved, and a store scoped to that tenant. Neither
+resolves anything on its own; both reach the identity seam.
 
 The substrate is chosen once, by `wiring.build()`, and held on the app's lifespan. Reading it
 from the request rather than importing a module-level singleton is what lets one test process
@@ -10,6 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from app import log
 from app.identity import tenant_for
 from app.store import Database, TaskStore
 
@@ -27,7 +29,17 @@ def database_of(request: Request) -> Database:
     return database
 
 
-TenantDep = Annotated[str, Depends(tenant_for)]
+async def resolved_tenant(request: Request, tenant: Annotated[str, Depends(tenant_for)]) -> str:
+    """The tenant `tenant_for` resolved, named on this request's `request completed` line.
+
+    The tenant requirement's router carries this, so every route under it names its tenant, and
+    an override of `tenant_for` reaches every route under it. `docs/adr/template/0009`.
+    """
+    log.name_on_request_line(request, log.TENANT_ID, tenant)
+    return tenant
+
+
+TenantDep = Annotated[str, Depends(resolved_tenant)]
 """The tenant this request resolved to, reached through `Depends` rather than called.
 
 Two things follow from that and neither is cosmetic. FastAPI caches a dependency's result for

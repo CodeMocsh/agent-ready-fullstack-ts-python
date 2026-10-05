@@ -47,3 +47,10 @@ same line.
 - `app/errors.py` re-exports `ApiError` and `responses`, and `app/environment.py` re-exports the
   mechanism, so a project's own code keeps importing from the module it always did. The
   template's own code imports from the mechanism module.
+
+## Amended 2026-10-05: `app/request_line.py`, the fields of `request completed`
+
+`app/request_line.py` is the project's list of the fields it names on `request completed`
+beyond `tenant_id`. `app/log.py` is the mechanism that reads it, and `_skip_if_exists` carries
+it like the others. `docs/adr/template/0009` says why the line carries them.
+

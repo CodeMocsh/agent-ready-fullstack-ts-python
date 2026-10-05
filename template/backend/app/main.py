@@ -8,7 +8,7 @@ from app.identity import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
 from app.routes import public, tenant
-from app.wiring import build_telemetry
+from app.wiring import build_service_version, build_telemetry
 
 
 def create_app() -> FastAPI:
@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
     `docs/adr/template/0007` holds the settings below and why each one is off. Building one configures
     the logging of the whole process: see `app.log.configure`.
     """
-    log.configure()
+    log.configure(build_service_version())
     app = FastAPI(
         title="Tasks API",
         version="0.1.0",

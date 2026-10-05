@@ -42,3 +42,24 @@ identifier or a number.
 - `tenant_id` is not on `request completed`: `tenant_for` is synchronous, so what it binds does
   not reach the middleware.
 - Not yet: a security-event stream, an audit log, keyed hashing of identifiers, OTLP export.
+
+## Amended 2026-10-05: the request line names its tenant and its build
+
+The consequence above, that `tenant_id` is not on `request completed`, no longer holds. The
+tenant requirement's router carries `app/deps.py::resolved_tenant`, which reaches `tenant_for`
+and names the tenant through `app/log.py::name_on_request_line`. That function writes to
+`request.state`, the one place a dependency can leave a value the middleware reads after the
+response; a contextvar set inside the request does not reach it. One tenant's requests can now
+be read apart from another's on the log alone.
+
+A request that resolves no tenant is logged with `tenant_id` null: a public route, or a request
+the identity seam refused. A route that answers `404` or `500` after the seam resolved a tenant
+names that tenant.
+
+Every line also carries `service.version`, read by `app/wiring.py::build_service_version` from
+`OTEL_RESOURCE_ATTRIBUTES` -- the variable the OpenTelemetry SDK reads for the spans -- so a span
+and a line name the same build. It is null when the deployment names none.
+
+A project that resolves more than a tenant, such as a user, declares the field in
+`app/request_line.py` and names it the same way. The declaration is what keeps this a declared
+field: a name nobody declared raises `UndeclaredRequestField` rather than reaching the log.

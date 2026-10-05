@@ -25,6 +25,9 @@ TRUST_INBOUND_CONTEXT_ENV: Final = "TRUST_INBOUND_TRACE_CONTEXT"
 SEMCONV_ENV: Final = "OTEL_SEMCONV_STABILITY_OPT_IN"
 STABLE_SEMCONV: Final = "http,database"
 """The only value of `SEMCONV_ENV` this process accepts, and the one it sets itself."""
+RESOURCE_ATTRIBUTES_ENV: Final = "OTEL_RESOURCE_ATTRIBUTES"
+"""Read for `service.version`, which every log line carries whether or not telemetry is on. The
+SDK reads the whole of it for the spans and metrics."""
 PROTOCOL_ENV: Final = "OTEL_EXPORTER_OTLP_PROTOCOL"
 HEADERS_ENV: Final = "OTEL_EXPORTER_OTLP_HEADERS"
 
@@ -52,11 +55,12 @@ NOT_READ: Final = (
 TELEMETRY_ENV: Final = (
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
+    RESOURCE_ATTRIBUTES_ENV,
     SEMCONV_ENV,
     *NEEDS_THE_ENDPOINT,
     *NOT_READ,
 )
-"""Every variable `wiring.build_telemetry` reads."""
+"""Every variable `wiring.build_telemetry` and `wiring.build_service_version` read."""
 
 STATEMENT_TIMEOUT_ENV: Final = "DATABASE_STATEMENT_TIMEOUT"
 IDLE_IN_TRANSACTION_TIMEOUT_ENV: Final = "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT"

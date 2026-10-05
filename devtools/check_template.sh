@@ -954,6 +954,7 @@ need backend/tests/errors/test_errors.py
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
+need backend/app/request_line.py
 need backend/app/deployment.py
 need backend/app/refusal.py
 need backend/tests/tier.py

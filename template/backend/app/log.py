@@ -7,14 +7,14 @@ the HTTP fields follow the OpenTelemetry semantic conventions.
 
 **This is the only module that may import `logging` or `structlog`**, and ruff refuses either
 anywhere else in the backend but `tests/log/`. Every field a line can carry is a parameter of a
-function below. Records from libraries pass through the same formatter with the message they
+function below, or, on `request completed`, `TENANT_ID` or a field `app/request_line.py` declares. Records from libraries pass through the same formatter with the message they
 wrote, and are heard only at `WARNING` and above. `docs/adr/template/0009` holds the reasoning.
 """
 
 import logging
 import sys
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Final, TextIO, final, override
 
 import structlog
@@ -25,12 +25,21 @@ from structlog.typing import EventDict, Processor, WrappedLogger
 
 from app.deployment import ACKNOWLEDGED_ENV
 from app.models import ClientEvent
+from app.request_line import FIELDS as PROJECT_FIELDS
 
 _LOG: Final = structlog.stdlib.get_logger("app")
 
+TENANT_ID: Final = "tenant_id"
+"""The field naming the tenant a request resolved to, on every `request completed` line."""
 
-def configure() -> None:
-    """Send every record in this process to stdout as one JSON line, from here on.
+
+class UndeclaredRequestField(RuntimeError):
+    """A field neither `TENANT_ID` nor `app/request_line.py` declares was named on a request."""
+
+
+def configure(service_version: str | None) -> None:
+    """Send every record in this process to stdout as one JSON line, from here on, each naming
+    `service_version` under `service.version` -- `None` when the deployment named none.
 
     Idempotent, and it touches only what it installed: a handler from an earlier call is
     replaced, and any other handler on the root logger is left alone. Below `WARNING` only
@@ -44,6 +53,7 @@ def configure() -> None:
             processors=[
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
                 structlog.processors.format_exc_info,
+                _naming_version(service_version),
                 _named_for_every_cloud,
                 structlog.processors.JSONRenderer(),
             ],
@@ -96,8 +106,32 @@ def identity_open(tenant: str, substrate: str) -> None:
     _LOG.warning(_IDENTITY_OPEN, tenant=tenant, substrate=substrate)
 
 
-def request_completed(method: str, route: str | None, status: int, duration_ms: float) -> None:
-    """One request, by the route that answered it -- never by its path, which carries values."""
+def name_on_request_line(request: Request, field: str, value: str) -> None:
+    """Put `value` under `field` on this request's `request completed` line.
+
+    Raises `UndeclaredRequestField` for a field that is not `TENANT_ID` and not in
+    `app/request_line.py`, and `AttributeError` for a request `instrument` is not serving.
+    `docs/adr/template/0009`.
+    """
+    if field not in request_line_fields():
+        raise UndeclaredRequestField(
+            f"{field!r} is not a field of request completed. Declare it in FIELDS in "
+            f"app/request_line.py."
+        )
+    request.state.request_line[field] = value
+
+
+def request_line_fields() -> tuple[str, ...]:
+    """Every field `name_on_request_line` accepts, in the order the line carries them."""
+    return (TENANT_ID, *sorted(PROJECT_FIELDS))
+
+
+def request_completed(
+    method: str, route: str | None, status: int, duration_ms: float, named: Mapping[str, str]
+) -> None:
+    """One request, by the route that answered it -- never by its path, which carries values.
+    Every field of `request_line_fields` is on it, `None` when the request did not name it: no
+    tenant on a public route, or when the identity seam refused the request."""
     _LOG.info(
         "request completed",
         **{
@@ -106,6 +140,7 @@ def request_completed(method: str, route: str | None, status: int, duration_ms: 
             "http.response.status_code": status,
             "duration_ms": duration_ms,
         },
+        **{field: named.get(field) for field in request_line_fields()},
     )
 
 
@@ -170,6 +205,14 @@ def _with_trace(_logger: WrappedLogger, _method: str, line: EventDict) -> EventD
     return line
 
 
+def _naming_version(version: str | None) -> Processor:
+    def named(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:
+        line["service.version"] = version
+        return line
+
+    return named
+
+
 def _named_for_every_cloud(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:
     line["severity"] = line.pop("level").upper()
     line["message"] = line.pop("event")
@@ -195,6 +238,8 @@ async def _completed(
     the server answers once the exception has passed through here."""
     started = time.perf_counter()
     status = 500
+    named: dict[str, str] = {}
+    request.state.request_line = named
     try:
         response = await call_next(request)
         status = response.status_code
@@ -205,4 +250,5 @@ async def _completed(
             getattr(request.scope.get("route"), "path_format", None),
             status,
             round((time.perf_counter() - started) * 1000, 1),
+            named,
         )
