@@ -145,7 +145,7 @@ frontend/             everything pnpm touches
 
 backend/              everything uv touches
   app/main.py         builds the FastAPI app
-  app/models.py       the pydantic models the contract is made of
+  app/models/         the pydantic models the contract is made of, layered
   app/routes/         the endpoints, a module per what a caller presents
   app/errors.py       every refusal a route can answer, once each
   app/deps.py         what a route is handed

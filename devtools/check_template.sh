@@ -654,8 +654,8 @@ PY
 # project from piling every file at the top of tests/, and it is what the tier targets
 # select on. test_gate.py stays at the top because it covers no source: it reads this
 # Makefile, the hook and the workflow.
-for folder in devtools errors identity integration log main observe routes serve store \
-              telemetry wiring; do
+for folder in devtools errors identity integration log main models observe routes serve \
+              store telemetry wiring; do
     need "backend/tests/$folder/__init__.py"
 done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and
@@ -917,7 +917,11 @@ need_grep 'import.meta.env.BASE_URL' frontend/src/api/base.ts
 
 need backend/pyproject.toml
 need backend/app/main.py
-need backend/app/models.py
+need backend/app/models/__init__.py
+need backend/app/models/shared.py
+need_absent backend/app/models.py
+# The layering is a written list, and this test is what holds it -- docs/adr/0013.
+need backend/tests/models/test_layering.py
 need backend/app/routes/public.py
 need backend/app/routes/tenant/__init__.py
 need_absent backend/app/routes.py
@@ -971,7 +975,8 @@ for adr in 0001-two-substrates-behind-one-contract \
            0007-the-spec-describes-what-the-service-actually-does \
            0008-a-route-cannot-escape-the-identity-seam \
            0011-routes-are-split-by-what-a-caller-presents \
-           0012-a-refusal-is-a-class-declared-once; do
+           0012-a-refusal-is-a-class-declared-once \
+           0013-the-models-are-a-layering-written-down; do
     need "docs/adr/$adr.md"
 done
 

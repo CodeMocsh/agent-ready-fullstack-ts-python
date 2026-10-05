@@ -2,25 +2,6 @@ from typing import Annotated, ClassVar, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class Task(BaseModel):
-    id: str
-    title: str
-    done: bool
-
-
-class CreateTaskBody(BaseModel):
-    title: str
-
-
-class UpdateTaskBody(BaseModel):
-    done: bool
-
-
-class ErrorBody(BaseModel):
-    detail: str
-
-
 MAX_CLIENT_EVENTS: Final = 20
 
 RouteId = Annotated[str, Field(max_length=200, pattern=r"^[A-Za-z0-9_$./-]+$")]

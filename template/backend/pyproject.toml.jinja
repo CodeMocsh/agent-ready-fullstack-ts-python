@@ -187,6 +187,11 @@ ignore = [
 "structlog".msg = "Log through a function in app/log.py, which declares every field a line can carry."
 "opentelemetry".msg = "Instrument in app/telemetry.py, which declares every attribute a span or metric can carry."
 
+[tool.ruff.lint.isort]
+# A package re-exports with `X as X` rather than a second list of names in `__all__`, and without
+# this isort gives every aliased name a statement of its own: app/models/__init__.py would triple.
+combine-as-imports = true
+
 [tool.ruff.lint.mccabe]
 # The per-function hard gate. Measured across httpx and flask, p95 complexity is
 # 6 and p99 is 9-11, so 8 flags roughly the top 2% of what excellent Python does
