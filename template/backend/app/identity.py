@@ -8,8 +8,8 @@ login needs, and it is a stub rather than a design.
 proves nothing — the interesting rules are exactly the ones a single implementation satisfies
 by accident. Introduce the Protocol when there is a second resolver to hold to it.
 
-Every route reaches this because `app/routes.py` declares it on the router rather than on the
-handlers. `docs/adr/0008` says why, and what a replacement owes.
+Every route reaches this because `app/routes/tenant/` declares it on the router rather than on
+the handlers. `docs/adr/0008` says why, and what a replacement owes.
 
 **What this is not is a trap**, because `tenant_id` is on every row from the first migration.
 Going from here to real authentication is a change to this function and a configuration

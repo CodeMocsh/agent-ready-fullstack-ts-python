@@ -373,12 +373,12 @@ def test_the_server_adds_exactly_the_bundle_surface() -> None:
     source = inspect.getsource(serve)
 
     assert len(DECLARED_HERE.findall(source)) == 1, (
-        "app/serve.py declares a route besides the bundle fallback. Routes belong on `router` "
-        "in app/routes.py, where the tenant is resolved and the guarantee test can drive them."
+        "app/serve.py declares a route besides the bundle fallback. Routes belong under "
+        "app/routes/, where the guarantee test can drive them."
     )
     assert ADDED_HERE.findall(source) == [], (
         "app/serve.py adds a route imperatively, which no decorator scan would have shown. "
-        "Routes belong on `router` in app/routes.py."
+        "Routes belong under app/routes/."
     )
     assert len(MOUNTED_HERE.findall(source)) == 1, (
         "app/serve.py mounts something besides the API, so there is a surface on this origin "

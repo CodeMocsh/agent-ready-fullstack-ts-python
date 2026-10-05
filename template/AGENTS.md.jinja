@@ -146,7 +146,8 @@ frontend/             everything pnpm touches
 backend/              everything uv touches
   app/main.py         builds the FastAPI app
   app/models.py       the pydantic models the contract is made of
-  app/routes.py       the endpoints
+  app/routes/         the endpoints, a module per what a caller presents
+  app/errors.py       every refusal a route can answer, once each
   app/deps.py         what a route is handed
   app/wiring.py       the only reader of the environment
   app/serve.py        the one-origin entrypoint: app.main plus the frontend bundle
@@ -168,11 +169,13 @@ Each of these is something a reasonable edit undoes without anything failing unt
 **The contract**
 
 - `openapi.json` and `frontend/src/api/schema.ts` are generated from
-  `backend/app/{models,routes}.py`. Change the backend, run `make openapi`, commit all
-  three. Never hand-edit either artifact, and never hand-merge one: take a side and
-  regenerate.
+  `backend/app/`. Change the backend, run `make openapi`, commit all three. Never hand-edit
+  either artifact, and never hand-merge one: take a side and regenerate.
 - Declare every status code a route can return, with a `model` for anything that has a
-  body. An undeclared code is invisible to the other half.
+  body. An undeclared code is invisible to the other half. A refusal is a class in
+  `app/errors.py`: raise it, and name it in `responses(...)` on the route.
+- A route lives under the `app/routes/` module for what its caller presents, never beside
+  routes that ask for something else.
 - `frontend/tests/api/contract.test.ts` runs against the mock handlers and against the
   real backend. Assert shapes, status codes and the `detail` a refusal carries — never
   seed data, which the two implementations differ on by design.
