@@ -138,9 +138,26 @@ cannot be placed. An entry that is not `key=value` refuses to start.
   arrive. It is billed per GB scanned, and it is worth having as a second layer.
 - **Azure.** Container Apps stores the line as one string. Read it with `parse_json` in KQL.
 
+**A line names its trace only by `trace_id` and `span_id`.** No cloud's console opens a line from
+a trace by those fields alone: Cloud Logging links only by its own `logging.googleapis.com/trace`
+fields, and CloudWatch and Azure Monitor link stdout by nothing. Find a trace's lines by
+`trace_id` instead. X-Ray writes the same id as `1-`, its first 8 hex digits, `-` and the other
+24; Application Insights calls it `operation_Id`. A project that wants the one-click link adds its
+cloud's fields itself, because this application names no vendor --
+[adr/template/0012](adr/template/0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md).
+
 **Retention is yours to set, and shorter is safer.** The log holds personal data even when
 nobody meant it to: an exception's message is written as the library wrote it. 14 to 30 days
 suits operational logs. When you add security events, PCI DSS asks for 12 months.
+
+**The platform keeps a request log of its own, and nothing here controls it.** Cloud Run writes
+every request to `run.googleapis.com/requests`, with the full URL and its query string, the
+client IP and the user agent. An AWS load balancer's access log, and an Azure Front Door or
+Application Gateway access log, hold the same once they are on. A value this application keeps
+out of its own lines is still in that log when it was in the URL. A deployment that must keep
+values out of its logs keeps them out of URLs, and excludes that log or gives it a short
+retention: an exclusion filter on Cloud Logging's `_Default` sink, a lifecycle rule on the S3
+bucket the access logs go to, a retention on the Log Analytics table.
 
 **Browser failures arrive here too**, as lines whose `message` is `client event` and whose
 `source` is `client`. Anybody can post one, so read them as a report and never as evidence.

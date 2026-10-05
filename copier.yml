@@ -105,15 +105,18 @@ _exclude:
 
 # Written once and then the project's: an update adds one that is missing and never touches
 # one that exists. Each holds only a project's own list -- its refusals, what its production
-# refuses, its tiers, its model layering -- and the mechanism that reads it is a module the
-# template keeps updating. docs/adr/template/0015. A project cannot delete one of these, because
-# the template's code imports each, so `_skip_if_exists` never re-adds one somebody removed.
+# refuses, its tiers, its model layering, its log lines, how its browser tests sign in -- and the
+# mechanism around it is a module the template keeps updating. docs/adr/template/0015. A project
+# cannot delete one of these but log_lines.py, because the template's code imports each, so
+# `_skip_if_exists` never re-adds one somebody removed. A deleted log_lines.py returns empty.
 _skip_if_exists:
   - backend/app/errors.py
   - backend/app/environment.py
   - backend/app/request_line.py
+  - backend/app/log_lines.py
   - backend/tests/tiers.py
   - backend/tests/models/layers.py
+  - frontend/e2e/signed-in.ts
 
 # Computed, never asked. The frontend package.json needs an SPDX expression, and npm
 # spells "no license" as UNLICENSED.

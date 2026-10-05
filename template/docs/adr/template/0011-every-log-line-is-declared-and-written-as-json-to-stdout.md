@@ -26,10 +26,11 @@ middleware that writes the line after the response.
 
 ## Decision
 
-- `app/log.py` is the only module that writes the log. Ruff's `TID251` refuses an import of
-  `logging` or `structlog` through `banned-api` in `backend/pyproject.toml.jinja`, and `T20`
-  refuses `print`.
-- Each log line is a function in `app/log.py`. Its parameters are the only fields the line
+- `app/log.py` and `app/log_lines.py` are the only modules that write the log. `app/log.py` holds
+  the format, the request line and the template's own lines. `app/log_lines.py` holds the
+  project's lines. Ruff's `TID251` refuses an import of `logging` or `structlog` anywhere else,
+  through `banned-api` in `backend/pyproject.toml.jinja`, and `T20` refuses `print`.
+- Each log line is a function in one of the two. Its parameters are the only fields the line
   carries.
 - Each line is one JSON object on stdout. The field names are the ones Cloud Logging, CloudWatch
   and Azure Monitor parse without an agent. The HTTP fields follow the OpenTelemetry semantic
@@ -74,7 +75,7 @@ middleware that writes the line after the response.
 
 ## Consequences
 
-- A new log line is a new function in `app/log.py`. A new field on `request completed` is a new
+- A new log line is a new function in `app/log_lines.py`. A new field on `request completed` is a new
   name in `app/request_line.py`.
 - An exception's message is written as the library wrote it. A Postgres unique violation names
   the conflicting value.

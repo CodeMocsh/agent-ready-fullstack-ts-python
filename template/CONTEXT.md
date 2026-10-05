@@ -75,8 +75,8 @@ _Avoid_: fake auth, no-auth mode.
 ## Logs
 
 **Log line**:
-One JSON object on stdout. Each one the application writes is a function in `app/log.py`, and
-its parameters are the only fields it may carry.
+One JSON object on stdout. Each one the application writes is a function in `app/log.py` or
+`app/log_lines.py`, and its parameters are the only fields it may carry.
 _Avoid_: log message (the `message` is one field of a line), log entry, event.
 
 **Client event**:

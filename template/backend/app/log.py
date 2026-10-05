@@ -5,10 +5,13 @@ Each line is one JSON object on stdout, with `time` in UTC, `severity`, `message
 names are what Cloud Logging, CloudWatch and Azure Monitor each parse without an agent or an SDK;
 the HTTP fields follow the OpenTelemetry semantic conventions.
 
-**This is the only module that may import `logging` or `structlog`**, and ruff refuses either
-anywhere else in the backend but `tests/log/`. Every field a line can carry is a parameter of a
-function below, or, on `request completed`, `TENANT_ID` or a field `app/request_line.py` declares. Records from libraries pass through the same formatter with the message they
-wrote, and are heard only at `WARNING` and above. `docs/adr/template/0011` holds the reasoning.
+**This module and `app/log_lines.py` are the only ones that may import `logging` or
+`structlog`**, and ruff refuses either anywhere else in the backend but `tests/log/`. This one
+holds the template's lines; the project's own are in `app/log_lines.py`. Every field a line can
+carry is a parameter of a function in one of the two, or, on `request completed`, `TENANT_ID`
+or a field `app/request_line.py` declares. Records from libraries pass through the same
+formatter with the message they wrote, and are heard only at `WARNING` and above.
+`docs/adr/template/0011` holds the reasoning.
 """
 
 import logging

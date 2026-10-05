@@ -921,6 +921,7 @@ need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
 # whatever else is listening, which in a second checkout is the other checkout's app.
 need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts
 need_grep 'process.env.FRONTEND_PORT' frontend/playwright.live.config.ts
+need frontend/e2e/signed-in.ts
 need_no_grep 'localhost:5173' frontend/playwright.live.config.ts
 # Reuse is the other half of the same bug and it is worse, because it produces a green
 # run rather than a failure: Playwright checks that something answers on the URL, never
@@ -1014,6 +1015,7 @@ need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
 need backend/app/request_line.py
+need backend/app/log_lines.py
 need backend/app/deployment.py
 need backend/app/refusal.py
 need backend/tests/tier.py
