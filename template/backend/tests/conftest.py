@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from app.wiring import TELEMETRY_ENV
+from app.environment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV
 from tests.tiers import python_tiers
 
 
@@ -37,6 +37,13 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
+
+
+@pytest.fixture(autouse=True)
+def the_development_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test is the development loop unless it says otherwise. An unset `APP_ENV` is
+    production, which refuses the in-memory substrate most tests run on."""
+    monkeypatch.setenv(ENVIRONMENT_ENV, DEVELOPMENT)
 
 
 @pytest.fixture(autouse=True)

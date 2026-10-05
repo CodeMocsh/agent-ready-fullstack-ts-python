@@ -37,6 +37,18 @@ that is not the application. `make migrate` is it.
 _Avoid_: auto-migrate, startup migration, boot migration — the application does none of these,
 by design.
 
+## Environments
+
+**Development loop**:
+A process started with `APP_ENV=development`: `make dev`, the contract suite, the tests. The
+only process that may run on the in-memory substrate.
+_Avoid_: local, dev mode, debug.
+
+**Production**:
+Any process whose `APP_ENV` is unset or `production`. Unset is production on purpose, so a
+deployment that forgets the variable is checked.
+_Avoid_: prod, live, deployed.
+
 ## Routes
 
 **Requirement**:

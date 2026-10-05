@@ -167,7 +167,7 @@ ignore = [
 
 # `resolved_without_a_credential` asks one question -- does this resolver hand out a tenant to
 # a request carrying nothing? -- and every way of failing is the same answer: it did not. The
-# probe reports through its return value, which `wiring.py` reads to decide whether to warn, so
+# probe reports through its return value, which `lifespan.py` reads to decide whether to warn, so
 # nothing is swallowed. Narrowing the except would mean naming the exceptions somebody else's
 # replacement resolver might raise, which is not knowable from here.
 [tool.ruff.lint.per-file-ignores]

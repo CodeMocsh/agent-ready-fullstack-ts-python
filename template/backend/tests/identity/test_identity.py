@@ -15,6 +15,7 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
+from app.environment import ACKNOWLEDGED_ENV
 from app.identity import (
     SENTINEL_TENANT,
     Unauthenticated,
@@ -22,7 +23,6 @@ from app.identity import (
     tenant_for,
 )
 from app.main import create_app
-from app.wiring import ACKNOWLEDGED_ENV
 from tests.conftest import Logged
 from tests.doubles import failing, refusing, refusing_async, resolving_async
 

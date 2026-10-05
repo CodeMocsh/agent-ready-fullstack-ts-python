@@ -48,8 +48,9 @@ from opentelemetry.trace import Link, SpanContext, Status, TraceState
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from app import log
+from app.environment import SEMCONV_ENV, STABLE_SEMCONV
 from app.store import Database, Pooled
-from app.wiring import SEMCONV_ENV, STABLE_SEMCONV, TelemetrySettings
+from app.wiring import TelemetrySettings
 
 SPAN_ATTRIBUTES: Final = frozenset(
     {

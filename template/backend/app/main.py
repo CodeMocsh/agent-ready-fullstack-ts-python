@@ -1,56 +1,14 @@
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from functools import cache
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import log, telemetry
-from app.identity import Unauthenticated, resolved_without_a_credential
+from app.identity import Unauthenticated
+from app.lifespan import lifespan
 from app.models import ErrorBody
 from app.routes import public, tenant
-from app.wiring import build, build_telemetry, unauthenticated_is_acknowledged
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """One `Database` per process, verified before the first request and closed after the last.
-
-    Verified, never applied: DDL is a release step (`make migrate`) and this process holds no
-    rights to it. Checking here rather than lazily is what makes a skipped release step a
-    failed startup instead of a failed request — the process that cannot serve does not come
-    up, and the deploy fails where somebody is watching.
-    """
-    database = build()
-    version = await database.check()
-    log.serving(database.name, version)
-    await _say_what_this_deployment_authenticates(database.name)
-    app.state.database = database
-    if app.state.instruments is not None:
-        app.state.instruments.observe(database)
-    try:
-        yield
-    finally:
-        try:
-            await database.close()
-        finally:
-            if app.state.instruments is not None:
-                app.state.instruments.shutdown()
-
-
-async def _say_what_this_deployment_authenticates(substrate: str) -> None:
-    """State it at every boot, and raise your voice only when nobody has said it on purpose.
-
-    The fact is logged either way and only the level moves; `docs/adr/0008` says why a warning
-    a deployment cannot acknowledge is one it learns to mute.
-    """
-    tenant = await resolved_without_a_credential()
-    if tenant is None:
-        log.identity_verified()
-    elif unauthenticated_is_acknowledged():
-        log.identity_open_on_purpose(tenant)
-    else:
-        log.identity_open(tenant, substrate)
+from app.wiring import build_telemetry
 
 
 def create_app() -> FastAPI:
