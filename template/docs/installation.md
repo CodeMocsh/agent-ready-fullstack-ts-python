@@ -77,7 +77,7 @@ generated from, so commit or stash first.
 What to expect, because it is not all free:
 
 - **Files you never touched update cleanly** — tooling, gates, `Makefile` targets, docs, ADRs.
-- **Files you rewrote come back as conflicts.** `app/models.py` and the modules under
+- **Files you rewrote come back as conflicts.** The modules under `app/models/` and
   `app/routes/tenant/` are the first any real project replaces. You are porting a pattern rather than accepting a patch.
 - **Regenerate the contract afterwards.** `openapi.json` and `frontend/src/api/schema.ts` are
   generated from your code, so merging them is meaningless.

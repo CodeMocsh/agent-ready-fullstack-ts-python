@@ -3,8 +3,7 @@ import subprocess
 import sys
 
 from funlog import log_calls
-from rich import get_console, reconfigure
-from rich import print as rprint
+from rich import get_console, print as rprint, reconfigure
 
 SRC_PATHS = ["app", "tests", "devtools"]
 DOC_PATHS = ["../README.md", "../docs"]
