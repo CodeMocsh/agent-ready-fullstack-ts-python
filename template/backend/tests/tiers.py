@@ -2,7 +2,7 @@
 
 The project owns this module: the template writes it once and an update never touches it, so
 add a tier here when a test needs something a laptop may not have. `tests/tier.py` says what a
-tier is. `docs/adr/template/0017`.
+tier is. `docs/adr/template/0015`.
 """
 
 from tests.tier import PYTEST_ROOT, Tier

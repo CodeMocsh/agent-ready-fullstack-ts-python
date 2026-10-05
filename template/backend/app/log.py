@@ -8,7 +8,7 @@ the HTTP fields follow the OpenTelemetry semantic conventions.
 **This is the only module that may import `logging` or `structlog`**, and ruff refuses either
 anywhere else in the backend but `tests/log/`. Every field a line can carry is a parameter of a
 function below, or, on `request completed`, `TENANT_ID` or a field `app/request_line.py` declares. Records from libraries pass through the same formatter with the message they
-wrote, and are heard only at `WARNING` and above. `docs/adr/template/0009` holds the reasoning.
+wrote, and are heard only at `WARNING` and above. `docs/adr/template/0011` holds the reasoning.
 """
 
 import logging
@@ -111,7 +111,7 @@ def name_on_request_line(request: Request, field: str, value: str) -> None:
 
     Raises `UndeclaredRequestField` for a field that is not `TENANT_ID` and not in
     `app/request_line.py`, and `AttributeError` for a request `instrument` is not serving.
-    `docs/adr/template/0009`.
+    `docs/adr/template/0011`.
     """
     if field not in request_line_fields():
         raise UndeclaredRequestField(

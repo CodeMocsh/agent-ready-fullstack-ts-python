@@ -47,7 +47,7 @@ hooks:
 # The gate. `gate` is the list and the place a new check goes; `pre-commit` is how it is
 # run, by the hook and by hand alike: queued behind any other gate of this project, held
 # to a budget, and skipped for a tree that already passed -- devtools/gate.sh, and
-# docs/adr/template/0015 for why. CI runs `gate` itself, so nothing there is skipped.
+# docs/adr/template/0014 for why. CI runs `gate` itself, so nothing there is skipped.
 # backend/tests/test_gate.py fails if the list, the runner and the hook stop agreeing.
 pre-commit:
 	@sh devtools/gate.sh

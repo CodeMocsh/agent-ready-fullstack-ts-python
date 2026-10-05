@@ -1,99 +1,92 @@
 # 0002. Code-first contract with committed artifacts
 
+Date: 2026-10-05
+
 ## Status
 
-Accepted, 2026-08-16.
+Accepted.
 
 ## Context
 
-The generated project is one system in two halves, and the halves have to agree on the shape
-of every request and response between them. Something has to hold that agreement, and there
-are three shapes it could take.
+A generated project is one system in two halves. The halves must agree on the shape of every
+request and every response. Something must hold that agreement.
 
-**Spec-first**: a hand-authored OpenAPI document is the source of truth, and both halves are
-written to match it. The document is easy to review and belongs to neither half. It is also
-inert — a YAML file can claim a route returns a `Task` when the service returns a `detail`
-string, and nothing anywhere runs to contradict it. Keeping a hand-written spec honest
-requires exactly the discipline that is hardest to sustain, and this template is aimed at
-codebases written largely by agents, where undisciplined-but-plausible is the default
-failure.
+The backend declarations are the natural place to write it. FastAPI route declarations and
+pydantic models execute. pytest exercises the same declarations that the exporter reads, so the
+spec cannot describe behaviour the service does not have. The output of `app.openapi()` is the
+same, byte for byte, on each run with pinned versions.
 
-**Code-first, derived at build time**: the spec and the TypeScript types are generated on
-demand and never committed. This is the conventional answer, and it breaks the property this
-template is built around. Generating the frontend's types would require running the
-backend's exporter, which requires Python and a synced virtualenv. The frontend half would
-stop being installable, testable and buildable on its own, and mock mode — a frontend that
-works with no backend at all — would become a claim rather than a fact.
+The usual way to use those declarations is to generate the spec and the TypeScript types at build
+time and commit neither. That breaks the property this template is built on. To generate the
+types, the frontend half must run the exporter of the backend half, which needs Python and a
+synced virtual environment. The frontend half then cannot install, test or build alone, and mock
+mode stops being a fact about the repo.
 
-**Code-first, derived and committed**: the same generation, with both outputs in git.
-
-The backend's declarations are the natural authoring point in any of these. FastAPI route
-decorators and pydantic models are executable: pytest exercises the same declarations the
-exporter reads, so the spec cannot describe behaviour the service does not have. A spike
-confirmed the pipeline composes and that its output is byte-deterministic across runs, and
-it found the one place where the honesty mechanism has teeth — a `404` declared without a
-`model` made the spec claim an empty body while `HTTPException` returns `{"detail": ...}`,
-and the typed mock handlers refused to compile against it before a single test ran.
+A declaration that does not match the service shows up as a type error in the other half. A `404`
+declared without a model tells the spec that the response has no body. `HTTPException` returns
+`{"detail": ...}`. The typed mock handlers then do not compile, before any test runs.
 
 ## Decision
 
-The backend's pydantic models and route declarations are the single authoring point. Both
-derived artifacts are **committed**:
+Paths under `backend/` and `frontend/` name files in a generated project.
 
-```
-backend/app/{models,routes}.py  ->  openapi.json  ->  frontend/src/api/schema.ts
-                                                       -> types.ts, mocks/handlers.ts
-```
+- The pydantic models in `backend/app/models/` and the route declarations in
+  `backend/app/routes/` are the one place the contract is written.
+- Both contract artifacts are committed: `openapi.json`, and `frontend/src/api/schema.ts` derived
+  from it. `frontend/src/api/types.ts` and the mock handlers, through `frontend/src/mocks/http.ts`,
+  are typed against `schema.ts`.
+- `make openapi` writes both. `backend/devtools/export_openapi.py` exports the spec in process
+  through `app.openapi()`, with no server. The `openapi:types` script in `frontend/package.json`
+  runs a pinned `openapi-typescript` over it.
+- `make openapi-check` regenerates both artifacts and fails on any diff. Its message names
+  `make openapi`. `make gate` includes it, and the generated `.github/workflows/ci.yml` runs
+  `make gate` in one job with both toolchains.
+- `devtools/check_template.sh` runs `make openapi` on every generated project and fails if either
+  committed artifact changes.
+- Nobody edits a contract artifact by hand, and that includes a merge conflict. The rule is in
+  `template/AGENTS.md.jinja`: take one side, then run `make openapi`.
+- `copier.yml` excludes both artifacts from `copier update`. After an update the project
+  regenerates them from its own code.
+- Every status code a route can return declares a model. The reasons, and the settings in
+  `app/main.py` that keep the spec true, are in
+  `template/docs/adr/template/0008-the-spec-describes-what-the-service-actually-does.md`.
 
-`make openapi` regenerates both — exporting the spec in-process via `app.openapi()` without
-starting a server, then running `openapi-typescript` over it. `make openapi-check`
-regenerates and diffs, failing with a message that names the fix. CI splits the assertion so
-that neither job needs the other toolchain: the backend job proves the spec matches the
-code, the frontend job proves the types match the spec, and the two together prove the types
-match the code.
+## Considered options
 
-Neither artifact is ever hand-edited, including during a merge conflict.
+**Spec first.** A hand-written OpenAPI document is the source of truth, and each half is written
+to match it. It is easy to review and belongs to neither half. It also does not execute. It can
+say a route returns a `Task` while the service returns a `detail` string, and nothing runs to
+contradict it. To keep it true takes discipline. Agents write most of the code here, and a
+plausible document that is wrong is their default failure. Rejected.
+
+**Code first, derived at build time and not committed.** This is the usual answer. It ties the
+frontend half to the Python toolchain, as the Context says. Rejected.
 
 ## Consequences
 
-**Positive.** Each half stays independently operable, which is the whole point. A
-contributor with only Node installed regenerates types, runs the full frontend test suite,
-and produces a production build; a contributor with only uv runs the backend and its tests.
-Mock mode's guarantee — the frontend works with no backend behind it — holds at the
-repository level and not just at runtime.
-
-CI stays two single-toolchain jobs, each fast and each able to fail for one reason.
-
-The contract is reviewable. An API change arrives in a pull request as a diff to
-`openapi.json`, which is the one place a breaking change is impossible to miss — a field
-going optional, a status code disappearing, a response shape changing. A build-time-only
-artifact would make the same change invisible until something downstream broke.
-
-The mock handlers become a checked implementation rather than a fixture. Typed against the
-committed schema by openapi-msw, a handler returning an undeclared status code or the wrong
-shape is a compile error, so the fake and the real service cannot drift silently.
-
-**Negative.** Regeneration is a discipline, and disciplines are exactly what this template
-distrusts elsewhere. Every model or route change needs `make openapi` in the same commit.
-This is enforced rather than requested — `make openapi-check` runs in CI and the failure
-message names the command — but the enforcement is a build failure after the fact, not a
-guardrail before it.
-
-Generated files conflict in merges, and the conflicts are unreadable. A three-way merge of
-an OpenAPI document produces something neither the generator nor the backend would emit, and
-it will type-check. The rule is absolute: take either side wholesale, then regenerate with
-`make openapi`. That rule has to be stated in `AGENTS.md`,
-because
-the default instinct — for a person and for an agent — is to resolve it by hand.
-
-The artifacts churn on dependency upgrades. `app.openapi()` is deterministic for pinned
-versions but not across FastAPI or pydantic minor bumps, and `openapi-typescript` changes
-its own output between releases, so `make upgrade` has to end with `make openapi` and an
-upgrade pull request carries artifact noise nobody wrote.
-
-Some of what lands in the artifacts looks like clutter and is not. FastAPI adds a `422` to
-every route with a parameter or a body, along with `HTTPValidationError` and
-`ValidationError` schemas. They describe real behaviour, they will appear in the first diff
-anyone reads, and someone will eventually try to clean them out. The documentation says not
-to, which is a weaker mechanism than a check — but a check that distinguishes legitimate
-spec pruning from vandalism is not something this template can write.
+- Each half stays independently operable. A contributor with only Node regenerates the types
+  from the committed `openapi.json`, runs the frontend tests and builds. A contributor with only
+  uv runs the backend and its tests. Mock mode works with no backend, in the repo as well as at
+  run time.
+- `make openapi-check` needs both halves. On a machine with only one, `devtools/gate.sh` runs that
+  half and reports the check as skipped. CI installs both halves, so the check runs there.
+- The contract is reviewable. An API change arrives in a pull request as a diff to
+  `openapi.json`. A field that becomes optional, a status code that goes away, or a changed
+  response shape is visible there. An artifact made only at build time hides the same change
+  until something downstream breaks.
+- The mock handlers are a checked implementation, not a fixture. openapi-msw types them against
+  the committed schema. A handler that returns an undeclared status code or the wrong shape is a
+  compile error, so the fake service and the real one cannot drift apart without a failure.
+- Every change to a model or a route needs `make openapi` in the same commit. The gate enforces
+  it, but only as a failure after the edit. Nothing stops the edit itself.
+- A three-way merge of a contract artifact gives a file that neither the exporter nor the backend
+  writes, and it can still type-check. The default action, for a person and for an agent, is to
+  resolve the conflict by hand. Only the written rule stops that.
+- The artifacts change on dependency upgrades. `app.openapi()` output is stable for pinned
+  versions, but not across FastAPI or pydantic minor releases. `openapi-typescript` also changes
+  its output between releases. So `make upgrade` ends with `make openapi`, and an upgrade pull
+  request carries artifact changes that nobody wrote.
+- FastAPI adds a `422` response to every route with a parameter or a body, and the
+  `HTTPValidationError` and `ValidationError` schemas. They look like clutter and describe real
+  behaviour. A check cannot tell a correct removal from a wrong one, so only the documentation
+  protects them.

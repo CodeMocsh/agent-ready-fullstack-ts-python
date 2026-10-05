@@ -71,7 +71,7 @@ def test_a_trailing_slash_is_a_404_and_never_a_redirect(client: TestClient) -> N
     """`redirect_slashes = False` in `create_app`, and nothing else would catch it going.
 
     The spec is byte-identical either way, so `make openapi-check` cannot see this one.
-    `docs/adr/template/0007` holds why the redirect is refused.
+    `docs/adr/template/0008` holds why the redirect is refused.
     """
     response = client.get("/tasks/", follow_redirects=False)
 

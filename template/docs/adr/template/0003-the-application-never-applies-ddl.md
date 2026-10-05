@@ -1,171 +1,116 @@
-# The application never applies DDL, and it refuses a schema that is not exactly its own
+# 0003. The application never applies DDL, and it refuses a schema that is not exactly its own
 
-**Amended 2026-08-27.** This record absorbed the schema-version match, which stood as a record
-of its own until the two were merged. Neither claim was decided differently; the rejected
-options and the costs of both are below, and the title now states both halves.
+Date: 2026-10-05
 
-**Amended 2026-08-30.** *The match is exact, in both directions* below said the comparison
-was the version marker, `max(key)`. It is now the set of applied keys, and what forced the
-change is recorded in that section. The claim it makes is unchanged and slightly stronger. The
-version marker still exists, and nothing decides on it.
+## Status
 
-Consequences moved with it. `make migrate` no longer "exits 0 when already current"; it re-runs
-every entry. The refusal names the entries the database has not applied rather than two version
-strings. The schema baseline and what it costs are new.
+Accepted.
 
-The running application holds no rights to change the schema and no credential that could. It
-verifies at startup and refuses to serve unless the entries applied to the database are exactly
-the entries this build carries. Applying them is `make migrate` — a release step, run by
-something that is not the web process.
+## Context
 
-Two database roles carry this. `<schema>_owner` owns the schema and every table and is
-`NOLOGIN`, so nothing serves traffic as it. `<schema>_app` is what the application connects
-as: DML only, never `CREATE`, never `BYPASSRLS`, and no write access to the migration ledger,
-so the role that verifies the schema cannot forge its own answer.
+Postgres checks privilege before existence. For a role without `CREATE`,
+`CREATE TABLE IF NOT EXISTS` on a table that already exists fails with
+`permission denied for schema`. An application with least privilege therefore cannot run DDL at
+startup at all. It needs a path that only reads.
 
-**The forcing reason is a privilege check, not taste.** PostgreSQL tests permission *before*
-existence, so `CREATE TABLE IF NOT EXISTS` against an already-correct table fails with
-`permission denied for schema` for a role holding no `CREATE`. A least-privilege application
-could not start at all without a path that only reads — so the split is not something the
-verify path enables, it is something it requires.
+An application that can apply DDL can drop the tables when an attacker controls it. The process
+most exposed to the internet must not hold that credential. A separation that depends on nobody
+making a mistake is not a separation.
 
-**And an application that could apply DDL would be an application whose compromise can drop
-your tables.** `DATABASE_OWNER_URL` is read by `python -m app.migrate` and nowhere else, and
-`wiring.build()` **refuses to start** if it can see that variable — the same argument as
-`FORCE` over `ENABLE`: a separation that depends on nobody making a mistake is not a
-separation.
+When a database carries an entry that this build does not know, a newer release migrated it. Every
+migration is additive, so an older build can usually still write. "Usually" is a compatibility
+judgement, made at startup, by a process that cannot check it. When the judgement is wrong, an old
+build writes rows to a shape it does not know, and the write reports success.
 
-## The match is exact, in both directions
+## Decision
 
-`check` refuses a database **missing** any entry this build carries, and one **carrying** an
-entry this build does not. `apply` refuses the second too.
-
-Missing is the obvious half: the columns this build names may not exist yet, and the release
-step was skipped.
-
-An unknown entry is the half worth writing down, because it could reasonably go the other way.
-It means a newer release has already migrated this database. Every migration here is
-additive — `tests/store/test_schema.py::test_every_entry_is_additive` refuses `DROP TABLE`,
-`DROP COLUMN`, `ALTER COLUMN ... TYPE` and `RENAME` — so an older build *can* still write
-everything it knows about, and serving it would usually work.
-
-**Usually is the problem.** Tolerating it is a compatibility judgement, made at startup, by a
-process that has no way to check whether it is true. It is true while migrations stay additive
-and stops being true the first time somebody needs an exception; and when it stops being true,
-the failure is an old build writing rows to a shape it does not understand, which reports
-itself as a successful write. The application refuses that class of thing everywhere else, and
-there is no reason for the schema check to be where it starts guessing.
-
-**The comparison is the set of applied keys, and was `max(key)` until 2026-08-30.** A single
-highest key cannot see an entry added below it. Bands were the mitigation: repairs sat at
-`0200_` so they always sorted above, and a repair keyed anywhere else was applied to no
-database and reported by nothing. That is a rule a person has to remember, guarding a failure
-that is silent, which is the shape this project refuses everywhere else. Comparing the set
-removes the failure instead of detecting it, and `apply` now runs every entry on every release
-step rather than returning early on a marker that has not moved. Keys still decide the order
-an entry runs in. They no longer decide whether it runs at all.
-
-Matching on the set makes the rule the same in both directions and in both functions: one
-sentence, and no window in which two schemas are both correct.
+- Two database roles carry the split. `app/store/roles.py` emits them into `deploy/roles.sql`.
+  - `<schema>_owner` owns the schema and every table, and applies the DDL. It is `NOLOGIN`, so
+    nothing serves traffic as it.
+  - `<schema>_app` is the role the application connects as. It holds DML only: no `CREATE`, no
+    `BYPASSRLS`.
+- The application role cannot write the ledger, `applied_once`. `_revoke_ledger` in
+  `app/store/migrate.py` revokes the write on every `apply`, because the ledger does not exist
+  before the first migration. The role that verifies the schema cannot forge its own answer.
+  `test_the_application_role_cannot_rewrite_the_ledger` holds this.
+- The release step applies the schema. It is `make migrate`, which runs `python -m app.migrate`,
+  and something that is not the web process runs it.
+- `app/migrate.py` is the only reader of `DATABASE_OWNER_URL`. `wiring.build()` raises
+  `OwnerCredentialVisible` when the application can see that variable.
+- `check` and `apply` in `app/store/migrate.py` are two functions, not one function with a mode.
+  The lifespan calls `Database.check()` before the first request. Only `app/migrate.py` calls
+  `apply`.
+- The match is exact, in both directions. `check` raises `SchemaBehindError` when the ledger lacks
+  an entry this build carries: the columns this build names may not exist. It raises
+  `SchemaTooNewError` when the ledger holds an entry this build does not carry. `apply` raises
+  `SchemaTooNewError` too.
+- The comparison is the set of applied keys. `_apply_all` runs every entry on every call, under
+  an advisory lock, and relies on each entry being idempotent. A key decides the order in which an
+  entry runs, never whether it runs.
+- `known_version` and `schema_version` report the highest key, for `make migrate` to print. No
+  decision reads them.
+- Migrations are additive. `tests/store/test_schema.py::test_every_entry_is_additive` refuses
+  `DROP TABLE`, `DROP COLUMN`, `ALTER COLUMN ... TYPE` and `RENAME`. Additive entries make an
+  expand-and-contract change possible across two releases. They also prevent a half-finished
+  deploy from leaving a schema that no build can read.
+- A shipped entry is never edited or removed. `backend/.schema-baseline.json` records a hash of
+  each entry body, and `test_no_shipped_entry_body_has_changed` refuses an edit or a removal in
+  the gate. `merged_baseline` in `backend/devtools/schema.py` keeps the recorded hash and refuses
+  a removed key, so `make schema` cannot hide the change. The only way past is a hand edit to the
+  baseline, in a diff that somebody reads.
+- `_become_owner` issues `SET ROLE <schema>_owner` when that role exists and the connecting role
+  is a member of it. Roles are cluster-wide, so existence alone says nothing about this database.
+  `_MAY_SET_ROLE` nests the two tests in `CASE`, because SQL does not promise to evaluate `AND`
+  in order, and `pg_has_role` raises on a role that does not exist.
+- Where `SET ROLE` is not possible, `apply` runs as the connecting role. This is the bootstrap for
+  a developer's own Postgres, which has no roles. `FORCE` keeps those objects bound to the policy
+  whoever owns them.
+- `deploy/roles.sql` is applied before the first migration. `ALTER DEFAULT PRIVILEGES` binds
+  only the objects created after it.
+- Role names derive from `DB_SCHEMA`, through `owner_role` and `app_role`. Two projects that
+  hard-code `app_owner` collide on a shared cluster, and the second to migrate inherits the
+  first's grants.
 
 ## Considered options
 
-**Migrating on startup, with an owner connection.** This is the convenient shape and it is
-what the previous version of this template did. Rejected once the two roles existed: it puts
-the credential that can drop the schema into the process most exposed to the internet, and it
-makes the configuration that ships to production (`check`) different from the one developers
-exercise daily.
-
-**Granting the application role `CREATE`**, which makes the split decorative. Rejected: the
-separation is the deliverable.
-
-**A mode flag with `auto` and `check`.** Rejected once the application only ever checked: a
-mode with one reachable value is dead configuration that reads like a choice, and keeping it
-would mean the application importing the code that applies DDL. It does not — nothing on the
-request path can reach `apply`, whatever credential the process was handed.
-
-This is the pattern the field settled on. pg-boss ships `migrate: false` for "when the
-configured user account does not have schema mutation privileges"; Graphile Worker ships raw
-SQL so the runtime role never needs `CREATE`; River keeps migration in a CLI because "the
-application must have elevated access to modify the database schema, and it's generally good
-practice to limit the application's database permissions in production."
-
-Two more options were rejected on the version match rather than on who applies it.
-
-**Warning on ahead and serving anyway**, so that a rolling deploy never crash-loops an
-instance of the previous release. This was the original decision here and it was reversed
-deliberately, with the cost below understood. The argument for it is real — the window is
-short and the additive rule does make it safe today — and it was rejected because "safe today,
-by a rule that lives in another file, checked by nobody at the moment it matters" is not the
-shape of guarantee this project makes elsewhere.
-
-**Tolerating a bounded number of entries ahead.** Rejected: a knob that encodes a guess about
-how long a rollout takes, which nobody would tune and everybody would eventually trip over.
+- **Migrate on startup, with an owner connection.** This puts the credential that can drop the
+  schema into the process most exposed to the internet. The configuration that ships to
+  production then differs from the one developers run every day. pg-boss, Graphile Worker and
+  River all keep migration out of the runtime role for the same reason.
+- **Grant the application role `CREATE`.** The split then protects nothing, and the split is the
+  deliverable.
+- **One function with a mode flag, `auto` or `check`.** Each process can reach only one value, so
+  the flag is dead configuration that looks like a choice.
+- **Warn when the database is ahead, and serve.** This prevents a crash loop during a rolling
+  deploy, and the additive rule makes it safe today. But it rests on a rule in another file that
+  nothing checks at the moment it matters.
+- **Tolerate a bounded number of unknown entries.** The bound is a guess about how long a rollout
+  takes. Nobody tunes it, and every deployment eventually exceeds it.
+- **Compare the highest applied key, `max(key)`.** It cannot see an entry keyed below an existing
+  one. Every author must then remember where to put a key, and a wrong key fails silently.
+- **Check entry hashes at deploy, as Flyway and Liquibase do.** The edit is visible at commit
+  time, so a deploy is the latest place to catch it, not the earliest. A deploy check also
+  changes `applied_once`, the table the first migration creates. Alembic checks neither.
+  [docs/schema.md](../../schema.md) says what that means for a project that moves to it.
 
 ## Consequences
 
-**`make migrate` is a release step and has to be wired up.** Fly's `release_command`, a
-pre-deploy command on Railway or Render, a `pre-upgrade` Job on Kubernetes, a one-off task on
-ECS, the `migrate` service in `deploy/compose.yaml`. It is idempotent, serialises on an
-advisory lock so two releases cannot race, and re-runs every entry harmlessly, which is what
-makes it safe in a hook that fires more than once.
-
-**Forgetting it fails the deploy rather than corrupting anything.** The new version refuses to
-start, naming the entries the database has not applied. That refusal is the enforcement.
-
-**A rolling deploy has a window.** Between the release step and the last old instance being
-replaced, the database is ahead of every instance still running the previous version. Those
-instances keep serving — they checked at boot and do not re-check — but any of them that
-*restarts* in that window will refuse to come up: a health-check failure, a node eviction, an
-autoscaler. The window is the length of the rollout. Make the migration and the rollout one
-step — scale down, migrate, scale up — or accept the window, which for most deployments is a
-minute and a risk nobody notices. What you should *not* do is quietly soften the check; change
-this decision on purpose instead.
-
-**Rolling the application back requires rolling the schema back.** Redeploying the previous
-version against a migrated database will not start. Plan a rollback as a schema rollback, or
-as rolling forward to a fixed build.
-
-**Migrations stay additive anyway**, and the test stays. Additive migrations are what make an
-expand-and-contract change possible across two releases, and what keeps a half-finished deploy
-from leaving the database in a shape nothing can read.
-
-**Editing or removing a shipped entry is refused by the gate, not at deploy.** Comparing the
-set of applied keys cannot see either: an edited body leaves every key matching, and a deleted
-key is only visible once a database that ran it is in front of you. `backend/.schema-baseline.json`
-records a hash per entry and refuses both in the pre-commit hook, on `.complexity-baseline.json`'s
-terms — regenerating cannot quiet it, so the only way past is a line in a diff somebody reads.
-
-A cosmetic edit stops a deploy too, and that is accepted: nothing can tell a reformat from a
-column, and the failure being prevented is silent.
-
-**Flyway and Liquibase do the same check in the database, and this one deviates on purpose.**
-Both store a hash per applied migration and validate it at deploy; Flyway's `repair` is the
-escape hatch our hand-edited line is. A runtime version was built here first and rejected. The
-mistake is visible at commit time, so a check at deploy is the latest moment it can be caught
-rather than the earliest, and putting it in `applied_once` would mean reshaping the one table
-the first migration creates. The cost of deviating is that the gate only sees a working tree: a
-build that bypassed it is not caught later. Alembic makes neither choice and hashes nothing, so
-it does not catch this at all — [docs/schema.md](../schema.md) says what that means for anyone
-leaving.
-
-**The migration issues `SET ROLE <schema>_owner`, guarded on two questions.** Does the role
-exist — roles are cluster-wide, so its existence says nothing about *this* database — and are
-we a *member* of it, since an unrelated owner finds the role present and is then refused with
-"must be able to SET ROLE". The two tests are nested rather than `AND`-ed, because SQL does not
-promise to evaluate the existence test first and `pg_has_role` raises outright on a role that
-is not there. Objects created without the `SET ROLE` are owned by whoever connected, fall
-outside `ALTER DEFAULT PRIVILEGES FOR ROLE <schema>_owner`, and the application is then refused
-at *query* time rather than at migration time.
-
-**Where neither holds, it applies as whoever connected.** That is the bootstrap, not a
-fallback: a developer pointing at their own Postgres has no roles provisioned and must still
-be able to work, and `FORCE` keeps those objects policy-bound whoever owns them.
-
-**`deploy/roles.sql` must be applied before the first migration.** `ALTER DEFAULT PRIVILEGES`
-binds only objects created after it; run it late and the next table is unreadable by the
-application until somebody re-runs a `GRANT` nobody remembers.
-
-**Role names derive from `DB_SCHEMA`.** Roles are cluster-wide, so two projects generated from
-this template that both hard-coded `app_owner` would collide the moment they shared a cluster,
-and the second to migrate would silently inherit the first's grants.
+- `make migrate` must be wired into the platform's release step. `docs/deployment.md` names the
+  hook on each platform. The step is idempotent and holds an advisory lock, so a hook that fires
+  more than once is safe.
+- A skipped release step fails the deploy and corrupts nothing. The new version refuses to start
+  and names the entries the database has not applied.
+- A rolling deploy has a window. After the release step, the database is ahead of every instance
+  of the previous version. `GET /ready` calls `check`, so a platform that probes it takes those
+  instances out of rotation. An instance of the previous version that restarts refuses to start.
+  The window lasts until the rollout replaces the last old instance.
+- To close the window, make the migration and the rollout one step: scale down, migrate, scale
+  up. Do not soften the check. Change this decision instead.
+- A rollback of the application needs a rollback of the schema. The previous version refuses to
+  start against a migrated database. Roll the schema back, or roll forward to a fixed build.
+- A new column is a new repair entry, never an edit to its table's `CREATE`. `ddl.py` states the
+  pattern.
+- A cosmetic edit to a shipped entry also fails the gate. Nothing can tell a reformat from a new
+  column, and the failure it prevents is silent.
+- The hash check sees only a working tree. A build that did not pass the gate is not caught at
+  deploy.

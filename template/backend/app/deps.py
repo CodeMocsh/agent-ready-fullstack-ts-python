@@ -33,7 +33,7 @@ async def resolved_tenant(request: Request, tenant: Annotated[str, Depends(tenan
     """The tenant `tenant_for` resolved, named on this request's `request completed` line.
 
     The tenant requirement's router carries this, so every route under it names its tenant, and
-    an override of `tenant_for` reaches every route under it. `docs/adr/template/0009`.
+    an override of `tenant_for` reaches every route under it. `docs/adr/template/0011`.
     """
     log.name_on_request_line(request, log.TENANT_ID, tenant)
     return tenant

@@ -1,5 +1,5 @@
 """Nothing in `app/models/` imports upward, and every shape in it is reachable as
-`from app.models import X`. `docs/adr/template/0013`."""
+`from app.models import X`. `docs/adr/template/0007`."""
 
 import ast
 from pathlib import Path

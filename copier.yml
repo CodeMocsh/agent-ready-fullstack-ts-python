@@ -106,7 +106,7 @@ _exclude:
 # Written once and then the project's: an update adds one that is missing and never touches
 # one that exists. Each holds only a project's own list -- its refusals, what its production
 # refuses, its tiers, its model layering -- and the mechanism that reads it is a module the
-# template keeps updating. docs/adr/template/0017. A project cannot delete one of these, because
+# template keeps updating. docs/adr/template/0015. A project cannot delete one of these, because
 # the template's code imports each, so `_skip_if_exists` never re-adds one somebody removed.
 _skip_if_exists:
   - backend/app/errors.py

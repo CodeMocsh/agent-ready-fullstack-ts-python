@@ -8,7 +8,7 @@
     "/client-events": {
       "post": {
         "summary": "Record Client Events",
-        "description": "Failures the browser saw, written to this process's log. Public, and so untrusted:\n`ClientEvent` takes no free text. `docs/adr/template/0009`.",
+        "description": "Failures the browser saw, written to this process's log. Public, and so untrusted:\n`ClientEvent` takes no free text. `docs/adr/template/0011`.",
         "operationId": "record_client_events_client_events_post",
         "requestBody": {
           "content": {

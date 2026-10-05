@@ -9,7 +9,7 @@ proves nothing — the interesting rules are exactly the ones a single implement
 by accident. Introduce the Protocol when there is a second resolver to hold to it.
 
 Every route reaches this because `app/routes/tenant/` declares it on the router rather than on
-the handlers. `docs/adr/template/0008` says why, and what a replacement owes.
+the handlers. `docs/adr/template/0004` says why, and what a replacement owes.
 
 **What this is not is a trap**, because `tenant_id` is on every row from the first migration.
 Going from here to real authentication is a change to this function and a configuration
@@ -71,7 +71,7 @@ async def resolved_without_a_credential() -> str | None:
     """The tenant a request carrying nothing resolves to, or `None` when it is refused.
 
     A property rather than a flag, and it awaits: a replacement is written `async def`, and
-    calling one returns a coroutine rather than raising. `docs/adr/template/0008` records both, and what
+    calling one returns a coroutine rather than raising. `docs/adr/template/0004` records both, and what
     reading that coroutine as a tenant did. Anything that is not a string is `None`, and every
     exception is silence -- a resolver that did not hand out a tenant did not serve the request.
     """

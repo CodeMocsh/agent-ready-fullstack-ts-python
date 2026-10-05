@@ -14,7 +14,7 @@ The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --p
 because the in-memory substrate loses every row when the process exits. `make dev`, the
 contract suite and the tests set `APP_ENV=development`; a deployment sets nothing, or
 `APP_ENV=production`. Any other value is refused. `app/environment.py` holds the rule and
-[adr/template/0014](adr/template/0014-the-environment-is-read-in-one-place-and-run-in-another.md) says why.
+[adr/template/0010](adr/template/0010-the-environment-is-read-in-one-place-and-run-in-another.md) says why.
 
 Something has to strip the `/api` prefix, because the backend serves bare paths. In development
 the Vite proxy does it. In a deployment, one of three:
@@ -47,7 +47,7 @@ browser reached over plaintext discards it, so sign-in fails by returning quietl
 sign-in screen with nothing saying why.
 
 With nothing in front, this process is the edge: read `SECURITY_HEADERS` and `MAX_BODY_BYTES`
-in `app/serve.py` first, and [adr/template/0006](adr/template/0006-the-one-origin-entrypoint-is-the-edge.md) for
+in `app/serve.py` first, and [adr/template/0009](adr/template/0009-the-one-origin-entrypoint-is-the-edge.md) for
 why `app.main` sets neither.
 
 ## The release step
@@ -67,8 +67,9 @@ migrates and then serves must drop the credential in between:
 **The database must have applied exactly the entries the build carries**, in both directions
 ([adr/template/0003](adr/template/0003-the-application-never-applies-ddl.md)). The cost, worth knowing before
 your first rolling deploy: between the release step and the last old instance being replaced,
-any instance of the *previous* version that restarts will not come back up. Already-running
-instances are fine. If that window matters, make the migration and the rollout one step — scale
+any instance of the *previous* version that restarts will not come back up. An instance that is
+already running keeps answering, but its `GET /ready` fails, so a platform that probes it takes it
+out of rotation. If that window matters, make the migration and the rollout one step — scale
 down, migrate, scale up — and plan a rollback as a schema rollback.
 
 ## Timeouts
@@ -105,7 +106,7 @@ The backend writes one JSON object per line to stdout, and nothing else. Every c
 runtime collects stdout with no agent and no SDK, so there is nothing to configure in the
 application. The names are the ones Cloud Logging reads as they are, and the HTTP fields follow
 the OpenTelemetry semantic conventions.
-[adr/template/0009](adr/template/0009-every-log-line-is-declared-and-written-as-json-to-stdout.md) says why every
+[adr/template/0011](adr/template/0011-every-log-line-is-declared-and-written-as-json-to-stdout.md) says why every
 line is declared.
 
 | Field | What it holds |
@@ -147,7 +148,7 @@ suits operational logs. When you add security events, PCI DSS asks for 12 months
 ## Traces and metrics
 
 Off until `OTEL_EXPORTER_OTLP_ENDPOINT` names a Collector, which the application posts to over
-OTLP/HTTP. [adr/template/0010](adr/template/0010-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md)
+OTLP/HTTP. [adr/template/0012](adr/template/0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md)
 says why the application stops there.
 
 | Variable | What it does |
@@ -214,5 +215,5 @@ and writes everything it holds. This one does complain — find the line whose `
 `identity:` and read its `severity`. `WARNING` means nobody has replaced it. Serving everybody
 is a real thing to do for a while, behind an authenticating proxy or on an internal tool; set
 `UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
-level and nothing else. [adr/template/0008](adr/template/0008-a-route-cannot-escape-the-identity-seam.md) says
+level and nothing else. [adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says
 what a replacement owes.

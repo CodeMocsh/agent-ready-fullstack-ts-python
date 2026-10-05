@@ -1,99 +1,78 @@
 # 0001. Copier over a bespoke CLI
 
+Date: 2026-10-05
+
 ## Status
 
-Accepted, 2026-08-16.
+Accepted.
 
 ## Context
 
-This template has two siblings with two different answers to the same question.
-agent-ready-ts ships a bespoke, zero-dependency Node CLI: `render.ts` substitutes a
-double-braced token in file contents and path names, plus a `.if-license` filename suffix
-for conditional files, and `cli.ts` handles prompts and disk. agent-ready-python uses
-[Copier](https://copier.readthedocs.io/) and ships no generator code at all.
+This template has two siblings, and they answer this question in opposite ways. agent-ready-ts
+ships a bespoke Node CLI with no dependencies. agent-ready-python uses
+[Copier](https://copier.readthedocs.io/) and ships no generator code. The frontend half here comes
+from agent-ready-ts. The backend half follows the conventions of agent-ready-python. So the origin
+of the code does not decide the question.
 
-Either precedent is defensible here. This template's frontend half is lifted from
-agent-ready-ts, so inheriting that repo's mechanics would let frontend changes port across
-as plain file copies. Its backend half is lifted from a spike shaped by agent-ready-python's
-conventions, so the opposite is equally true.
+Three forces decide it.
 
-Three things break the tie, and the first is specific to what this template contains. This
-is the most dotfile-heavy tree of the three: `.claude/`, `.entire/`, `.githooks/`,
-`.github/`, `.gitignore`, `backend/.python-version`, and three committed `.env` files in the
-frontend half. Distribution through `pnpm dlx github:` runs the tree through npm's
-pack-and-install machinery, which renames a packaged `.gitignore` to `.npmignore` on
-extraction and drops nested ones entirely. agent-ready-ts lives with that: it stores
-`template/gitignore` undotted, restores the dot at render time, and pays for a check that
-installs a real tarball to prove the rename still behaves. Each dotfile added here would be
-another instance of that problem.
+The template holds many dotfiles: `.claude/`, `.entire/`, `.githooks/`, `.github/`, `.gitignore`,
+`backend/.python-version`, and the committed `.env` files of the frontend half. Distribution
+through `pnpm dlx github:` sends the tree through the pack-and-install step of npm. That step
+renames a packaged `.gitignore` to `.npmignore` and drops nested ones. A generator that ships that
+way must store each dotfile under another name and restore it at render time. It must also test
+that round trip through a real tarball. Each new dotfile adds one more case of this problem.
 
-Second, agent-ready-ts documents having no update path as tracked debt. Re-running it into
-an existing directory overwrites rather than merges, so updating a generated project means
-reading the template's diff and applying it by hand. This template will evolve faster than
-either sibling — it carries a contract flow and two ecosystems — so the projects it
-generates need a real update path more, not less.
+A generated project needs an update path. A CLI that renders into an existing directory
+overwrites it. The user must then read the diff of the template and apply it by hand. This
+template carries a contract flow and two ecosystems, so it changes often. Its generated projects
+need an update path more than the projects of either sibling.
 
-Third, the obvious objection to Copier is that it makes the generator depend on a Python
-toolchain. That objection does not survive contact with this template: the backend half
-requires uv anyway, so requiring `uvx` to generate the project is not a new cost.
+The usual objection to Copier is that generation then needs a Python toolchain. The backend half
+already needs uv, so `uvx` adds no new requirement.
 
 ## Decision
 
-Pure Copier. `copier.yml` plus `_subdirectory: template`, and no generator code of any kind
-in this repository.
+- The generator is Copier and nothing else. `copier.yml` holds the questions, their validators
+  and `_subdirectory: template`. The repo holds no generator code: no `src/` and no
+  `package.json`.
+- A conditional file uses Jinja in its filename. The license file is
+  `{% if package_license != 'None' %}LICENSE{% endif %}.jinja`. It renders to no file when the
+  answer is `None`. The license bodies are one if/elif chain inside it.
+- One Copier version is pinned, in `COPIER_SPEC` in `devtools/render.sh`. Every render runs it
+  through `uvx --exclude-newer "14 days"`. `devtools/check_template.sh` refuses any other
+  `copier@` version that a doc, script or workflow in the repo names.
+- A release is a git tag `v` plus the contents of `VERSION`, because `copier update` resolves
+  against tags. `.github/workflows/release.yml` cuts the tag when the gate passes on main.
+- `devtools/render.sh` refuses a render that leaves a `{{ … }}` token, a `{% … %}` statement
+  or a `*.jinja` file in the generated project.
+- `devtools/check_template.sh` refuses a generated project whose `.copier-answers.yml` does not
+  record `_src_path` and `_commit`. `copier update` reads both.
+- The rules for where Jinja may appear are in [../constraints.md](../constraints.md).
 
-Distribution is:
+## Considered options
 
-```bash
-uvx --exclude-newer "14 days" copier@9.17.1 copy \
-  gh:CodeMocsh/agent-ready-fullstack-ts-python my-app
-```
-
-which works against a private repository because git supplies the credentials. Releases are
-tagged `v0.x.y` from the first one, because `copier update` resolves against tags.
+**A bespoke CLI, as in agent-ready-ts, distributed through `pnpm dlx github:`.** A frontend
+change from that sibling then ports as a plain file copy. The CLI brings the dotfile problem of
+npm with it, and it has no update path. Rejected.
 
 ## Consequences
 
-**Positive.** The npm dotfile trap disappears, and with it the undotted storage convention,
-the restore step at render time, and the tarball round-trip assertion that existed to police
-them. Copier delivers by `git clone`, so a dotfile is a dotfile.
-
-`copier update` comes free. Generated projects record their answers in
-`.copier-answers.yml`, which carries the source path and the commit they were rendered from,
-so pulling a later template improvement is one command and a conflict resolution rather than
-a manual diff.
-
-There is no `src/`, no `package.json`, no `licenses/` directory and no unit-test job in CI.
-Conditional files are expressed as Jinja in the filename — the LICENSE file is emitted by a
-name that evaluates empty when no license was chosen — and license bodies as a single
-if/elif chain, because Copier already has the expression language that `.if-license` and a
-`licenses/` directory exist to work around. The repo's own checks collapse to one script.
-
-**Negative.** The mechanics now diverge from agent-ready-ts, which is the sibling this
-template shares the most *content* with. A frontend change ported from there cannot be
-copied blind: its `{{ token }}` substitution happens to look like Jinja, but its
-`.if-license` suffix and its undotted filenames do not exist here and its `.jinja` suffixes
-do not exist there. Porting means reading, not copying.
-
-A `.jinja` suffix takes a file out of its own toolchain. The editor stops type-checking it,
-the formatter stops touching it, and the file's own linter never sees it. This is mitigated
-by a hard rule — no `.ts`, `.tsx`, or `.py` file is ever suffixed, and the backend half is
-entirely token-free apart from `pyproject.toml.jinja` — which pushes all variability into
-config files and metadata, where losing editor support costs little. The rule has a real
-price: anything project-specific a source file needs must be read at runtime rather than
-substituted at render time.
-
-The forgotten-suffix failure mode is new and silent. A token added to a file that was never
-renamed to `.jinja` ships as the literal text `{{ package_name }}` into every generated
-project, and nothing in the rendering pipeline objects. `devtools/check_template.sh` asserts
-after every render that no `{{ … }}` survives, no `{% … %}` survives, and no `*.jinja` file
-remains on disk, which is the only thing standing between that mistake and a user.
-
-Generation now depends on third-party software this project does not control. Copier is
-pinned to an exact version and run behind `--exclude-newer`, so a bad release cannot reach a
-user unannounced, but a Copier major with different rendering semantics is a migration this
-repo will have to perform rather than absorb.
-
-Finally, this is hard to reverse. Once projects exist carrying `.copier-answers.yml` and
-expecting `copier update`, moving to a bespoke CLI would strand every one of them on a
-manual upgrade path — which is precisely the debt this decision was made to avoid.
+- Copier delivers the template by `git clone`, so a dotfile stays a dotfile. There is no renamed
+  storage, no restore step and no tarball test.
+- `copier update` brings a later template into a generated project as a three-way merge. The user
+  resolves conflicts and does not apply a diff by hand.
+- A change from agent-ready-ts does not port as a copy. That sibling uses a `.if-license` suffix
+  and undotted filenames, and this template uses `.jinja` suffixes. To port a change, read it and
+  write it again.
+- A `.jinja` suffix takes a file out of its own toolchain. The editor, the formatter and the
+  linter stop seeing it. So variability lives in config files and metadata, and the only `.jinja`
+  file in the backend half is `pyproject.toml.jinja`. A source file that needs a project-specific
+  value reads it at run time. Render-time substitution is not available to it.
+- A token in a file without the `.jinja` suffix renders as literal text, and Copier does not
+  object. The assertion in `devtools/render.sh` is the only check that stops it.
+- Generation depends on software this repo does not control. The pin and `--exclude-newer` stop a
+  bad Copier release from reaching a user without notice. A Copier major release with different
+  rendering semantics is a migration this repo must do.
+- The decision is expensive to reverse. Every generated project carries `.copier-answers.yml` and
+  expects `copier update`. A move to a bespoke CLI gives each of them a manual upgrade path.
