@@ -90,7 +90,11 @@ def answers_for(root: Path, every_file: list[Path], source: Path, name: str) -> 
             for path in every_file
             if f"{tail}-" in str(path) and path.suffix == ".md"
         }
-    return {path.resolve() for path in every_file if str(path).endswith(tail)}
+    return {
+        path.resolve()
+        for path in every_file
+        if str(path).endswith(tail) or str(path).endswith(f"{tail}.jinja")
+    }
 
 
 def main() -> int:

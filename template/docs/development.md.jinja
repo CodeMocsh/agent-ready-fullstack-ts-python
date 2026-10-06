@@ -23,11 +23,18 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 
 ## The gate
 
+{% if github_ci -%}
 - **The gate is `make gate`:** secrets, lint-check, openapi-check and test. The git hook runs
   it through `make pre-commit` before a commit, and `.github/workflows/ci.yml` runs it directly
   after a push, against a fresh checkout nobody configured. A new check goes in `make gate`,
   never into the workflow: a workflow that re-lists the steps is a second copy, and the copy is
   the one that goes stale.
+{%- else -%}
+- **The gate is `make gate`:** secrets, lint-check, openapi-check and test. The git hook runs
+  it through `make pre-commit` before a commit. If your CI runs it after a push, have it run
+  `make gate` rather than a list of the same steps: a copy of the list is the one that goes
+  stale.
+{%- endif %}
 - **`make pre-commit` runs the gate once per tree.** `devtools/gate.sh` queues behind any other
   gate of this project and records the tree a green run read, so a commit of that same tree
   passes at once. Edit one byte and the gate runs again.
@@ -47,10 +54,16 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 outside the gate. Each needs something fetched or started first, and people skip a gate that
 fetches a browser or a daemon.
 
+{% if github_ci -%}
 `ci.yml` runs `db-test` in a job of its own after a push. Nothing runs the others, so nothing
 tells you that you did not run them: `test-e2e` after a UI change, `observe-test` after touching
 `app/telemetry.py`. Run `db-test` yourself after touching `app/store/` or `deploy/` too, because
 a failure after a push reaches you late.
+{%- else -%}
+Nothing runs them, so nothing tells you that you did not run them: `db-test` after touching
+`app/store/` or `deploy/`, `test-e2e` after a UI change, `observe-test` after touching
+`app/telemetry.py`. `db-test` needs only Docker, so it is the tier to add to your CI first.
+{%- endif %}
 
 ## The comment ban
 

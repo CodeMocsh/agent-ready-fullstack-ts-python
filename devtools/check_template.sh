@@ -606,6 +606,20 @@ PY
         grep -q "^$question: false$" "$DECLINED/.copier-answers.yml" \
             || fail "$question=false is not recorded, so the next update would bring its files back"
     done
+
+    echo "==> assert a copy without the GitHub workflow names no workflow"
+    # github_ci=false acts on a copy, unlike the two questions above. The workflow and its test
+    # go together: the test alone fails on a missing workflow, and the workflow alone is a
+    # file the project asked not to have. A doc that still sends the reader to ci.yml is the
+    # quiet half of the same failure.
+    NO_CI="$(sh "$RENDER" --into "$WORK/no-ci" -- --data github_ci=false)"
+    [ ! -e "$NO_CI/.github" ] || fail "a copy with github_ci=false still ships .github/"
+    [ ! -e "$NO_CI/backend/tests/test_workflow.py" ] \
+        || fail "a copy with github_ci=false still ships the test of a workflow it does not have"
+    grep -q '^github_ci: false$' "$NO_CI/.copier-answers.yml" \
+        || fail "github_ci=false is not recorded, so the next update would bring the workflow back"
+    named="$(cd "$NO_CI" && grep -rl 'ci\.yml' --include='*.md' . | grep -v '^\./docs/adr/' || true)"
+    [ -z "$named" ] || fail "a copy with github_ci=false still names ci.yml in: $named"
 fi
 
 echo "==> assert the agent guard"
@@ -749,6 +763,7 @@ need_grep '^SHELL := /bin/bash' Makefile
 # well as in test_gate.py because that test walks the workflows it finds, and a directory
 # that stopped existing is a walk over nothing.
 need .github/workflows/ci.yml
+need backend/tests/test_workflow.py
 need_grep 'make gate' .github/workflows/ci.yml
 need_no_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
@@ -773,7 +788,7 @@ import sys
 
 sys.path.insert(0, "backend")
 try:
-    from tests import test_gate
+    from tests import test_gate, test_workflow
 except ImportError as error:
     print(f"check: test_gate.py could not be imported, which is not the same as passing: {error}",
           file=sys.stderr)
@@ -782,9 +797,9 @@ except ImportError as error:
 failures = []
 
 
-def refused(name):
+def refused(name, module=test_gate):
     try:
-        getattr(test_gate, name)()
+        getattr(module, name)()
     except AssertionError:
         return True
     return False
@@ -820,10 +835,10 @@ def emptied_tier(name, root, holds, declares, describes):
     mutated(name, originals, declares, declares.replace("test", "check"), describes, root)
 
 
-for name in ("test_every_tier_is_selected_by_a_file_that_still_names_it",
-             "test_every_tier_still_holds_tests",
-             "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
-    if refused(name):
+for module, name in ((test_gate, "test_every_tier_is_selected_by_a_file_that_still_names_it"),
+                     (test_gate, "test_every_tier_still_holds_tests"),
+                     (test_workflow, "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it")):
+    if refused(name, module):
         failures.append(f"{name} fails on the tree as rendered, before any mutation")
 
 mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
@@ -850,7 +865,7 @@ planted.parent.mkdir(parents=True, exist_ok=True)
 planted.write_text("jobs:\n  gate:\n    steps:\n      - run: sh devtools/check_template.sh\n",
                    encoding="utf-8")
 try:
-    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
+    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it", test_workflow):
         failures.append("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it passed a "
                         "workflow that runs check_template.sh, which is a script in the "
                         "generator repository and not a file a generated project holds")
