@@ -74,6 +74,18 @@ identity_stub:
     project authenticates requests itself.
   default: true
 
+# Whether the project ships a GitHub Actions workflow. Unlike the two questions above, this one
+# acts on a copy as well: a project hosted elsewhere, or one that runs its checks on its own CI,
+# answers false and gets no `.github/` and no test of a workflow. On an update, false removes the
+# workflow and its test, edited or not, because Copier removes a file the new render no longer
+# has. A project generated before this question existed keeps its `.github/` until it deletes it.
+github_ci:
+  type: bool
+  help: >-
+    Ship a GitHub Actions workflow that runs the gate and the Postgres tier on every pull
+    request and every push to main or master?
+  default: true
+
 _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
@@ -93,6 +105,9 @@ _exclude:
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/routes/test_guarantee.py{% endif %}"
+  # No workflow, and no test of one, for a project that runs its checks somewhere else.
+  - "{% if not github_ci %}.github{% endif %}"
+  - "{% if not github_ci %}backend/tests/test_workflow.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may
   # delete this one; it is excluded on update rather than skipped, so it never comes back.
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"
@@ -144,8 +159,8 @@ _message_after_copy: |
   Commit before `make install`: the installer activates this project's git hooks, and
   that needs a repository to install them into. Commit the lockfiles it produces too --
   no lockfile ships with the template, because a fresh project should resolve against
-  today's registry rather than the day the template was written, and CI installs from
-  the lockfiles with --frozen.
+  today's registry rather than the day the template was written{% if github_ci %}, and CI installs
+  from the lockfiles with --frozen{% endif %}.
 
   Then, in one terminal:
 

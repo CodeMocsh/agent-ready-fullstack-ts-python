@@ -5,11 +5,11 @@ Everything here reads a file rather than an import: the `Makefile`, the git hook
 and nothing but this file notices when they stop -- a gate that lost a member, a tier nothing
 runs, a test that switched itself off.
 
-**The hook and the workflow run the same list, and that is the point.** The hook checks a
-commit on the machine making it; the workflow checks a push against a fresh checkout nobody
-configured, which is what catches a clone where `make hooks` was never run. Neither may grow
-its own list of steps -- `test_a_workflow_runs_the_gate_rather_than_a_copy_of_it` is what
-insists the workflow names `make gate` instead.
+**Everything that runs the gate runs the same list, and that is the point.** The hook checks a
+commit on the machine making it; a CI checks a push against a fresh checkout nobody configured,
+which is what catches a clone where `make hooks` was never run. Neither may grow its own list of
+steps. A project that ships the GitHub workflow also ships the test that holds it to
+`make gate`.
 
 Two of its helpers are imported by `devtools/check_template.sh` in the generator repository,
 which is why this module imports no third-party package at the top and does each such import
@@ -26,7 +26,6 @@ from tests.tiers import TIERS, python_tiers
 
 ROOT = Path(__file__).resolve().parents[2]
 MAKEFILE = ROOT / "Makefile"
-WORKFLOWS = ROOT / ".github" / "workflows"
 HOOK = ROOT / ".githooks" / "pre-commit"
 RUNNER = ROOT / "devtools" / "gate.sh"
 HOLD = ROOT / "devtools" / "hold-the-gate.pl"
@@ -115,40 +114,6 @@ def without_comments(text: str) -> str:
     return "\n".join(
         line for line in text.splitlines() if not line.strip().startswith(COMMENT_OPENERS)
     )
-
-
-def workflows() -> list[tuple[Path, str]]:
-    """Every workflow this project ships, with its comment lines stripped. A workflow that
-    named the gate in a comment and ran `true` would satisfy a plain substring check."""
-    found = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
-    return [(path, without_comments(path.read_text(encoding="utf-8"))) for path in found]
-
-
-def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
-    """A workflow that runs its own list of steps drifts from `make gate` silently, in
-    the direction of checking less, and the drift shows up as a green push that a commit would
-    have refused. Run the target instead. If it needs to run only part of the gate, make that
-    part a target too.
-
-    The body is read with comments stripped, so a workflow naming the target in a comment and
-    running `true` does not satisfy this. Neither does naming `check_template.sh`, which an
-    earlier version accepted: that is a script in the generator repository and not a file this
-    project contains, so it could never be the right answer here and only bought a pass."""
-    shipped = workflows()
-
-    assert shipped, (
-        "no workflow ships, so this test loops over nothing and passes without checking "
-        "anything -- the shape a check takes when it has quietly stopped being one. Restore "
-        "`.github/workflows/ci.yml`, or, if this project runs its checks somewhere GitHub "
-        "cannot see, delete this assertion on purpose rather than leaving it green."
-    )
-
-    for path, body in shipped:
-        assert "make gate" in body, (
-            f"{path.relative_to(ROOT)} does not run `make gate`. A workflow that "
-            f"re-lists the gate's steps is a second copy of the gate, and the copy is what "
-            f"goes stale -- point it at the target, or add a target for the part it runs."
-        )
 
 
 def test_the_opt_in_tier_stays_out_of_the_gate():

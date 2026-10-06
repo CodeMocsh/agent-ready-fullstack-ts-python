@@ -48,8 +48,9 @@ does what the list cannot:
 - **It runs what it can in a clone with one half installed, and says so.** It prints `PARTIAL RUN`
   and names each check it did not run. A partial run records nothing.
 
-`.github/workflows/ci.yml` runs `make gate`, not `make pre-commit`. In CI a missing half is a
-broken install, so a partial run is wrong there. CI needs neither the record nor the lock.
+A CI runs `make gate`, not `make pre-commit`. In a project that ships
+`.github/workflows/ci.yml`, that workflow does. In CI a missing half is a broken install, so a
+partial run is wrong there. CI needs neither the record nor the lock.
 
 ## Considered options
 

@@ -443,7 +443,7 @@ done
 split="$(sort -u "$WORK/action-pins" | awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' | sort | tr '\n' ' ')"
 [ -z "$split" ] || fail "pinned to more than one commit across both trees: ${split% }. Pin every use of that action to one commit; .github/dependabot.yml bumps both trees in one pull request."
 
-# The generated project's backend/tests/test_gate.py refuses a workflow that re-lists the
+# The generated project's backend/tests/test_workflow.py refuses a workflow that re-lists the
 # gate's steps instead of naming the target. This repo asserts the same of its own, because
 # a rule the template asserts and its own generator ignores is a rule nobody believes.
 #
@@ -606,6 +606,24 @@ PY
         grep -q "^$question: false$" "$DECLINED/.copier-answers.yml" \
             || fail "$question=false is not recorded, so the next update would bring its files back"
     done
+
+    echo "==> assert a copy without the GitHub workflow names no workflow"
+    # github_ci=false acts on a copy, unlike the two questions above. The workflow and its test
+    # go together: the test alone fails on a missing workflow, and the workflow alone is a
+    # file the project asked not to have. A doc that still sends the reader to ci.yml is the
+    # quiet half of the same failure.
+    NO_CI="$(sh "$RENDER" --into "$WORK/no-ci" -- --data github_ci=false)"
+    [ ! -e "$NO_CI/.github" ] || fail "a copy with github_ci=false still ships .github/"
+    [ ! -e "$NO_CI/backend/tests/test_workflow.py" ] \
+        || fail "a copy with github_ci=false still ships the test of a workflow it does not have"
+    grep -q '^github_ci: false$' "$NO_CI/.copier-answers.yml" \
+        || fail "github_ci=false is not recorded, so the next update would bring the workflow back"
+    # Every file, not only Markdown: a comment in a script that says the workflow runs the gate
+    # is the same false promise. A decision record may name the workflow, as the place a
+    # project that ships it runs the gate.
+    named="$(cd "$NO_CI" && grep -rIl --exclude-dir=adr 'ci\.yml' .)" \
+        && fail "a copy with github_ci=false still names ci.yml in: $(echo $named)"
+    [ $? -eq 1 ] || fail "grep could not read the copy with github_ci=false"
 fi
 
 echo "==> assert the agent guard"
@@ -746,9 +764,10 @@ need_grep '^SHELL := /bin/bash' Makefile
 # A workflow ships, and it runs `make gate` -- the list the git hook runs, so the two cannot
 # drift. Not `make pre-commit`, whose runner passes a clone with a half missing. The hook checks the machine that commits; the workflow checks a fresh
 # checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
-# well as in test_gate.py because that test walks the workflows it finds, and a directory
+# well as in test_workflow.py because that test walks the workflows it finds, and a directory
 # that stopped existing is a walk over nothing.
 need .github/workflows/ci.yml
+need backend/tests/test_workflow.py
 need_grep 'make gate' .github/workflows/ci.yml
 need_no_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
@@ -766,25 +785,25 @@ sed 's/#.*//' .github/workflows/ci.yml | grep -q 'make db-test' \
 # distinguishes a working check from a green one. Break what the check exists to catch,
 # require it to fail, put the file back. The passing direction is the line above it.
 echo "==> assert the gate's own checks fail on what they are for"
-python3 - <<'PY' || fail "a check in test_gate.py did not refuse what it is written to refuse"
+python3 - <<'PY' || fail "a check in test_gate.py or test_workflow.py did not refuse what it is written to refuse"
 import pathlib
 import shutil
 import sys
 
 sys.path.insert(0, "backend")
 try:
-    from tests import test_gate
+    from tests import test_gate, test_workflow
 except ImportError as error:
-    print(f"check: test_gate.py could not be imported, which is not the same as passing: {error}",
+    print(f"check: test_gate.py or test_workflow.py could not be imported, which is not the same as passing: {error}",
           file=sys.stderr)
     sys.exit(1)
 
 failures = []
 
 
-def refused(name):
+def refused(name, module=test_gate):
     try:
-        getattr(test_gate, name)()
+        getattr(module, name)()
     except AssertionError:
         return True
     return False
@@ -820,10 +839,10 @@ def emptied_tier(name, root, holds, declares, describes):
     mutated(name, originals, declares, declares.replace("test", "check"), describes, root)
 
 
-for name in ("test_every_tier_is_selected_by_a_file_that_still_names_it",
-             "test_every_tier_still_holds_tests",
-             "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
-    if refused(name):
+for module, name in ((test_gate, "test_every_tier_is_selected_by_a_file_that_still_names_it"),
+                     (test_gate, "test_every_tier_still_holds_tests"),
+                     (test_workflow, "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it")):
+    if refused(name, module):
         failures.append(f"{name} fails on the tree as rendered, before any mutation")
 
 mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
@@ -850,7 +869,7 @@ planted.parent.mkdir(parents=True, exist_ok=True)
 planted.write_text("jobs:\n  gate:\n    steps:\n      - run: sh devtools/check_template.sh\n",
                    encoding="utf-8")
 try:
-    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
+    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it", test_workflow):
         failures.append("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it passed a "
                         "workflow that runs check_template.sh, which is a script in the "
                         "generator repository and not a file a generated project holds")
@@ -1682,6 +1701,12 @@ echo "==> backend: install, lint, test"
 run "uv sync" sh -c 'cd backend && uv sync --all-groups'
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
+if [ "$VARIANT" = "default" ]; then
+    # The copy without the workflow keeps test_gate.py and loses test_workflow.py. Run what it
+    # keeps, on this install, so a test that still needs the workflow fails here.
+    run "test_gate.py without the workflow" sh -c \
+        "cd '$NO_CI/backend' && '$OUT/backend/.venv/bin/python' -m pytest -q -p no:cacheprovider tests/test_gate.py"
+fi
 
 echo "==> frontend: install, lint, test, build"
 run "pnpm install" pnpm -C frontend install --prefer-offline

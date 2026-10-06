@@ -17,10 +17,10 @@ Some checks cannot run everywhere. One needs a Postgres daemon, one needs Docker
 browser binary. The gate runs on every commit and must not need any of them. So these checks need
 a place to live that is not the gate and is not a skip.
 
-Who starts a check is the least stable fact about it. `make db-test` needs no person:
-`.github/workflows/ci.yml` runs it for every pull request. A name such as `manual/` is then
-false. In testing vocabulary a manual test is one a person performs by hand, and no test here is
-one.
+Who starts a check is the least stable fact about it. In a project that ships
+`.github/workflows/ci.yml`, `make db-test` needs no person: the workflow runs it for every pull
+request. A name such as `manual/` is then false. In testing vocabulary a manual test is one a
+person performs by hand, and no test here is one.
 
 ## Decision
 
