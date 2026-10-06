@@ -9,8 +9,8 @@ const USAGE = `usage: node devtools/comments.mjs <paths...> [options]
 
   --exclude <pattern>   skip a path; repeatable, and trailing /** is optional
 
-Reads comments.exclude from package.json as well. See AGENTS.md for
-what this refuses, and for the two things it deliberately does not read.`;
+Reads comments.exclude from package.json as well. See docs/development.md
+for what this refuses, and for the two things it deliberately does not read.`;
 
 function isDirective(text, index) {
   const lineStart = text.lastIndexOf("\n", index) + 1;

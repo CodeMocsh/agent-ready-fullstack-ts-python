@@ -4,7 +4,7 @@ Agents write code that works and degrades. An agent decides a value at the call 
 than once. It patches new logic into whatever function is nearest. Every step passes its tests.
 These gates refuse the shortcuts that look correct in the diff and cost later, and each one
 fails the build, so the standard holds without anyone remembering it. The aim is the one in
-`AGENTS.md`: elegance is less code doing more, and every line must earn its keep.
+`AGENTS.md`: elegance is less code doing more, and every line must have a purpose.
 
 ## Frontend
 

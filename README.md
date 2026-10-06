@@ -90,7 +90,7 @@ generated file belongs in git is [adr/0002](docs/adr/0002-code-first-contract-wi
 ## The agent-ready layer
 
 - **`AGENTS.md` + `CLAUDE.md`** — one source of agent instructions at the root, covering both
-  halves: principles, a layout map, the rules that bite, and an index into everything else.
+  halves: principles, the rules nothing checks, and an index into everything else.
 - **A see-what-you-built loop** — Playwright wired up in both mock and live mode, and an
   instruction to run the app and read a screenshot rather than infer behaviour from JSX.
 - **A contract suite that runs twice** — identical assertions against the mock handlers and
