@@ -11,6 +11,7 @@ backend/
   app/models/         the pydantic models the contract is made of, layered
   app/routes/         the endpoints, a module per what a caller presents
   app/refusal.py      how a route says no: ApiError and responses(...)
+  app/request_line.py the fields `request completed` names, beyond tenant_id -- yours
   app/errors.py       every refusal a route can answer, once each -- yours
   app/deps.py         what a route is handed
   app/wiring.py       what this deployment configured, read from the environment
@@ -22,6 +23,7 @@ backend/
   app/log.py          how the application logs, and the template's own lines
   app/log_lines.py    every other line the application logs -- yours
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
+  app/migrate.py      the entrypoint `make migrate` runs
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/integration/, which is a tier
   tests/tiers.py      what a tier needs and what runs it
@@ -62,6 +64,8 @@ backend/
   method. A store you can hold is a store already scoped.
 - Every index on a tenant table leads with `tenant_id`, or the policy's predicate cannot be
   satisfied and Postgres scans.
+- A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
+  the row makes Postgres evaluate it for every row, and the index cannot help.
 - `MemoryDatabase` stays. The gate runs on it and must not need a daemon, and one implementation
   of a `Protocol` is a shape nothing checks.
 - **Migrations are additive, and the application never applies them.** No `DROP COLUMN`, no

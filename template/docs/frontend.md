@@ -29,17 +29,20 @@ feels real enough.
   them to match house rules.
 - `src/api/schema.ts` is regenerate-only, like `openapi.json`. A hand edit is a bug.
 - `pnpm dlx shadcn add` does not put everything in `src/components/ui`. A block, a chart, a hook
-  or a lib file lands in ordinary scanned source and fails `make lint` in shadcn's idiom. Fix the
-  values to tokens, or add that one path to `conformance.exclude`. Never use
-  `conformance.allow`: it matches text rather than path, so it permits that text everywhere and
-  nothing fails.
+  or a lib file lands in ordinary scanned source and fails `make lint` in shadcn's idiom.
+  [AGENTS.md](../AGENTS.md) says what to do.
 
 ## Conventions
 
 - **The theme is the only place a colour, a type size or a spacing step is defined.** A hex
   literal, a palette step like `bg-blue-500`, a `text-[13px]`, a `p-[7px]` or an opacity
   modifier like `bg-primary/80` fails `pnpm conformance`. Add a token to `src/index.css`.
+  A font size, family, line height or letter spacing is a token too: `pnpm conformance` refuses
+  one in a `style={{}}` attribute or a raw declaration in a stylesheet.
 - **Icon stroke comes from `--icon-stroke`**, not from the call site.
+- **A `useEffect` does not fetch.** Server state comes from TanStack Query hooks against
+  `src/api/client.ts`. Effects are for synchronising with something outside React.
+  `pnpm conformance` refuses a `fetch`, an `await` or a `.then` written in an effect.
 - **A component file is named for what it exports**, in kebab-case: `task-list.tsx` exports
   `TaskList`. The file name is how anything finds a component without reading it.
 - **Export a function, not an arrow.** `export function load()`, never

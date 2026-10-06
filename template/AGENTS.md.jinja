@@ -4,8 +4,8 @@ Instructions for AI coding agents working on {{ package_name }}. Follows the
 [AGENTS.md](https://agents.md) convention.
 
 This file holds the principles and the rules that nothing checks for you. A rule that a gate, a
-test or a boot refusal enforces is not here, because its failure message tells you what to do.
-Detail is one link away.
+test or a check at startup enforces is not here, because its failure message tells you what to
+do. Detail is one link away.
 
 ## Approach
 
@@ -35,13 +35,13 @@ No code path continues past a condition it did not plan for. In both halves:
 
 Not crashing is legitimate only when the design plans for the condition, the contract names it,
 and the code reports it. In an app with two halves, a silent failure looks like an empty screen:
-a route that swallows a store error answers `200 []`, and the table says "No tasks yet". Assert
+a route that ignores a store error answers `200 []`, and the table says "No tasks yet". Assert
 the failure itself, never the absence of an effect.
 
 ## Zero comments
 
-No comments of any kind, suppression directives included: `make lint` refuses them. Express
-intent through names, structure, types and tests.
+No comments in source, tests or scripts, suppression directives included: `make lint` refuses
+them. Express intent through names, structure, types and tests.
 
 Rationale goes in the commit message. Only an architectural decision also goes in `docs/adr/`,
 and most decisions are not one: [what earns a file](docs/adr/README.md). A Python docstring may
@@ -70,16 +70,16 @@ fans out to both. Each half works without the other's toolchain.
 **Every change**
 
 - Never hand-edit or hand-merge a generated file. Take a side and regenerate: `make openapi` for
-  the contract, `make schema` for `deploy/`.
+  the contract, `make schema` and `make roles` for `deploy/`.
 - Run `make pre-commit`, then commit. The gate runs once per tree. A run that skipped a half says
   so on stderr; read that before you believe the green.
 - When a complexity gate fails, split the function. Do not raise a threshold to get green.
 - Do not restyle vendored code: `frontend/src/components/ui/**`, `frontend/src/lib/utils.ts`,
   `frontend/public/mockServiceWorker.js`. Regenerate the worker with
-  `pnpm dlx msw init public --save`.
-- When a `copier update` conflicts in a file the template owns, change the template so the next
-  one does not. A conflict in a file this project rewrote is resolved here. After an update, run
-  `make openapi` and `make lint`.
+  `pnpm -C frontend exec msw init public --save`.
+- When a `copier update` conflicts in a file the template owns, fix it in the template, or report
+  it there, so the next update does not conflict. A conflict in a file this project rewrote is
+  resolved here. [docs/installation.md](docs/installation.md) lists the steps after an update.
 - The tiers are outside the gate, so nothing tells you that you skipped one. Run `make db-test`
   after touching `app/store/` or `deploy/`, `make observe-test` after touching
   `app/telemetry.py`, and `make test-e2e` after a UI change.
@@ -88,25 +88,31 @@ fans out to both. Each half works without the other's toolchain.
 
 **Frontend**
 
-- Never fetch in a `useEffect`. Server state comes from TanStack Query hooks against
-  `src/api/client.ts`.
+- Never fetch in a `useEffect`, and never through a function an effect calls. Server state comes
+  from TanStack Query hooks against `src/api/client.ts`. `pnpm conformance` sees only a `fetch`,
+  an `await` or a `.then` written in the effect itself.
 - Never assume the app is served from `/`. Derive every path from `import.meta.env.BASE_URL`.
 - Do not add `.env.production`. Nothing tests for one, and it is the file in which mock mode
   can be switched back on.
+- A mock handler refuses every case the backend refuses. A mock that answers one makes the
+  contract suite pass against a shape the real service never returns.
 - Contract tests assert shapes, status codes and a refusal's `detail`, never seed data.
+- When `pnpm dlx shadcn add` puts a file in scanned source and `make lint` fails on it, change
+  the values to tokens, or add that one path to `conformance.exclude`. Never use
+  `conformance.allow`: it matches text, so it permits that text in every file.
 
 **Backend**
 
-- A route goes in the `app/routes/` module for what its caller presents. A refusal is a class in
-  `app/errors.py`, raised and named in `responses(...)`.
-- Two writers at once both land. Shape a write that another can race, cheapest first: append or
+- A route goes in the `app/routes/` module for what its caller presents.
+- Two writers at once both succeed. Shape a write that another can race, cheapest first: append or
   merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
   in the route and write in the store afterwards. A race only shows on Postgres, so its test goes
   in `tests/integration/`.
 - Never widen the store's surface to take a tenant. `Database.store(tenant_id)` is the only way
   to get a store, and no store method takes a tenant.
 - A policy compares one column to one setting, never a join or a row-dependent function.
-- A new column on a shipped table goes in its `CREATE` and in a repair entry.
+- A new column on a shipped table goes in its `CREATE` and in a repair entry. Without the repair
+  entry, a database that already ran the `CREATE` never gets the column.
   [docs/backend.md](docs/backend.md) says how.
 - Never log or trace a body, a path, a query string, an address or an exception's message. A log
   field is a parameter of a function in `app/log_lines.py`.
@@ -120,7 +126,7 @@ fans out to both. Each half works without the other's toolchain.
 
 ```bash
 make install        # both halves, then the git hooks
-make pre-commit     # the gate
+make pre-commit     # the gate, once per tree
 make dev            # both halves: backend :8000, frontend :5173, live mode
 make dev-frontend   # frontend only, mock mode
 make lint           # auto-fix and lint both halves

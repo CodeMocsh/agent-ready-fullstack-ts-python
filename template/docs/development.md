@@ -44,8 +44,8 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 ## The tiers
 
 `make test-e2e`, `make test-e2e-live`, `make db-test` and `make observe-test` are deliberately
-outside the gate. Each needs something fetched or started first, and a gate that fetches a
-browser or a daemon is a gate people learn to commit around.
+outside the gate. Each needs something fetched or started first, and people skip a gate that
+fetches a browser or a daemon.
 
 `ci.yml` runs `db-test` in a job of its own after a push. Nothing runs the others, so nothing
 tells you that you did not run them: `test-e2e` after a UI change, `observe-test` after touching
@@ -59,13 +59,15 @@ a failure after a push reaches you late.
 `backend/devtools/comments.py` are the two gates.
 
 - **Suppressions are refused too:** `biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`,
-  `# type: ignore`. A suppression is a threshold decision taken silently at the point of pain.
+  `# type: ignore`. A suppression is a threshold decision taken silently, where the check fails.
   Make it a fix in the code, or a reviewable line in `biome.json`, `tsconfig.json` or
   `pyproject.toml`. ruff's `BLE` refuses `except Exception`, and the one place a blind catch is
   right carries a line under `per-file-ignores`.
-- **Two things are not comments.** Shebangs and TypeScript `///` directives are executable
-  directives. A Python docstring is a string bound to the symbol, reachable through `help()`. A
-  module, class or function may carry one. `/** */` is a comment token, JSDoc included.
+- **Shebangs and TypeScript `///` directives are not comments.** They are executable
+  directives, and neither gate reads them.
+- **A Python docstring is not a comment.** It is a string bound to the symbol, reachable through
+  `help()`. A module, class or function may carry one. `/** */` is a comment token, JSDoc
+  included.
 - **Config files may carry comments** where the format offers no other way to explain a rule.
   That includes `frontend/*.config.ts`. Vendored and generated code is out of scope entirely.
 

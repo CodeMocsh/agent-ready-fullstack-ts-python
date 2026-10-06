@@ -40,13 +40,13 @@ No code path continues past a condition it did not plan for. In both halves:
 
 Not crashing is legitimate only when the design plans for the condition, the contract names it,
 and the code reports it. In an app with two halves, a silent failure looks like an empty screen:
-a route that swallows a store error answers `200 []`, and the table says "No tasks yet". Assert
+a route that ignores a store error answers `200 []`, and the table says "No tasks yet". Assert
 the failure itself, never the absence of an effect.
 
 ## Zero comments
 
-No comments of any kind, suppression directives included: `make lint` refuses them. Express
-intent through names, structure, types and tests.
+No comments in source, tests or scripts, suppression directives included: `make lint` refuses
+them. Express intent through names, structure, types and tests.
 
 Rationale goes in the commit message. Only an architectural decision also goes in `docs/adr/`,
 and most decisions are not one: [what earns a file](docs/adr/README.md). A Python docstring may
