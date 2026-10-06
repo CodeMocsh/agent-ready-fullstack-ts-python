@@ -7,7 +7,7 @@ from collections.abc import Callable
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader, MetricsData, NumberDataPoint
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
@@ -112,24 +112,48 @@ def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
     )
 
     with TestClient(app) as client:
-        client.get("/ready")
-        collected = metrics.get_metrics_data()
+        assert client.get("/ready").status_code == 200
+        database = app.state.database
+        assert isinstance(database, PostgresDatabase)
+        assert client.portal is not None
+        opened = client.portal.call(database.pool)
+        with client.portal.wrap_async_context_manager(database.connection()):
+            collected = metrics.get_metrics_data()
 
+    reported = by_state(collected, pool=provisioned.schema)
+    assert reported.keys() == {
+        ("db.client.connection.count", "used"),
+        ("db.client.connection.count", "idle"),
+        ("db.client.connection.max", None),
+    }
+    used = reported["db.client.connection.count", "used"]
+    idle = reported["db.client.connection.count", "idle"]
+    most = reported["db.client.connection.max", None]
+    assert used >= 1
+    assert idle >= 0
+    assert used + idle <= most
+    assert most == opened.get_max_size()
+
+
+def by_state(collected: MetricsData | None, *, pool: str) -> dict[tuple[str, str | None], float]:
+    """Each connection metric's value by its name and state. Fails on a point that is not a
+    number, names another pool or carries another attribute, and on a point reported twice."""
     assert collected is not None
     points = [
-        (metric.name, dict(point.attributes or {}), point.value)
+        (metric.name, point)
         for resource in collected.resource_metrics
         for scope in resource.scope_metrics
         for metric in scope.metrics
+        if metric.name.startswith("db.client.connection.")
         for point in metric.data.data_points
-        if metric.name.startswith("db.client.connection.") and isinstance(point, NumberDataPoint)
     ]
-    pool = {"db.client.connection.pool.name": provisioned.schema}
-    assert sorted(points, key=str) == sorted(
-        [
-            ("db.client.connection.count", {**pool, "db.client.connection.state": "used"}, 0),
-            ("db.client.connection.count", {**pool, "db.client.connection.state": "idle"}, 1),
-            ("db.client.connection.max", pool, 10),
-        ],
-        key=str,
-    )
+    reported: dict[tuple[str, str | None], float] = {}
+    for name, point in points:
+        assert isinstance(point, NumberDataPoint)
+        attributes = dict(point.attributes or {})
+        state = attributes.pop("db.client.connection.state", None)
+        assert attributes == {"db.client.connection.pool.name": pool}
+        assert isinstance(state, str | None)
+        assert (name, state) not in reported
+        reported[name, state] = point.value
+    return reported
