@@ -92,10 +92,11 @@ What to expect, because it is not all free:
   on an update leaves the example resource's own files alone, and does not re-add any you
   deleted. Everything else keeps updating.
 - **Drop the GitHub workflow if your checks run somewhere else.** Answer once:
-  `uvx --exclude-newer "14 days" copier@9.17.1 update --data github_ci=false`. From then on an
-  update leaves `.github/` alone. Delete `.github/` and `backend/tests/test_workflow.py` in the
-  same commit; the test fails while a workflow is missing. A new project answers the same
-  question on its first copy.
+  `uvx --exclude-newer "14 days" copier@9.17.1 update --data github_ci=false`. The update
+  removes the workflow and `backend/tests/test_workflow.py`, even a workflow you edited, so
+  commit first. A project generated before 0.33.0 keeps its `.github/`: delete it yourself.
+  `docs/development.md` is yours, so remove what it says about the workflow too. A new project
+  answers the same question on its first copy.
 - **Stop receiving the identity stub once you authenticate.** Answer once:
   `uvx --exclude-newer "14 days" copier@9.17.1 update --data identity_stub=false`, and an update
   leaves `app/identity.py` and its tests alone.

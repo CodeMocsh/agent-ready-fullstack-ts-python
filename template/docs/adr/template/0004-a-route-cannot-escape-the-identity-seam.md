@@ -103,8 +103,9 @@ A replacement verifies a credential against a session store or a key set, so it 
   [0002](0002-tenant-isolation-is-forced-and-always-on.md) permits a policy to compare a column to
   a setting and nothing else. A rule per user or per project needs a join that a policy may not
   do. The database owns the tenant boundary. The route owns everything finer.
-- The git hook runs the guarantee before a commit. `.github/workflows/ci.yml` runs `make gate`
-  again after a push, which covers a clone where nobody ran `make hooks`.
+- The git hook runs the guarantee before a commit. In a project that ships
+  `.github/workflows/ci.yml`, the workflow runs `make gate` again after a push, which covers a
+  clone where nobody ran `make hooks`.
 - A route that the walk cannot drive fails the test. It is not skipped. A websocket has no HTTP
   methods, and `test_no_route_shape_escapes_being_driven` fails on one. A mount whose routes the
   walk cannot list fails `test_every_mount_is_one_this_walk_can_see_into`. A guarantee that

@@ -5,12 +5,11 @@ Everything here reads a file rather than an import: the `Makefile`, the git hook
 and nothing but this file notices when they stop -- a gate that lost a member, a tier nothing
 runs, a test that switched itself off.
 
-**The hook and the workflow run the same list, and that is the point.** The hook checks a
-commit on the machine making it; the workflow checks a push against a fresh checkout nobody
-configured, which is what catches a clone where `make hooks` was never run. Neither may grow
-its own list of steps -- `test_a_workflow_runs_the_gate_rather_than_a_copy_of_it`, in
-`test_workflow.py`, is what insists the workflow names `make gate` instead. That test ships only
-with the workflow.
+**Everything that runs the gate runs the same list, and that is the point.** The hook checks a
+commit on the machine making it; a CI checks a push against a fresh checkout nobody configured,
+which is what catches a clone where `make hooks` was never run. Neither may grow its own list of
+steps. A project that ships the GitHub workflow also ships the test that holds it to
+`make gate`.
 
 Two of its helpers are imported by `devtools/check_template.sh` in the generator repository,
 which is why this module imports no third-party package at the top and does each such import

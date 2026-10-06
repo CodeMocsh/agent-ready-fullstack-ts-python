@@ -443,7 +443,7 @@ done
 split="$(sort -u "$WORK/action-pins" | awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' | sort | tr '\n' ' ')"
 [ -z "$split" ] || fail "pinned to more than one commit across both trees: ${split% }. Pin every use of that action to one commit; .github/dependabot.yml bumps both trees in one pull request."
 
-# The generated project's backend/tests/test_gate.py refuses a workflow that re-lists the
+# The generated project's backend/tests/test_workflow.py refuses a workflow that re-lists the
 # gate's steps instead of naming the target. This repo asserts the same of its own, because
 # a rule the template asserts and its own generator ignores is a rule nobody believes.
 #
@@ -618,8 +618,12 @@ PY
         || fail "a copy with github_ci=false still ships the test of a workflow it does not have"
     grep -q '^github_ci: false$' "$NO_CI/.copier-answers.yml" \
         || fail "github_ci=false is not recorded, so the next update would bring the workflow back"
-    named="$(cd "$NO_CI" && grep -rl 'ci\.yml' --include='*.md' . | grep -v '^\./docs/adr/' || true)"
-    [ -z "$named" ] || fail "a copy with github_ci=false still names ci.yml in: $named"
+    # Every file, not only Markdown: a comment in a script that says the workflow runs the gate
+    # is the same false promise. A decision record may name the workflow, as the place a
+    # project that ships it runs the gate.
+    named="$(cd "$NO_CI" && grep -rIl --exclude-dir=adr 'ci\.yml' .)" \
+        && fail "a copy with github_ci=false still names ci.yml in: $(echo $named)"
+    [ $? -eq 1 ] || fail "grep could not read the copy with github_ci=false"
 fi
 
 echo "==> assert the agent guard"
@@ -760,7 +764,7 @@ need_grep '^SHELL := /bin/bash' Makefile
 # A workflow ships, and it runs `make gate` -- the list the git hook runs, so the two cannot
 # drift. Not `make pre-commit`, whose runner passes a clone with a half missing. The hook checks the machine that commits; the workflow checks a fresh
 # checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
-# well as in test_gate.py because that test walks the workflows it finds, and a directory
+# well as in test_workflow.py because that test walks the workflows it finds, and a directory
 # that stopped existing is a walk over nothing.
 need .github/workflows/ci.yml
 need backend/tests/test_workflow.py
@@ -781,7 +785,7 @@ sed 's/#.*//' .github/workflows/ci.yml | grep -q 'make db-test' \
 # distinguishes a working check from a green one. Break what the check exists to catch,
 # require it to fail, put the file back. The passing direction is the line above it.
 echo "==> assert the gate's own checks fail on what they are for"
-python3 - <<'PY' || fail "a check in test_gate.py did not refuse what it is written to refuse"
+python3 - <<'PY' || fail "a check in test_gate.py or test_workflow.py did not refuse what it is written to refuse"
 import pathlib
 import shutil
 import sys
@@ -790,7 +794,7 @@ sys.path.insert(0, "backend")
 try:
     from tests import test_gate, test_workflow
 except ImportError as error:
-    print(f"check: test_gate.py could not be imported, which is not the same as passing: {error}",
+    print(f"check: test_gate.py or test_workflow.py could not be imported, which is not the same as passing: {error}",
           file=sys.stderr)
     sys.exit(1)
 
@@ -1697,6 +1701,12 @@ echo "==> backend: install, lint, test"
 run "uv sync" sh -c 'cd backend && uv sync --all-groups'
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
+if [ "$VARIANT" = "default" ]; then
+    # The copy without the workflow keeps test_gate.py and loses test_workflow.py. Run what it
+    # keeps, on this install, so a test that still needs the workflow fails here.
+    run "test_gate.py without the workflow" sh -c \
+        "cd '$NO_CI/backend' && '$OUT/backend/.venv/bin/python' -m pytest -q -p no:cacheprovider tests/test_gate.py"
+fi
 
 echo "==> frontend: install, lint, test, build"
 run "pnpm install" pnpm -C frontend install --prefer-offline

@@ -8,8 +8,8 @@
 # clone that has installed only one of them is a legitimate way to work here. That
 # is also the one dangerous thing in this file: a run where everything skipped exits
 # 0 and looks exactly like a run where everything passed. So a partial run says what
-# it did not do, on stderr, every time. Read it: the workflow runs `make gate` after a
-# push, and nothing before it, so a half a partial run skipped is unchecked until then.
+# it did not do, on stderr, every time. Read it: a half a partial run skipped is unchecked
+# until something runs `make gate`{% if github_ci %}, which the workflow does after a push{% endif %}.
 #
 # The whole run is timed and the time is printed, because a gate reaches minutes by
 # degrees with nobody watching. BUDGET is a smoke alarm rather than
