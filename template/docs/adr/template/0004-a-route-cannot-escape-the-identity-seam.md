@@ -63,7 +63,8 @@ A replacement verifies a credential against a session store or a key set, so it 
   asked of a service after a leak.
 - The guarantee ships with the identity stub. `test_guarantee.py`, `tests/identity/doubles.py`
   and `tests/identity/test_identity.py` test the seam as the stub ships it. The answer
-  `identity_stub=false` stops `copier update` from bringing them, beside `app/identity.py`.
+  `identity_stub: false`, recorded in `.copier-answers.yml`, stops `copier update` from bringing
+  them, beside `app/identity.py`.
 - `tests/routes/walk.py` imports nothing about identity. Other suites that walk the routes keep
   working after a project replaces the stub.
 
@@ -110,5 +111,5 @@ A replacement verifies a credential against a session store or a key set, so it 
   methods, and `test_no_route_shape_escapes_being_driven` fails on one. A mount whose routes the
   walk cannot list fails `test_every_mount_is_one_this_walk_can_see_into`. A guarantee that
   silently stops covering a route is worse than one that says so.
-- A project that answers `identity_stub=false` owns `test_guarantee.py` from then on. An update
+- A project that records `identity_stub: false` owns `test_guarantee.py` from then on. An update
   does not change it.

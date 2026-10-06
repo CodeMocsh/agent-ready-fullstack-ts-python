@@ -53,25 +53,29 @@ package_license:
     - None
 
 # Whether `copier update` keeps bringing the example resource, `tasks`. A project that has
-# replaced the example answers false once, and from then on an update neither changes its own
-# files at those paths nor re-adds the ones it deleted. A fresh copy always ships the example:
+# replaced the example records false in .copier-answers.yml before an update, and from then on an
+# update neither changes its own files at those paths nor re-adds the ones it deleted. Given on
+# the update itself, false deletes those files: the old render still has them and the new one
+# does not. A fresh copy always ships the example:
 # the rest of the template is built on it, so the answer only takes effect on an update.
 # docs/adr/0004-the-example-is-declined-on-update-and-never-on-copy.md says what was tried.
 example_resource:
   type: bool
   help: >-
-    Keep updating the example resource (`tasks`) on `copier update`? Answer no once your
-    project has replaced it.
+    Keep updating the example resource (`tasks`) on `copier update`? To stop, set it to false in
+    .copier-answers.yml and commit before you update. Changing it to no during an update deletes
+    the example's files, your edits included.
   default: true
 
 # The same, for the identity stub: `app/identity.py`, which resolves every request to the
 # sentinel tenant, and its tests. A project that has replaced it with real authentication
-# answers false once, and an update stops bringing the stub back.
+# records false the same way, and an update stops bringing the stub back.
 identity_stub:
   type: bool
   help: >-
-    Keep updating the identity stub (`app/identity.py`) on `copier update`? Answer no once your
-    project authenticates requests itself.
+    Keep updating the identity stub (`app/identity.py`) on `copier update`? To stop, set it to
+    false in .copier-answers.yml and commit before you update. Changing it to no during an
+    update deletes the stub and its tests, your edits included.
   default: true
 
 # Whether the project ships a GitHub Actions workflow. Unlike the two questions above, this one

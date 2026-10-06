@@ -86,20 +86,23 @@ What to expect, because it is not all free:
   module that reads it is the template's, and keeps updating. `docs/frontend.md`,
   `docs/backend.md` and `docs/development.md` are yours too: rewrite them with this project's
   detail. A later template change to one reaches only new projects.
-- **Stop receiving the example resource once you have replaced it.** When your project has its
-  own, answer once:
-  `uvx --exclude-newer "14 days" copier@9.17.1 update --data example_resource=false`. From then
-  on an update leaves the example resource's own files alone, and does not re-add any you
-  deleted. Everything else keeps updating.
-- **Drop the GitHub workflow if your checks run somewhere else.** Answer once:
-  `uvx --exclude-newer "14 days" copier@9.17.1 update --data github_ci=false`. The update
-  removes the workflow and `backend/tests/test_workflow.py`, even a workflow you edited, so
-  commit first. A project generated before 0.33.0 keeps its `.github/`: delete it yourself.
-  `docs/development.md` is yours, so remove what it says about the workflow too. A new project
-  answers the same question on its first copy.
-- **Stop receiving the identity stub once you authenticate.** Answer once:
-  `uvx --exclude-newer "14 days" copier@9.17.1 update --data identity_stub=false`, and an update
-  leaves `app/identity.py` and its tests alone.
+- **Stop receiving the example resource once you have replaced it.** Record the answer before
+  you update: set `example_resource: false` in `.copier-answers.yml`, commit, then run the
+  update. From then on an update leaves the example resource's own files alone, and does not
+  re-add any you deleted. Everything else keeps updating. **Do not give the answer on the update
+  itself**, with `--data example_resource=false` or at the prompt: Copier then deletes the
+  example's files, your edits included. The file says never to edit it by hand. This one edit
+  is expected, and Copier keeps the value when it writes the file again.
+- **Drop the GitHub workflow if your checks run somewhere else.** Answer once, on the update
+  itself: `uvx --exclude-newer "14 days" copier@9.17.1 update --data github_ci=false`. On this
+  question the update is meant to delete: it removes the workflow and
+  `backend/tests/test_workflow.py`, even a workflow you edited, so commit first. A project
+  generated before 0.33.0 keeps its `.github/`: delete it yourself. `docs/development.md` is
+  yours, so remove what it says about the workflow too. A new project answers the same question on
+  its first copy.
+- **Stop receiving the identity stub once you authenticate.** Record the answer the same way:
+  set `identity_stub: false` in `.copier-answers.yml`, commit, then update. An update then leaves
+  `app/identity.py` and its tests alone. Given on the update itself, the answer deletes them.
 - **Files you rewrote come back as conflicts.** The modules under `app/models/` and
   `app/routes/tenant/` are the first any real project replaces. You are porting a pattern rather than accepting a patch.
 - **Regenerate the contract and the complexity baseline afterwards.** `openapi.json`,
