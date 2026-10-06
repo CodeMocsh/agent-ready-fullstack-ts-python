@@ -34,13 +34,16 @@ def sending_a_value_to_postgres(app: FastAPI) -> FastAPI:
     return app
 
 
-def exported_by(
-    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, drive: Callable[[TestClient], None]
-) -> tuple[ReadableSpan, ...]:
-    """The spans an instrumented app on Postgres exports while `drive` uses it."""
+@pytest.fixture
+def on_postgres(provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An app created in the test serves from the provisioned schema."""
     monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
     monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
-    app = sending_a_value_to_postgres(create_app())
+
+
+def exported_by(app: FastAPI, drive: Callable[[TestClient], None]) -> tuple[ReadableSpan, ...]:
+    """Returns the spans `app` exports while `drive` uses it. The instruments stop before it
+    returns."""
     spans = InMemorySpanExporter()
     instruments = telemetry.instrument(app, telemetry_settings(), spans, InMemoryMetricReader())
     try:
@@ -52,13 +55,12 @@ def exported_by(
     return spans.get_finished_spans()
 
 
-def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
-    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("on_postgres")
+def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value() -> None:
     def sends(client: TestClient) -> None:
         assert client.post("/sent", json={"name": CANARY}).status_code == 200
 
-    exported = exported_by(provisioned, monkeypatch, sends)
+    exported = exported_by(sending_a_value_to_postgres(create_app()), sends)
 
     queries = [one for one in exported if one.kind is SpanKind.CLIENT]
     assert queries
@@ -70,16 +72,17 @@ def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
     assert CANARY not in json.dumps([(one.name, dict(one.attributes or {})) for one in exported])
 
 
-def test_a_query_exports_only_inside_a_traced_request(
-    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.usefixtures("on_postgres")
+def test_a_query_exports_only_inside_a_traced_request() -> None:
+    app = sending_a_value_to_postgres(create_app())
+
     def queries_outside_and_inside_a_request(client: TestClient) -> None:
         assert client.portal is not None
-        client.portal.call(outside_any_request, client.app)
+        client.portal.call(outside_any_request, app)
         assert client.get("/ready").status_code == 200
         assert client.post("/sent", json={"name": "sent"}).status_code == 200
 
-    exported = exported_by(provisioned, monkeypatch, queries_outside_and_inside_a_request)
+    exported = exported_by(app, queries_outside_and_inside_a_request)
 
     [server] = [one for one in exported if one.kind is SpanKind.SERVER]
     queries = [one for one in exported if one.kind is SpanKind.CLIENT]
@@ -100,11 +103,10 @@ async def outside_any_request(app: FastAPI) -> None:
         await conn.fetchval("SELECT 1")
 
 
+@pytest.mark.usefixtures("on_postgres")
 def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
-    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
+    provisioned: Provisioned,
 ) -> None:
-    monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
-    monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
     app = create_app()
     metrics = InMemoryMetricReader()
     app.state.instruments = telemetry.instrument(
