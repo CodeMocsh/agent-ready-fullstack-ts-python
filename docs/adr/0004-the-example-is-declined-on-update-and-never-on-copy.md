@@ -30,10 +30,18 @@ copy only. `_exclude` does get the operation, as `_copier_operation`.
   only when `_copier_operation` is `update`. `_exclude` is the one list of those files.
 - A copy always ships every file. The help text of each question asks only about
   `copier update`.
-- Copier records the answer in `.copier-answers.yml`, so a project gives it once.
+- A project records a false answer in `.copier-answers.yml` and commits it before an update.
+  An update renders the old version with the last answers. A false answer given on the update
+  itself leaves the owned files in the old render and out of the new one, and Copier deletes a
+  file the new render no longer has, edited or not. `template/docs/installation.md` and the help
+  text of each question say this.
 - `devtools/check_template.sh` renders a copy with both answers false. It reads the owned files
   out of `copier.yml`, and it refuses the copy if any of them is missing or if either answer is
   not recorded.
+- `devtools/check_template.sh` also updates a copy that recorded both answers false and edited
+  every owned file, across a later template commit that changes every owned file. It refuses
+  the update if an owned file is gone, no longer holds the project's edit, or took the
+  template's change.
 
 ## Considered options
 
@@ -54,12 +62,13 @@ size.
 
 ## Consequences
 
-- A project that answers false keeps what it has at the owned paths. An update never adds back a
-  file the project deleted.
+- A project that records false before an update keeps what it has at the owned paths. An update
+  never adds back a file the project deleted.
+- A project that gives false on the update itself loses the owned files once. It gets them back
+  from its own history.
 - The files that mix framework and example keep updating. They include the store, the schema,
   `backend/app/models/__init__.py` and `frontend/src/mocks/handlers.ts`. A project still meets
   the example in those files.
 - The answer has no effect on a copy, so it is safe to ask there.
-- The gate checks only the copy half. To prove the update half needs a tagged template and a
-  project to update. That is a dry run against a real generated project, and it is not part of
-  the gate.
+- The gate checks the update half against a later commit of the working tree, not against a
+  released tag. A change in how Copier resolves a tag is outside what it proves.

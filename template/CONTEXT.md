@@ -58,7 +58,8 @@ _Avoid_: surface, access level, guard.
 
 **Example resource**:
 `tasks`: the one resource the template ships, so every layer has something real to carry. A
-project replaces it, then answers `example_resource=false` so `copier update` stops bringing it.
+project replaces it, then records `example_resource: false` in `.copier-answers.yml` so
+`copier update` stops bringing it.
 _Avoid_: demo, sample, worked example.
 
 **Refusal**:
@@ -68,8 +69,8 @@ _Avoid_: error response, exception (an exception is how a refusal is raised, not
 
 **Identity stub**:
 `app/identity.py` as the template ships it: every request resolves to the sentinel tenant. A
-project that authenticates replaces it, then answers `identity_stub=false` so `copier update`
-stops bringing it.
+project that authenticates replaces it, then records `identity_stub: false` in
+`.copier-answers.yml` so `copier update` stops bringing it.
 _Avoid_: fake auth, no-auth mode.
 
 ## Logs

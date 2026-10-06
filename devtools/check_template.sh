@@ -607,6 +607,47 @@ PY
             || fail "$question=false is not recorded, so the next update would bring its files back"
     done
 
+    echo "==> assert a project that declines keeps its own files through an update"
+    # An update renders the old version with the project's last answers. Flip a question with
+    # --data on the update itself and the old render still holds the owned files while the new
+    # one does not, so Copier deletes them, edited or not. template/docs/installation.md has
+    # the answer recorded in .copier-answers.yml first. This holds the template to that
+    # procedure: an owned file the project edited survives an update that changes it in the
+    # template, with the project's edit and without the template's.
+    G="git -c user.email=check@example.com -c user.name=check -c commit.gpgsign=false"
+    BASE="$(sh "$RENDER" --into "$WORK/update")"
+    MARK="kept by the project"
+    OWNED="$(sed -n "s/.*not [a-z_]* and _copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
+    (
+        cd "$BASE"
+        git init -q && $G add -A && $G commit -qm copy
+        for owned in $OWNED; do echo "$MARK" >>"$owned"; done
+        sed -i.bak -e 's/^example_resource: true$/example_resource: false/' \
+            -e 's/^identity_stub: true$/identity_stub: false/' .copier-answers.yml
+        rm .copier-answers.yml.bak
+        grep -q '^example_resource: false$' .copier-answers.yml \
+            && grep -q '^identity_stub: false$' .copier-answers.yml \
+            || fail "the answers were not recorded false, so the update below declines nothing"
+        $G commit -qam "the project replaces the example and the stub"
+    )
+    for owned in $OWNED; do
+        [ -f "$WORK/update/src/template/$owned" ] || fail "copier.yml owns $owned, which the template does not have"
+        echo "a later template change" >>"$WORK/update/src/template/$owned"
+    done
+    echo "a later template change" >>"$WORK/update/src/template/docs/schema.md"
+    $G -C "$WORK/update/src" commit -qam "a later template"
+    (cd "$BASE" && uvx --exclude-newer "14 days" "$COPIER_SPEC" update --defaults --quiet \
+        --trust --vcs-ref=HEAD) >"$WORK/update.log" 2>&1 \
+        || { cat "$WORK/update.log" >&2; fail "copier update failed on a project that declined both questions"; }
+    grep -q "a later template change" "$BASE/docs/schema.md" \
+        || fail "the update did not bring the later template, so the check below proves nothing"
+    for owned in $OWNED; do
+        [ -f "$BASE/$owned" ] || fail "an update after declining deleted $owned"
+        [ "$(tail -1 "$BASE/$owned")" = "$MARK" ] || fail "an update after declining overwrote $owned"
+        ! grep -q "a later template change" "$BASE/$owned" \
+            || fail "an update after declining still brought the template's change to $owned"
+    done
+
     echo "==> assert a copy without the GitHub workflow names no workflow"
     # github_ci=false acts on a copy, unlike the two questions above. The workflow and its test
     # go together: the test alone fails on a missing workflow, and the workflow alone is a
