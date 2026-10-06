@@ -117,6 +117,12 @@ _skip_if_exists:
   - backend/tests/tiers.py
   - backend/tests/models/layers.py
   - frontend/e2e/signed-in.ts
+  # The docs AGENTS.md sends an agent to for a project's own detail. A project rewrites each with
+  # its own, so a template change to one would conflict on every update. A new project gets the
+  # template's first version; AGENTS.md links all three, so a deleted one comes back on update.
+  - docs/frontend.md
+  - docs/backend.md
+  - docs/development.md
 
 # Computed, never asked. The frontend package.json needs an SPDX expression, and npm
 # spells "no license" as UNLICENSED.
