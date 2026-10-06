@@ -298,6 +298,15 @@ def test_every_log_line_written_in_a_sampled_request_names_its_trace_and_span(
     assert len(line["span_id"]) == 16
 
 
+def test_a_span_outside_any_request_starts_no_trace(untrusting: Instrumented) -> None:
+    tracer = untrusting.instruments.tracer_provider.get_tracer(__name__)
+    for kind in set(SpanKind) - {SpanKind.SERVER}:
+        tracer.start_span("SELECT", kind=kind).end()
+    untrusting.client.get("/widgets")
+
+    assert [one.name for one in untrusting.finished()] == ["GET /widgets"]
+
+
 def test_a_request_sampled_out_exports_no_span_and_logs_no_trace_but_is_still_measured(
     unsampled: Instrumented, logged: Logged
 ) -> None:

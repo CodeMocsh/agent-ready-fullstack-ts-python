@@ -1,12 +1,14 @@
 """What a real Postgres produces: database spans named by operation, with no query text and no
-value that was sent, and the pool's connections as metrics."""
+value that was sent, only inside a request, and the pool's connections as metrics."""
 
 import json
+from collections.abc import Callable
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader, NumberDataPoint
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
 
@@ -32,32 +34,70 @@ def sending_a_value_to_postgres(app: FastAPI) -> FastAPI:
     return app
 
 
-def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
-    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def exported_by(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, drive: Callable[[TestClient], None]
+) -> tuple[ReadableSpan, ...]:
+    """The spans an instrumented app on Postgres exports while `drive` uses it."""
     monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
     monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
     app = sending_a_value_to_postgres(create_app())
     spans = InMemorySpanExporter()
     instruments = telemetry.instrument(app, telemetry_settings(), spans, InMemoryMetricReader())
-
     try:
         with TestClient(app) as client:
-            assert client.post("/sent", json={"name": CANARY}).status_code == 200
+            drive(client)
         instruments.tracer_provider.force_flush()
     finally:
         instruments.shutdown()
+    return spans.get_finished_spans()
 
-    queries = [one for one in spans.get_finished_spans() if one.kind is SpanKind.CLIENT]
+
+def test_a_query_is_a_span_named_by_its_operation_and_carrying_no_value(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def sends(client: TestClient) -> None:
+        assert client.post("/sent", json={"name": CANARY}).status_code == 200
+
+    exported = exported_by(provisioned, monkeypatch, sends)
+
+    queries = [one for one in exported if one.kind is SpanKind.CLIENT]
     assert queries
     for query in queries:
         assert query.attributes is not None
         assert query.attributes["db.system.name"] == "postgresql"
         assert "db.query.text" not in query.attributes
         assert set(query.attributes) <= telemetry.SPAN_ATTRIBUTES
-    assert CANARY not in json.dumps(
-        [(one.name, dict(one.attributes or {})) for one in spans.get_finished_spans()]
-    )
+    assert CANARY not in json.dumps([(one.name, dict(one.attributes or {})) for one in exported])
+
+
+def test_a_query_exports_only_inside_a_traced_request(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def queries_outside_and_inside_a_request(client: TestClient) -> None:
+        assert client.portal is not None
+        client.portal.call(outside_any_request, client.app)
+        assert client.get("/ready").status_code == 200
+        assert client.post("/sent", json={"name": "sent"}).status_code == 200
+
+    exported = exported_by(provisioned, monkeypatch, queries_outside_and_inside_a_request)
+
+    [server] = [one for one in exported if one.kind is SpanKind.SERVER]
+    queries = [one for one in exported if one.kind is SpanKind.CLIENT]
+    assert server.context is not None
+    assert queries
+    assert {one.context.trace_id for one in exported if one.context is not None} == {
+        server.context.trace_id
+    }
+    for query in queries:
+        assert query.parent is not None
+        assert query.parent.span_id == server.context.span_id
+
+
+async def outside_any_request(app: FastAPI) -> None:
+    database = app.state.database
+    assert isinstance(database, PostgresDatabase)
+    async with database.connection() as conn:
+        await conn.fetchval("SELECT 1")
 
 
 def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(

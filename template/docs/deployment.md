@@ -195,6 +195,10 @@ capture, or a protocol other than `http/protobuf`. The SDK reads `OTEL_RESOURCE_
   needs delta temporality, which the Collector's `cumulativetodelta` processor provides.
 - **Anything else** that takes OTLP: Grafana, Jaeger, Datadog, Honeycomb.
 
+**Only a request starts a trace.** A query is a span only inside a traced request. A query in a
+probe, or in work outside any request, exports no span. A probe still writes its `request
+completed` line. The pool metrics still count the connections that work uses.
+
 Add the Collector's `redaction` processor as a second layer; the application already sends only
 declared attributes. Sampling beyond a fixed ratio -- keeping every error and every slow
 request -- is tail sampling, which also lives in the Collector.

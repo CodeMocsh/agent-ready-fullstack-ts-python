@@ -38,6 +38,11 @@ can send it forged ids, and can make it sample everything.
   callers are the deployment's own. `test_a_trusted_caller_is_continued_in_the_same_trace` holds
   it.
 - Baggage is never read or forwarded.
+- Only a server span starts a trace. A query in a probe, or in work outside any request, exports
+  no span. Work that polls Postgres then adds no trace. `_RequestsOnly` in `app/telemetry.py` does
+  this. `test_a_span_outside_any_request_starts_no_trace` and
+  `tests/integration/test_telemetry.py::test_a_query_exports_only_inside_a_traced_request` hold
+  it.
 
 ## Considered options
 
