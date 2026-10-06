@@ -82,8 +82,10 @@ What to expect, because it is not all free:
 
 - **Files you never touched update cleanly** — tooling, gates, `Makefile` targets, docs, ADRs.
 - **Some files are yours after the first copy.** `copier.yml` lists them under
-  `_skip_if_exists`, and an update never touches them. Each holds only your list; the module that
-  reads it is the template's, and keeps updating.
+  `_skip_if_exists`, and an update never touches them. Each code module holds only your list; the
+  module that reads it is the template's, and keeps updating. `docs/frontend.md`,
+  `docs/backend.md` and `docs/development.md` are yours too: rewrite them with this project's
+  detail. A later template change to one reaches only new projects.
 - **Stop receiving the example resource once you have replaced it.** When your project has its
   own, answer once:
   `uvx --exclude-newer "14 days" copier@9.17.1 update --data example_resource=false`. From then
