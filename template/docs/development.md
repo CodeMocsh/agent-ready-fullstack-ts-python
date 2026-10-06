@@ -1,0 +1,84 @@
+# Development
+
+[AGENTS.md](../AGENTS.md) holds the rules nothing checks. This is the root of the tree, the gate
+and the tiers, the comment ban, and how to work in one half. [frontend.md](frontend.md) and
+[backend.md](backend.md) hold the two halves.
+
+## The two halves
+
+Each half installs, lints, tests and builds without the other's toolchain: `pnpm` runs in
+`frontend/`, `uv` in `backend/`, and `make` at the root fans out to both. There is no root
+`package.json`, and `pnpm install` at the root is meant to fail.
+
+```
+openapi.json          the contract -- generated from the backend, committed
+Makefile              the interface across both halves
+CONTEXT.md            the vocabulary
+docs/adr/             architectural decisions, as its README defines them;
+                      template/ holds the ones that came with the template
+frontend/             everything pnpm touches
+backend/              everything uv touches
+deploy/               schema.sql and roles.sql -- generated from app/store/
+```
+
+## The gate
+
+- **The gate is `make gate`:** secrets, lint-check, openapi-check and test. The git hook runs
+  it through `make pre-commit` before a commit, and `.github/workflows/ci.yml` runs it directly
+  after a push, against a fresh checkout nobody configured. A new check goes in `make gate`,
+  never into the workflow: a workflow that re-lists the steps is a second copy, and the copy is
+  the one that goes stale.
+- **`make pre-commit` runs the gate once per tree.** `devtools/gate.sh` queues behind any other
+  gate of this project and records the tree a green run read, so a commit of that same tree
+  passes at once. Edit one byte and the gate runs again.
+- **`make secrets` is in the gate.** gitleaks reads the tree the gate certifies. Remove a finding
+  and rotate the secret. When it is no secret at all, put its fingerprint in `.gitleaksignore`.
+- **No test skips itself.** A test that needs a daemon or a browser goes in a tier declared in
+  `backend/tests/tiers.py`. Everything else mirrors the source it covers. A skip exits 0 and
+  looks like a pass, so `test_gate.py` fails on one.
+- **A complexity threshold is a reviewable decision.** Raising one, or recording a baseline
+  upward, is not the way to green. `make lint` lowers a stale baseline for you, and records again
+  one that the codebase moved by changing size rather than shape; either change belongs in your
+  commit.
+
+## The tiers
+
+`make test-e2e`, `make test-e2e-live`, `make db-test` and `make observe-test` are deliberately
+outside the gate. Each needs something fetched or started first, and a gate that fetches a
+browser or a daemon is a gate people learn to commit around.
+
+`ci.yml` runs `db-test` in a job of its own after a push. Nothing runs the others, so nothing
+tells you that you did not run them: `test-e2e` after a UI change, `observe-test` after touching
+`app/telemetry.py`. Run `db-test` yourself after touching `app/store/` or `deploy/` too, because
+a failure after a push reaches you late.
+
+## The comment ban
+
+`make lint` fails on any comment token under `frontend/{src,tests,e2e,devtools}` and
+`backend/{app,tests,devtools}`. `frontend/devtools/comments.mjs` and
+`backend/devtools/comments.py` are the two gates.
+
+- **Suppressions are refused too:** `biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`,
+  `# type: ignore`. A suppression is a threshold decision taken silently at the point of pain.
+  Make it a fix in the code, or a reviewable line in `biome.json`, `tsconfig.json` or
+  `pyproject.toml`. ruff's `BLE` refuses `except Exception`, and the one place a blind catch is
+  right carries a line under `per-file-ignores`.
+- **Two things are not comments.** Shebangs and TypeScript `///` directives are executable
+  directives. A Python docstring is a string bound to the symbol, reachable through `help()`. A
+  module, class or function may carry one. `/** */` is a comment token, JSDoc included.
+- **Config files may carry comments** where the format offers no other way to explain a rule.
+  That includes `frontend/*.config.ts`. Vendored and generated code is out of scope entirely.
+
+## Working in one half
+
+The commands in `AGENTS.md` cover the common cases, and the `Makefile` is the full list: the
+tiers, the migration targets and the per-half variants. `make observe` starts Grafana, Tempo and
+Prometheus and prints the `OTEL_*` variables to export. Each script under `devtools/` says what
+it does and why, at the top.
+
+`BACKEND_PORT`, `FRONTEND_PORT` and `PREVIEW_PORT` move every server, so a second checkout can run
+at the same time.
+
+Each half also works with its own tools: `pnpm -C frontend test:watch`,
+`pnpm -C frontend add some-package`, `cd backend && uv run pytest -q tests/routes/`,
+`cd backend && uv add some-package`.
