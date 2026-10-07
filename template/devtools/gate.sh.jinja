@@ -11,11 +11,10 @@
 # it did not do, on stderr, every time. Read it: a half a partial run skipped is unchecked
 # until something runs `make gate`{% if github_ci %}, which the workflow does after a push{% endif %}.
 #
-# The whole run is timed and the time is printed, because a gate reaches minutes by
-# degrees with nobody watching. BUDGET is a smoke alarm rather than
-# a target: it is a few times what the gate costs, so a loaded laptop does not trip it
-# and a regression that doubles the bill does. Raise it in a commit that says what got
-# slower and why that is the right trade.
+# The runner measures the whole run in CPU-seconds and prints the result, because a gate
+# reaches minutes by degrees with nobody watching. BUDGET is a smoke alarm rather than a
+# target: it is a few times what the gate uses. Raise it in a commit that says what uses
+# more CPU and why that is the right trade.
 set -eu
 
 BUDGET=60
@@ -52,12 +51,22 @@ perl devtools/hold-the-gate.pl "$lock"
 
 started=$(date +%s)
 
-report_the_time() {
+report_the_cost() {
     elapsed=$(( $(date +%s) - started ))
+    spent="$(git rev-parse --git-path gate-spent)"
+    times >"$spent"
+    cpu=$(awk 'function seconds(t, p) { split(t, p, /[ms]/); return p[1] * 60 + p[2] }
+        NR == 2 { printf "%d", seconds($1) + seconds($2) }' "$spent")
+    case "$cpu" in
+        '' | *[!0-9]*)
+            echo "pre-commit: cannot read the gate's CPU time from $spent" >&2
+            return 1
+            ;;
+    esac
     echo "" >&2
-    echo "pre-commit: ${elapsed}s of a ${BUDGET}s budget" >&2
-    if [ "$elapsed" -gt "$BUDGET" ]; then
-        echo "  Over budget. Something got slower; find it before it becomes normal." >&2
+    echo "pre-commit: ${cpu} CPU-seconds of a ${BUDGET} budget, ${elapsed}s on the clock" >&2
+    if [ "$cpu" -gt "$BUDGET" ]; then
+        echo "  Over budget. Something uses more CPU. Find it before it becomes normal." >&2
         echo "  \`time make pre-commit\` prints the phases. BUDGET lives in devtools/gate.sh." >&2
         return 1
     fi
@@ -69,7 +78,7 @@ if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
     if [ "$(sh devtools/worktree-tree.sh)" = "$before" ]; then
         echo "$before" >"$passed"
     fi
-    report_the_time || exit 1
+    report_the_cost || exit 1
     exit 0
 fi
 
@@ -98,6 +107,6 @@ echo "  openapi-check   SKIPPED (needs both halves)" >&2
 echo "  contract suite  SKIPPED (needs both halves)" >&2
 echo "Run 'make install', then 'make pre-commit', to check it properly." >&2
 
-report_the_time || failed=1
+report_the_cost || failed=1
 
 exit "$failed"
