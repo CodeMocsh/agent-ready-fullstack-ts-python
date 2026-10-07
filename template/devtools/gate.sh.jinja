@@ -12,9 +12,8 @@
 # until something runs `make gate`{% if github_ci %}, which the workflow does after a push{% endif %}.
 #
 # The runner measures the whole run in CPU-seconds and prints the result, because a gate
-# reaches minutes by degrees with nobody watching. BUDGET is a smoke alarm rather than a
-# target: it is a few times what the gate uses. Raise it in a commit that says what uses
-# more CPU and why that is the right trade.
+# reaches minutes by degrees with nobody watching. BUDGET is a limit, not a target. Raise it
+# in a commit that says what uses more CPU and why that is the right trade.
 set -eu
 
 BUDGET=60
@@ -67,7 +66,8 @@ report_the_cost() {
     echo "pre-commit: ${cpu} CPU-seconds of a ${BUDGET} budget, ${elapsed}s on the clock" >&2
     if [ "$cpu" -gt "$BUDGET" ]; then
         echo "  Over budget. Something uses more CPU. Find it before it becomes normal." >&2
-        echo "  \`time make pre-commit\` prints the phases. BUDGET lives in devtools/gate.sh." >&2
+        echo "  To find it, run \`time make <target>\` for each target on the Makefile's \`gate:\` line." >&2
+        echo "  BUDGET lives in devtools/gate.sh." >&2
         return 1
     fi
     return 0
