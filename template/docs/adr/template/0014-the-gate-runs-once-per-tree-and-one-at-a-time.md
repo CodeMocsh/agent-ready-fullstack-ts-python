@@ -39,13 +39,13 @@ does what the list cannot:
   `/tmp/<package_name>-pre-commit-<uid>.lock`. Two worktrees of one project queue. A second gate
   waits, and says on stderr which checkout holds the lock. `devtools/hold-the-gate.pl` takes it.
   `test_a_second_gate_waits_for_the_first_and_says_where_it_runs` holds this.
-- **It measures the run in CPU-seconds against `BUDGET`.** The measure is the CPU time that
-  `times` reports for the processes the runner waited for, and for the processes those waited for.
-  The wait for the lock adds nothing to it, and the load from other worktrees changes it little. A
-  green run over the budget fails after the runner records its pass, so a retried commit does not
-  run the gate again. `make gate` uses 19 to 24 CPU-seconds on the eighteen-core machine where the
-  template measured it, and the budget is about two and a half times that. A project whose gate
-  grows raises `BUDGET` in a commit that says why.
+- **It measures the run in CPU-seconds against `BUDGET`.** The measure is the CPU time that `times`
+  reports for the processes the runner waited for, and for the processes those waited for. The wait
+  for the lock adds nothing to it, and the load from other worktrees changes it little. A green run
+  over the budget fails after the runner records its pass, so a retried commit does not run the
+  gate again. A project sets `BUDGET` higher than the CPU-seconds its gate uses. It raises `BUDGET`
+  in a commit that says why. As the template ships it, `make gate` uses 19 to 24 CPU-seconds on the
+  eighteen-core machine where the template measured it.
   `test_a_gate_the_clock_alone_slows_is_within_budget`,
   `test_a_gate_that_works_past_its_budget_is_over_it` and
   `test_a_green_run_over_budget_fails_and_is_still_remembered_as_passed` hold this.
@@ -81,9 +81,9 @@ partial run is wrong there. CI needs neither the record nor the lock.
 - The budget does not see a gate that gets slower without more work: a new wait, or a check that
   loses its parallelism. The runner prints the seconds on the clock beside the CPU-seconds, and
   nothing holds them.
-- The measure grows a little with parallelism. Vitest runs at most one test file fewer than the
-  number of cores at once. The template measured 5.7 CPU-seconds for its frontend tests one file
-  at a time, and 7.5 with every file at once.
+- The measure grows with parallelism, because each worker a test runner starts uses CPU to start.
+  As the template ships them, the frontend tests use 5.7 CPU-seconds one file at a time, and 7.5
+  with every file at once.
 - `devtools/gate.sh` is rendered from `devtools/gate.sh.jinja`, because the lock carries the
   project's name.
 - The runner keeps its jobs in one file: which halves are installed, the record, the lock, the
