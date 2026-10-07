@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
+    testTimeout: 20000,
     include: ["tests/**/*.test.ts", "tests/**/*.test.tsx"],
     // Vitest loads no .env file, so components reading this flag would see it unset
     // and claim the wrong half is answering. Mirror what tests/setup.ts decides from

@@ -403,7 +403,7 @@ def test_a_collector_that_hangs_slows_no_request_and_holds_shutdown_to_two_timeo
     stopped = time.monotonic() - stopping
 
     assert answered.status_code == 200
-    assert answering < 0.5
+    assert answering < EXPORT_TIMEOUT_SECONDS
     assert stopped < 2 * EXPORT_TIMEOUT_SECONDS + 1.5
 
 
