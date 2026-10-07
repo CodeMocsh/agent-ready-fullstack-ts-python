@@ -39,6 +39,7 @@ if [ "${1:-}" = "--spec" ]; then
 fi
 
 export UV_EXCLUDE_NEWER="14 days"
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
 VARIANT=default
