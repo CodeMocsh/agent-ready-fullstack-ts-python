@@ -20,6 +20,7 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
 VARIANT="${1:-default}"
 FAST="${FAST:-0}"
 export UV_EXCLUDE_NEWER="14 days"
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RENDER="$REPO/devtools/render.sh"
