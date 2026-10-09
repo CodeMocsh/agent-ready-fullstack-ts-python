@@ -1169,6 +1169,27 @@ need_grep 'service_completed_successfully' deploy/compose.yaml
 # on the unix socket only, so a socket probe reports healthy while init is still running.
 need_grep 'pg_isready -h 127.0.0.1' deploy/compose.yaml
 need_no_grep 'pg_isready -q' Makefile
+
+need_grep '"127.0.0.1:\${DB_PORT:-5433}:5432"' deploy/compose.yaml
+awk '/^ *#/ { next }
+     /^ *ports:/ { if ($0 !~ /ports: *$/) exit 1; inside = 1; next }
+     inside && /^ *- / { if ($0 !~ /^ *- "127\.0\.0\.1:/) exit 1; next }
+     { inside = 0 }' deploy/compose.yaml \
+    || fail "deploy/compose.yaml publishes a port beyond 127.0.0.1"
+need_no_grep 'network_mode' deploy/compose.yaml
+awk '{ cmd = joined ? cmd " " $0 : $0; joined = /\\$/ }
+     joined { next }
+     { n = split(cmd, f, /[ \t]+/); on = 0
+       for (i = 2; i <= n; i++) {
+         if (f[i] == "run" && (f[i - 1] == "docker" || f[i - 1] == "container")) { on = 1; continue }
+         if (!on) continue
+         if (f[i] ~ /^--publish-all/ || f[i] ~ /^-[a-zA-Z]*P/) exit 1
+         if (f[i] ~ /^(-[a-zA-Z]*p|--publish)$/ && f[i + 1] !~ /^127\.0\.0\.1:/) exit 1
+         if (f[i] ~ /^(-[a-zA-Z]*p|--publish=)./ && f[i] !~ /^(-[a-zA-Z]*p|--publish=)127\.0\.0\.1:/) exit 1
+         if (f[i] ~ /;$/ || f[i] ~ /^(&&|\|\||\|)$/) on = 0 } }' Makefile \
+    || fail "a docker run in the Makefile publishes a port beyond 127.0.0.1"
+need_no_grep 'localhost:\$(' Makefile
+
 need backend/devtools/schema.py
 need_grep 'CREATE TABLE IF NOT EXISTS tasks' deploy/schema.sql
 need_grep 'applied_once' deploy/schema.sql
