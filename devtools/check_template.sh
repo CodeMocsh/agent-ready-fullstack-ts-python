@@ -1750,6 +1750,29 @@ if [ "$VARIANT" = "default" ]; then
         "cd '$NO_CI/backend' && '$OUT/backend/.venv/bin/python' -m pytest -q -p no:cacheprovider tests/test_gate.py"
 fi
 
+echo "==> assert basedpyright checks a call a test makes through the test client's portal"
+cat >backend/tests/test_portal_is_typed.py <<'PY'
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+
+async def needs(app: FastAPI) -> FastAPI:
+    return app
+
+
+def calls(client: TestClient) -> None:
+    assert client.portal is not None
+    client.portal.call(needs, 0)
+PY
+out="$(cd backend && uv run --no-sync basedpyright tests/test_portal_is_typed.py 2>&1)" && typed=no || typed=yes
+rm backend/tests/test_portal_is_typed.py
+[ "$typed" = yes ] || fail "basedpyright accepted an int where a FastAPI is expected: it sees TestClient.portal as Unknown"
+printf '%s\n' "$out" | grep -q 'reportCallIssue' || {
+    echo "basedpyright failed, but not on the call through the portal:" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+}
+
 echo "==> frontend: install, lint, test, build"
 run "pnpm install" pnpm -C frontend install --prefer-offline
 
