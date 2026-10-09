@@ -3,7 +3,7 @@ and an update never touches it, so add your own findings and variables here.
 
 `refuse_development_settings` is what `app/lifespan.py` calls before anything is built. The
 mechanism is re-exported, so the project's own code imports all of it from here.
-`docs/adr/template/0017`.
+`docs/adr/template/0015`.
 """
 
 from app.deployment import (

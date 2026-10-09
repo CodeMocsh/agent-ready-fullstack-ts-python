@@ -11,6 +11,7 @@ from app.deployment import (
     NOT_READ,
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
+    RESOURCE_ATTRIBUTES_ENV,
     SAMPLING_RATIO_ENV,
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
@@ -23,6 +24,7 @@ from app.wiring import (
     TelemetrySettings,
     TimeoutsMisconfigured,
     build,
+    build_service_version,
     build_telemetry,
     build_timeouts,
 )
@@ -120,6 +122,37 @@ def test_an_endpoint_without_a_name_refuses_to_start(monkeypatch: pytest.MonkeyP
 
     with pytest.raises(TelemetryMisconfigured, match=SERVICE_NAME_ENV):
         build_telemetry()
+
+
+def test_no_resource_attributes_is_no_version() -> None:
+    assert build_service_version() is None
+
+
+@pytest.mark.parametrize(
+    ("said", "version"),
+    [
+        ("service.version=1.4.2", "1.4.2"),
+        (" deployment.environment.name = prod , service.version = 1.4.2 ", "1.4.2"),
+        ("service.version=1.4.2%2Bbuild.7", "1.4.2+build.7"),
+        ("deployment.environment.name=prod", None),
+    ],
+)
+def test_the_version_is_read_from_the_resource_attributes_with_or_without_telemetry(
+    monkeypatch: pytest.MonkeyPatch, said: str, version: str | None
+) -> None:
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
+
+    assert build_service_version() == version
+
+
+@pytest.mark.parametrize("said", ["service.version", "=1.4.2", "service.version=1.4.2,"])
+def test_resource_attributes_that_are_not_key_value_pairs_refuse_to_start(
+    monkeypatch: pytest.MonkeyPatch, said: str
+) -> None:
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
+
+    with pytest.raises(TelemetryMisconfigured, match=RESOURCE_ATTRIBUTES_ENV):
+        build_service_version()
 
 
 def test_no_timeout_variable_is_the_shipped_bounds() -> None:

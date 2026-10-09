@@ -53,25 +53,41 @@ package_license:
     - None
 
 # Whether `copier update` keeps bringing the example resource, `tasks`. A project that has
-# replaced the example answers false once, and from then on an update neither changes its own
-# files at those paths nor re-adds the ones it deleted. A fresh copy always ships the example:
+# replaced the example records false in .copier-answers.yml before an update, and from then on an
+# update neither changes its own files at those paths nor re-adds the ones it deleted. Given on
+# the update itself, false deletes those files: the old render still has them and the new one
+# does not. A fresh copy always ships the example:
 # the rest of the template is built on it, so the answer only takes effect on an update.
 # docs/adr/0004-the-example-is-declined-on-update-and-never-on-copy.md says what was tried.
 example_resource:
   type: bool
   help: >-
-    Keep updating the example resource (`tasks`) on `copier update`? Answer no once your
-    project has replaced it.
+    Keep updating the example resource (`tasks`) on `copier update`? To stop, set it to false in
+    .copier-answers.yml and commit before you update. Changing it to no during an update deletes
+    the example's files, your edits included.
   default: true
 
 # The same, for the identity stub: `app/identity.py`, which resolves every request to the
 # sentinel tenant, and its tests. A project that has replaced it with real authentication
-# answers false once, and an update stops bringing the stub back.
+# records false the same way, and an update stops bringing the stub back.
 identity_stub:
   type: bool
   help: >-
-    Keep updating the identity stub (`app/identity.py`) on `copier update`? Answer no once your
-    project authenticates requests itself.
+    Keep updating the identity stub (`app/identity.py`) on `copier update`? To stop, set it to
+    false in .copier-answers.yml and commit before you update. Changing it to no during an
+    update deletes the stub and its tests, your edits included.
+  default: true
+
+# Whether the project ships a GitHub Actions workflow. Unlike the two questions above, this one
+# acts on a copy as well: a project hosted elsewhere, or one that runs its checks on its own CI,
+# answers false and gets no `.github/` and no test of a workflow. On an update, false removes the
+# workflow and its test, edited or not, because Copier removes a file the new render no longer
+# has. A project generated before this question existed keeps its `.github/` until it deletes it.
+github_ci:
+  type: bool
+  help: >-
+    Ship a GitHub Actions workflow that runs the gate and the Postgres tier on every pull
+    request and every push to main or master?
   default: true
 
 _exclude:
@@ -93,6 +109,9 @@ _exclude:
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/routes/test_guarantee.py{% endif %}"
+  # No workflow, and no test of one, for a project that runs its checks somewhere else.
+  - "{% if not github_ci %}.github{% endif %}"
+  - "{% if not github_ci %}backend/tests/test_workflow.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may
   # delete this one; it is excluded on update rather than skipped, so it never comes back.
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"
@@ -105,14 +124,24 @@ _exclude:
 
 # Written once and then the project's: an update adds one that is missing and never touches
 # one that exists. Each holds only a project's own list -- its refusals, what its production
-# refuses, its tiers, its model layering -- and the mechanism that reads it is a module the
-# template keeps updating. docs/adr/template/0017. A project cannot delete one of these, because
-# the template's code imports each, so `_skip_if_exists` never re-adds one somebody removed.
+# refuses, its tiers, its model layering, its log lines, how its browser tests sign in -- and the
+# mechanism around it is a module the template keeps updating. docs/adr/template/0015. A project
+# cannot delete one of these but log_lines.py, because the template's code imports each, so
+# `_skip_if_exists` never re-adds one somebody removed. A deleted log_lines.py returns empty.
 _skip_if_exists:
   - backend/app/errors.py
   - backend/app/environment.py
+  - backend/app/request_line.py
+  - backend/app/log_lines.py
   - backend/tests/tiers.py
   - backend/tests/models/layers.py
+  - frontend/e2e/signed-in.ts
+  # The docs AGENTS.md sends an agent to for a project's own detail. A project rewrites each with
+  # its own, so a template change to one would conflict on every update. A new project gets the
+  # template's first version; AGENTS.md links all three, so a deleted one comes back on update.
+  - docs/frontend.md
+  - docs/backend.md
+  - docs/development.md
 
 # Computed, never asked. The frontend package.json needs an SPDX expression, and npm
 # spells "no license" as UNLICENSED.
@@ -134,8 +163,8 @@ _message_after_copy: |
   Commit before `make install`: the installer activates this project's git hooks, and
   that needs a repository to install them into. Commit the lockfiles it produces too --
   no lockfile ships with the template, because a fresh project should resolve against
-  today's registry rather than the day the template was written, and CI installs from
-  the lockfiles with --frozen.
+  today's registry rather than the day the template was written{% if github_ci %}, and CI installs
+  from the lockfiles with --frozen{% endif %}.
 
   Then, in one terminal:
 

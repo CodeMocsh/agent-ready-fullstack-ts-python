@@ -31,7 +31,8 @@ _Avoid_: rendered template, output, instance
 **Example resource**:
 `tasks`, the one resource the template ships so every layer of a generated project has
 something real to carry. The store, the schema and the frontend are built on it, so a copy
-always includes it; `example_resource=false` only stops `copier update` bringing it.
+always includes it; `example_resource: false`, recorded before an update, only stops
+`copier update` bringing it.
 _Avoid_: demo, sample, worked example
 
 **Half**:

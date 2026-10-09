@@ -62,17 +62,26 @@ make build          # production build of the frontend
 make upgrade        # update dependencies, then regenerate the contract
 ```
 
-`make pre-commit` is what the git hook runs before a commit, and what
+{% if github_ci -%}
+`make gate` is what the git hook runs before a commit, through `make pre-commit`, and what
 `.github/workflows/ci.yml` runs after a push — one target, two moments, so a commit that
 skipped the hook is still checked. It needs no browser, no database daemon and no second
-terminal. The opt-in targets each need one
-of those, which is why they are opt-in. `ci.yml` also runs `make db-test` in a job of its own;
-nothing runs the others, so nothing will tell you that you did not run them.
+terminal. The opt-in targets each need one of those, which is why they are opt-in. `ci.yml`
+also runs `make db-test` in a job of its own; nothing runs the others, so nothing will tell you
+that you did not run them.
+{%- else -%}
+`make gate` is what the git hook runs before a commit, through `make pre-commit`. It needs no
+browser, no database daemon and no second terminal. The opt-in targets each need one of those,
+which is why they are opt-in. Nothing runs them, so nothing will tell you that you did not run
+them.
+{%- endif %}
 
-[AGENTS.md](AGENTS.md) is the map: the principles, the layout, the rules that bite, and an
-index into [docs/installation.md](docs/installation.md) for prerequisites,
-[docs/deployment.md](docs/deployment.md) for shipping it, and
-[docs/adr/](docs/adr/) for the decisions.
+[AGENTS.md](AGENTS.md) is the map: the principles, the rules nothing checks, and an index into
+[docs/frontend.md](docs/frontend.md) and [docs/backend.md](docs/backend.md) for the two halves,
+[docs/development.md](docs/development.md) for the gate and the tiers,
+[docs/installation.md](docs/installation.md) for prerequisites,
+[docs/deployment.md](docs/deployment.md) for shipping it, and [docs/adr/](docs/adr/) for the
+decisions.
 
 ## License
 

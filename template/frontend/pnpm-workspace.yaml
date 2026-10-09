@@ -35,11 +35,17 @@ trustPolicyExclude:
 # exempt every future release of it from the cool-off, which is a permanent hole
 # opened to close a temporary one. Once 3.3.19 exists, this entry buys nothing and
 # should go.
+#
+# source-map-js is the same case: it reaches this project through vite -> postcss,
+# and every version below 1.2.2 carries GHSA-68fv-2mgg-jv7q. Once 1.2.2 has aged
+# past the cool-off, its entry buys nothing and should go.
 minimumReleaseAgeExclude:
   - 'nanoid@3.3.18'
+  - 'source-map-js@1.2.2'
 
 overrides:
   nanoid: '^3.3.18'
+  source-map-js: '^1.2.2'
 
 # How long a `pnpm dlx` package stays usable from the store without re-resolving,
 # in minutes (30 days). The default is a day, which would mean `make openapi` --

@@ -1,5 +1,5 @@
-import { expect, test } from "@playwright/test";
 import { CANARY, nextClientEvent } from "./client-events";
+import { expect, test } from "./signed-in";
 
 test("an error nothing caught is recorded by its class, never by what it says", async ({
   page,

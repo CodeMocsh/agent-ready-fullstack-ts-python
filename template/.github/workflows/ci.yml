@@ -6,7 +6,7 @@ name: CI
 #
 # Not a list of steps that happens to match the gate. A re-listed copy drifts, always in
 # the direction of checking less, and the drift surfaces as a green push that a commit
-# would have refused. backend/tests/test_gate.py fails on a workflow that does not name
+# would have refused. backend/tests/test_workflow.py fails on a workflow that does not name
 # the target, and it reads this file with comments stripped, so naming it here would not
 # satisfy the check.
 #

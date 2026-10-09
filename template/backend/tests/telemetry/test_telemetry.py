@@ -24,7 +24,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from app import serve, telemetry
-from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
+from app.deployment import OTLP_ENDPOINT_ENV, RESOURCE_ATTRIBUTES_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
@@ -136,6 +136,42 @@ def everything_in(span: ReadableSpan) -> str:
             ],
         }
     )
+
+
+@pytest.fixture
+def versioned(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
+    """A version that needs decoding: the one two readers of the variable could read apart."""
+    monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, "service.version=1.4.2%2Bbuild.7")
+    yield from instrumented(monkeypatch, trust=False)
+
+
+def test_a_span_names_the_version_every_log_line_names(
+    versioned: Instrumented, logged: Logged
+) -> None:
+    """Two readers of one variable: the SDK for the spans, `app.wiring` for the log."""
+    versioned.client.get("/widgets")
+
+    [server] = versioned.servers()
+
+    assert server.resource.attributes["service.version"] == "1.4.2+build.7"
+    assert {line["service.version"] for line in logged()} == {"1.4.2+build.7"}
+
+
+@pytest.mark.parametrize(
+    "path", ["/widgets/does-not-exist", "/shelves/top/widgets/does-not-exist", "/no-route"]
+)
+def test_the_log_and_the_span_name_one_request_by_the_same_route(
+    untrusting: Instrumented, logged: Logged, path: str
+) -> None:
+    """Two readers of one route: the instrumentation for the span, `app.log` for the line. A
+    route that reads one way in the trace and another in the log cannot be joined across them."""
+    untrusting.client.get(path)
+
+    [server] = untrusting.servers()
+    [line] = [one for one in logged() if one["message"] == "request completed"]
+
+    assert server.attributes is not None
+    assert line["http.route"] == server.attributes.get("http.route")
 
 
 def test_a_request_is_one_server_span_named_by_its_route_with_only_declared_attributes(
@@ -262,6 +298,15 @@ def test_every_log_line_written_in_a_sampled_request_names_its_trace_and_span(
     assert len(line["span_id"]) == 16
 
 
+def test_a_span_outside_any_request_starts_no_trace(untrusting: Instrumented) -> None:
+    tracer = untrusting.instruments.tracer_provider.get_tracer(__name__)
+    for kind in set(SpanKind) - {SpanKind.SERVER}:
+        tracer.start_span("SELECT", kind=kind).end()
+    untrusting.client.get("/widgets")
+
+    assert [one.name for one in untrusting.finished()] == ["GET /widgets"]
+
+
 def test_a_request_sampled_out_exports_no_span_and_logs_no_trace_but_is_still_measured(
     unsampled: Instrumented, logged: Logged
 ) -> None:
@@ -358,7 +403,7 @@ def test_a_collector_that_hangs_slows_no_request_and_holds_shutdown_to_two_timeo
     stopped = time.monotonic() - stopping
 
     assert answered.status_code == 200
-    assert answering < 0.5
+    assert answering < EXPORT_TIMEOUT_SECONDS
     assert stopped < 2 * EXPORT_TIMEOUT_SECONDS + 1.5
 
 

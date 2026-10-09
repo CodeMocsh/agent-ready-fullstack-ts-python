@@ -3,348 +3,156 @@
 Instructions for AI coding agents working on {{ package_name }}. Follows the
 [AGENTS.md](https://agents.md) convention.
 
-This file is the principles, the map, and the index. Everything else is one link away — so a
-new rule belongs here only if it is a principle, and anything with detail in it goes in `docs/`
-with a pointer from here.
+This file holds the principles and the rules that nothing checks for you. A rule that a gate, a
+test or a check at startup enforces is not here, because its failure message tells you what to
+do. Detail is one link away.
 
 ## Approach
 
-You are a principal engineer. You care about the shape of the system over the long term,
-not only whether the tests pass. Elegance is less code doing more: every line must earn
-its keep.
+You are a principal engineer. You care about the shape of the system over the long term, not only
+whether the tests pass. Elegance is less code doing more: every line must have a purpose.
 
-Resolve ambiguity before building, not after. A request you could satisfy two different
-ways is a request you do not understand yet. Ask, or state the assumption you are
-proceeding on and why. Guessing and building is the expensive failure; asking costs one
-round.
+Resolve ambiguity before you build. If a request has two readings, ask, or state the assumption
+you proceed on and why.
 
-Code is the source of truth for behaviour; docs are the source of truth for intent. When
-they disagree the doc is wrong. Fix the doc, not the code.
+Code is the source of truth for behaviour; docs are the source of truth for intent. When they
+disagree, fix the doc.
 
-Tests validate outcomes, not implementation. A test earns its keep by failing when
-behaviour breaks: one that mirrors the implementation only makes refactoring expensive,
-and one that cannot fail is dead weight. Cover the seams and the edges that actually
-bite. Coverage percentage is not the goal, and deleting a test that no longer
-distinguishes anything is a real improvement.
+Tests validate outcomes, not implementation. A test is useful only if it fails when behaviour
+breaks. Delete a test that no longer distinguishes anything.
+
+**When you report, be extremely concise.** In a report, concision comes before grammar.
 
 ## Fail loudly
 
-No code path continues past a condition it did not plan for. Four bans, and both halves
-are in scope:
+No code path continues past a condition it did not plan for. In both halves:
 
 - No `except Exception`, and no `catch` that continues.
-- No default standing in for a failure — no `or {}`, no `?? []`, no quietly returned
-  `None` or `undefined`.
-- No failure signalled by a return value a caller can drop. If continuing would be
-  wrong, raise or throw.
+- No default in place of a failure: no `or {}`, no `?? []`, no quietly returned `None` or
+  `undefined`.
+- No failure signalled by a return value a caller can drop. Raise or throw.
 - No warning where the code cannot correctly proceed.
 
-**The first ban is mechanised on the backend half**: ruff's `BLE` refuses `except Exception`,
-and the one place a blind catch is right carries a line in `pyproject.toml` under
-`per-file-ignores` rather than a suppression at the point of pain. The other three bans, and
-the frontend half, are prose. A rule nothing enforces does not hold, so those are the ones
-that rot first.
-
-Not crashing is legitimate only when all three of these hold: the design plans for the
-condition, the contract names it, and the code reports it. Fewer than three, and it
-raises.
-
-This is not a style preference, because in an app with two halves **a silent failure
-looks like an empty screen**. A route that swallows a store error answers `200 []` and
-the table renders "No tasks yet". A `catch` around a mutation leaves the optimistic
-update on screen and the write on the floor. A mock handler that answers a case the
-backend refuses makes the contract suite green against a shape the real service never
-returns. Every one of those reads as working software — and a test that asserts the
-*absence* of an effect passes just as happily against the bug. Assert the failure
-itself.
-
-The contract is where this is cheapest to get right: declare every status code a route
-can return, with a model for anything that has a body, and the other half then cannot
-fail to handle it without a type error.
+Not crashing is legitimate only when the design plans for the condition, the contract names it,
+and the code reports it. In an app with two halves, a silent failure looks like an empty screen:
+a route that ignores a store error answers `200 []`, and the table says "No tasks yet". Assert
+the failure itself, never the absence of an effect.
 
 ## Zero comments
 
-No explanatory comments, no TODO/FIXME notes, no lint or type suppression directives
-(`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`), no
-commented-out code. Shebangs and TypeScript `///` directives are executable directives,
-not comments.
+No comments in source, tests or scripts, suppression directives included: `make lint` refuses
+them. Express intent through names, structure, types and tests.
 
-Express intent through names, structure, types, and tests. Rationale goes in the commit
-message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
-so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
-explanation.
-
-**An ADR cites nothing by section number.** Name the thing — the route, the function,
-the rule, the invariant — and let the reader grep. A section number points into one
-revision of one document, and an ADR outlives the document whose structure it borrowed.
-
-**A Python docstring is not a comment, and the gates already say so.** `comments.py`
-refuses comment tokens, and a docstring is a string bound to the symbol -- reachable
-through `help()`, part of the interface rather than an aside about the line below. A
-module, class or function may carry one. TypeScript has no equivalent: `/** */` is a
-comment token and `comments.mjs` refuses it, JSDoc included.
-
-What a docstring may say is the constraint. Contracts, not reasoning: behaviour, failure,
-timing, ownership, safe use. Link the rationale; don't restate it. One that walks through
-the body is the banned comment wearing a different quote character.
-
-Scope: source, tests, scripts. Config files may carry comments where the format offers no
-other way to explain a rule, and that includes `frontend/*.config.ts`, which is
-configuration that happens to be written in TypeScript. **Vendored and generated code is
-out of scope entirely.**
-
-**The rule is enforced, because on its own it does not hold.** `make lint` fails on any
-comment token under `frontend/{src,tests,e2e,devtools}` and `backend/{app,tests,devtools}`
-— `frontend/devtools/comments.mjs` and `backend/devtools/comments.py` are the two gates.
-An agent reads this file at the top of a session and explains in place anyway, because
-that is what the training data does. The suppression half is the half most worth
-mechanising: refusing the spelling turns a threshold decision taken silently at the point
-of pain into either a fix in the code or a reviewable line in `biome.json`,
-`tsconfig.json` or `pyproject.toml`.
+Rationale goes in the commit message. Only an architectural decision also goes in `docs/adr/`,
+and most decisions are not one: [what earns a file](docs/adr/README.md). A Python docstring may
+state a contract -- behaviour, failure, timing, ownership, safe use -- never the reasoning.
 
 ## Simplified technical English
 
-Every word a human or an agent reads is written the way ASD-STE100 says to write a maintenance
-manual: one idea per sentence, active voice, and one meaning per term. That covers prose and code
-alike — docs, commit messages, decisions, identifiers, test names, log lines, and the message a
-failure carries.
-
-**Take the rules, not the dictionary.** ASD-STE100 ships a controlled vocabulary chosen for
-aircraft maintenance, and this repo has its own nouns. `CONTEXT.md` is the word list that binds
-here: one term per concept, and that term every time the concept appears — in a sentence, in a
-symbol name, in the text of an error.
-
-This is what makes *Zero comments* affordable. With no comment to fall back on, the name and the
-failure message are the whole explanation, so they are worth the care the code gets.
-
-**When you report, be extremely concise.** Sacrifice grammar for concision.
+Write every word a person or an agent reads the way ASD-STE100 says: one idea per sentence,
+active voice, one meaning per term. That covers docs, commit messages, decisions, identifiers,
+test names, log lines and failure messages. `CONTEXT.md` is the word list: one term per concept,
+and that term every time.
 
 ## Layout
 
-Two halves and a root layer. Each half installs, lints, tests and builds without the
-other's toolchain: `pnpm` runs in `frontend/`, `uv` in `backend/`, `make` at the root fans
-out to both. There is no root `package.json`, and `pnpm install` at the root is meant to
-fail.
+Two halves and the root. `pnpm` runs in `frontend/`, `uv` in `backend/`, and `make` at the root
+fans out to both. Each half works without the other's toolchain.
 
-```
-openapi.json          the contract -- generated from the backend, committed
-Makefile              the interface across both halves
-CONTEXT.md            the vocabulary
-docs/adr/             decisions that would otherwise look like they could be simpler;
-                      template/ holds the ones that came with the template
+- `openapi.json` is the contract, generated from `backend/app/`. `frontend/src/mocks/` is a
+  second implementation of it, and every component test runs against it.
+- `CONTEXT.md` is the vocabulary, and `docs/adr/` the architectural decisions.
+- The tree and its detail are in [docs/frontend.md](docs/frontend.md),
+  [docs/backend.md](docs/backend.md) and [docs/development.md](docs/development.md).
 
-frontend/             everything pnpm touches
-  src/api/            the contract: base.ts, client.ts, types.ts, schema.ts (generated)
-  src/mocks/          the fake implementation of that contract -- permanent, not a scaffold
-  src/components/     UI; ui/ is vendored shadcn
-  src/index.css       the @theme block -- see the theme rule below
-  src/router.tsx      routes
-  src/client-events.ts reports a failure the browser saw to the backend's log
-  tests/              mirrors src/
-  e2e/                Playwright; *.live.spec.ts needs a running backend
-  devtools/           the frontend's own gates, and the scanner they share
+## The rules nothing checks
 
-backend/              everything uv touches
-  app/main.py         builds the FastAPI app
-  app/models/         the pydantic models the contract is made of, layered
-  app/routes/         the endpoints, a module per what a caller presents
-  app/refusal.py      how a route says no: ApiError and responses(...)
-  app/errors.py       every refusal a route can answer, once each -- yours
-  app/deps.py         what a route is handed
-  app/wiring.py       what this deployment configured, read from the environment
-  app/deployment.py   the variables' names, and how production refuses
-  app/environment.py  what production refuses to carry -- yours
-  app/lifespan.py     what this process runs; reads no variable
-  app/serve.py        the one-origin entrypoint: app.main plus the frontend bundle
-  app/identity.py     which tenant a request is -- ships as a stub returning "default"
-  app/log.py          every line the application logs, and the only importer of logging
-  app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
-  app/store/          the data layer; ddl.py is the schema, as data
-  tests/              mirrors app/, except tests/integration/, which is a tier
-  tests/tiers.py      what a tier needs and what runs it
-  tests/test_gate.py  tests the repository rather than the app
+**Every change**
 
-deploy/               schema.sql and roles.sql -- generated from app/store/
-```
-
-## The rules that bite
-
-Each of these is something a reasonable edit undoes without anything failing until later.
-
-**The contract**
-
-- `openapi.json` and `frontend/src/api/schema.ts` are generated from
-  `backend/app/`. Change the backend, run `make openapi`, commit all three. Never hand-edit
-  either artifact, and never hand-merge one: take a side and regenerate.
-- **Some files are yours after the first copy.** `copier.yml` lists them under
-  `_skip_if_exists`, and an update never touches them. Each holds only your list; the module
-  that reads it is the template's, and keeps updating.
-- **After `copier update`, run `make openapi` and `make lint`.** An update never touches
-  `openapi.json`, `schema.ts` or `backend/.complexity-baseline.json`, because each is generated
-  from your code; those two targets write them again.
-- Declare every status code a route can return, with a `model` for anything that has a
-  body. An undeclared code is invisible to the other half. A refusal is a class in
-  `app/errors.py`: raise it, and name it in `responses(...)` on the route.
-- A route lives under the `app/routes/` module for what its caller presents, never beside
-  routes that ask for something else.
-- Every `frontend/tests/api/*contract.test.ts` runs against the mock handlers and against
-  the real backend. Assert shapes, status codes and the `detail` a refusal carries — never
-  seed data, which the two implementations differ on by design.
-
-**Tests**
-
-- **No test skips itself.** A test that needs a daemon or a browser goes in a tier
-  declared in `backend/tests/tiers.py`. Everything else mirrors the source it covers. A
-  skip exits 0 and looks like a pass, so `test_gate.py` fails on one.
-- **The gate is `make gate`.** The git hook runs it through `make pre-commit` before a
-  commit, and `.github/workflows/ci.yml` runs it directly after a push, against a fresh
-  checkout nobody configured. New checks go in `make gate`, never into the workflow: a
-  workflow that re-lists the steps is a second copy, and the copy is the one that goes stale.
-- **`make secrets` is in the gate.** gitleaks reads the tree the gate certifies. A finding is
-  removed and the secret rotated, or, when it is no secret at all, its fingerprint goes in
-  `.gitleaksignore`.
-- **Run `make pre-commit`, then commit: the gate runs once.** `devtools/gate.sh` queues
-  behind any other gate of this project and records the tree a green run read, so a commit of
-  that same tree passes at once. Edit one byte and the gate runs again.
-- **The tiers are deliberately outside it** — `make test-e2e`, `make test-e2e-live`,
-  `make db-test` and `make observe-test` each need something fetched or started first, and a
-  gate that fetches a browser or a daemon is a gate people learn to commit around.
-  `ci.yml` runs `db-test` in a job of its own after a push. Nothing runs the others, so
-  nothing will tell you that you did not run them: `test-e2e` after a UI change,
-  `observe-test` after touching `app/telemetry.py`. Run `db-test` yourself after touching
-  `app/store/` or `deploy/` too, because a failure after a push reaches you late.
-- **You have a browser. Use it.** After a UI change, run the app and look at it rather
-  than inferring from the JSX. A screenshot is evidence; reading markup is a guess.
-
-**Vendored and generated code — do not tidy**
-
-- `frontend/src/components/ui/**`, `frontend/src/lib/utils.ts` and
-  `frontend/public/mockServiceWorker.js` were written by a tool. You may change what they
-  *do*; do not reformat them, strip their comments, or restyle them to match house rules.
-- `openapi.json` and `frontend/src/api/schema.ts` are regenerate-only. A hand edit is a bug.
-- `pnpm dlx shadcn add` does not put everything in `src/components/ui`. A block, a chart, a
-  hook or a lib file lands in ordinary scanned source and will fail `make lint` in shadcn's
-  idiom. Fix the values to tokens, or add that one path to `conformance.exclude` — never
-  `conformance.allow`, which matches text rather than path.
+- Never hand-edit or hand-merge a generated file. Take a side and regenerate: `make openapi` for
+  the contract, `make schema` and `make roles` for `deploy/`.
+- Run `make pre-commit`, then commit. The gate runs once per tree. A run that skipped a half says
+  so on stderr; read that before you believe the green.
+- When a complexity gate fails, split the function. Do not raise a threshold to get green.
+- Do not restyle vendored code: `frontend/src/components/ui/**`, `frontend/src/lib/utils.ts`,
+  `frontend/public/mockServiceWorker.js`. Regenerate the worker with
+  `pnpm -C frontend exec msw init public --save`.
+- When a `copier update` conflicts in a file the template owns, fix it in the template, or report
+  it there, so the next update does not conflict. A conflict in a file this project rewrote is
+  resolved here. [docs/installation.md](docs/installation.md) lists the steps after an update.
+- The tiers are outside the gate, so nothing tells you that you skipped one. Run `make db-test`
+  after touching `app/store/` or `deploy/`, `make observe-test` after touching
+  `app/telemetry.py`, and `make test-e2e` after a UI change.
+- After a UI change, run the app and look at it. A screenshot is evidence; reading markup is a
+  guess.
 
 **Frontend**
 
-- **Never fetch in a `useEffect`.** Server state comes from TanStack Query hooks against
-  `src/api/client.ts`. Effects are for synchronising with something outside React.
-- **The theme is the only place a colour, a type size or a spacing step is defined.** A hex
-  literal, a palette step like `bg-blue-500`, a `text-[13px]`, a `p-[7px]` or an opacity
-  modifier like `bg-primary/80` fails `pnpm conformance`. Add a token to `src/index.css`.
-- **Icon stroke comes from `--icon-stroke`**, not from the call site.
-- **Never assume the app is served from `/`.** The worker registration, `src/api/base.ts`
-  and the router basepath all derive from `import.meta.env.BASE_URL`.
-- **Do not delete `src/mocks/`** when the backend feels real enough. It is the fixture
-  layer every component test runs against.
-- **A component file is named for what it exports**, in kebab-case: `task-list.tsx` exports
-  `TaskList`. The file name is how anything finds a component without reading it.
-- **Export a function, not an arrow.** `export function load()`, never
-  `export const load = () => …` — a declaration names itself; an assignment does not.
-- **A file holds no more non-blank lines than `complexity.maxFileLines`**, JSX included, and
-  `pnpm file-length` refuses one past it. Split by what the parts require of a caller. A
-  file that must stay whole goes in `complexity.overCap` by name; biome's own file-length
-  rule cannot see JSX and is not the gate.
-- Use the `@/` alias for anything under `src/`. TypeScript is `strict`, plus
-  `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`.
-- **There is no `.env.production`, on purpose.** Production mode loads no env file, so mock
-  mode is off because nothing turns it on — do not add one, or you create the file in which
-  someone can switch it back on. `public/` is copied into every build whatever the mode, so
-  the `strip-mock-worker` plugin in `vite.config.ts` covers what no mode can; without it a
-  production deploy ships `mockServiceWorker.js` to its own origin.
-- **Record a failure through the function `startClientEvents` returns**, never through
-  `console`, which biome refuses in `src/`. A client event names a kind, a route template and an
-  error class, and never carries a message: an error's message is where a user's input ends up.
-- The agent guard blocks writes to any `.env*` file. If one needs to change, say so and let
-  a human edit it.
+- Never fetch in a `useEffect`, and never through a function an effect calls. Server state comes
+  from TanStack Query hooks against `src/api/client.ts`. `pnpm conformance` sees only a `fetch`,
+  an `await` or a `.then` written in the effect itself.
+- Never assume the app is served from `/`. Derive every path from `import.meta.env.BASE_URL`.
+- Do not add `.env.production`. Nothing tests for one, and it is the file in which mock mode
+  can be switched back on.
+- A mock handler refuses every case the backend refuses. A mock that answers one makes the
+  contract suite pass against a shape the real service never returns.
+- Contract tests assert shapes, status codes and a refusal's `detail`, never seed data.
+- When `pnpm dlx shadcn add` puts a file in scanned source and `make lint` fails on it, change
+  the values to tokens, or add that one path to `conformance.exclude`. Never use
+  `conformance.allow`: it matches text, so it permits that text in every file.
 
 **Backend**
 
-- **Log through a function in `app/log.py`.** ruff refuses `logging` and `structlog` outside
-  `app/log.py` and `tests/log/`, and `print` outside `devtools/`. A field is a parameter
-  somebody declared, so never pass a body, a path, a query string or an exception's message.
-  `tests/log/test_log.py` holds a canary to that.
-- **A span attribute leaves the process only if `SPAN_ATTRIBUTES` in `app/telemetry.py` names
-  it**, and a metric attribute only if `METRIC_ATTRIBUTES` does. Never a path, a query string,
-  a header, an address, query text, a tenant or a user. `tests/telemetry/` holds a canary to
-  that.
-- **`app/wiring.py` reads the environment and builds from it; `app/deployment.py` names
-  the variables and refuses, in production, what `app/environment.py` says only development
-  may carry; `app/lifespan.py` reads nothing.** A `build_` function that reads no variable belongs in `lifespan.py`. Everything
-  below them takes its DSN, schema and migrate mode as arguments. Nothing degrades from
-  Postgres to memory: a bad `DATABASE_URL` fails at boot, and an unset one is refused unless
-  `APP_ENV=development`.
-- **Never widen the store's surface to take a tenant.** `Database.store(tenant_id)` is the
-  only way to get one, and the tenant is a parameter on no method. A store you can hold is
-  a store already scoped.
-- **Every index on a tenant table leads with `tenant_id`**, or the policy's predicate
-  cannot be satisfied and Postgres scans. Right answers, quietly slower, until the table is
-  too large to fix cheaply.
-- **Migrations are additive, and the application never applies them.** No `DROP COLUMN`, no
-  `ALTER COLUMN ... TYPE`, no `RENAME`. `make migrate` applies; `make schema` and
-  `make roles` regenerate the committed artifacts in `deploy/`.
-- **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key, and
-  `make migrate` runs all of them every time. Never edit a shipped entry: a column added
-  later lands twice, once in its table's `CREATE` and once in the `0200_` repair band.
-  `.schema-baseline.json` records each body and `make test` refuses the edit. Run
-  `make schema` and commit both files.
-- **The application must never see `DATABASE_OWNER_URL`.** It refuses to start if it can.
-- **Do not delete `MemoryDatabase`** when Postgres feels real enough. The gate runs on it
-  and must not need a daemon, and one implementation of a `Protocol` is a shape nothing
-  checks.
-- Seed rows are asserted in `tests/routes/test_tasks.py` and nowhere else. Memory hands out
-  `"1"`, Postgres hands out uuids — pattern-match neither.
+- A route goes in the `app/routes/` module for what its caller presents.
+- Two writers at once both succeed. Shape a write that another can race, cheapest first: append or
+  merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
+  in the route and write in the store afterwards. A race only shows on Postgres, so its test goes
+  in `tests/integration/`.
+- Never widen the store's surface to take a tenant. `Database.store(tenant_id)` is the only way
+  to get a store, and no store method takes a tenant.
+- A policy compares one column to one setting, never a join or a row-dependent function.
+- A new column on a shipped table goes in its `CREATE` and in a repair entry. Without the repair
+  entry, a database that already ran the `CREATE` never gets the column.
+  [docs/backend.md](docs/backend.md) says how.
+- Never log or trace a body, a path, a query string, an address or an exception's message. A log
+  field is a parameter of a function in `app/log_lines.py`.
 
-**Both halves**
+**Dependencies**
 
-- When a complexity gate fails, **split the function.** Raising a threshold or re-recording
-  a baseline upward is a deliberate, reviewable decision, not the way to green. `make lint`
-  lowers a stale baseline for you, and re-records one the codebase moved by changing size
-  rather than shape; either change belongs in your commit.
-- A **supply-chain cool-off** applies in both halves, so a package published in the last
-  fortnight will not resolve — including via `pnpm dlx shadcn add`. Commit both lockfiles.
+- A package published in the last fortnight does not resolve, in either half, and that includes
+  `pnpm dlx shadcn add`. Pick an older version. Commit both lockfiles.
 
 ## Commands
 
 ```bash
-make install        # both halves, then activate the versioned git hooks
-make pre-commit     # the gate: secrets + lint-check + openapi-check + test, once per tree
+make install        # both halves, then the git hooks
+make pre-commit     # the gate, once per tree
 make dev            # both halves: backend :8000, frontend :5173, live mode
-make dev-frontend   # frontend only, mock mode -- no backend required
-make lint           # auto-fix and lint both halves (lint-check is the check-only variant)
+make dev-frontend   # frontend only, mock mode
+make lint           # auto-fix and lint both halves
 make test           # both halves, then the contract suite against the real backend
 make openapi        # regenerate the contract artifacts
-make db             # a Postgres to develop against; prints the DATABASE_URL to export
-make observe        # Grafana, Tempo and Prometheus locally; prints the OTEL_* to export
-make build          # production build of the frontend
+make db             # a Postgres to develop against
 ```
 
-The `Makefile` is the full list — the tiers, the migration targets and the per-half variants
-as well. Each script under `devtools/` explains what it does and why, at the top.
-`BACKEND_PORT`, `FRONTEND_PORT` and `PREVIEW_PORT` move every server, so a second checkout can
-run at the same time.
-
-Or work in one half with its own tools — `pnpm -C frontend test:watch`,
-`pnpm -C frontend add some-package`, `cd backend && uv run pytest -q tests/routes/`,
-`cd backend && uv add some-package`.
+The `Makefile` is the full list. [docs/development.md](docs/development.md) says what each tier
+needs and how to work in one half.
 
 ## Where to read more
 
 | | |
 |---|---|
 | [CONTEXT.md](CONTEXT.md) | the glossary, and why renaming `tenant_id` is a day-one decision |
+| [docs/frontend.md](docs/frontend.md) | the frontend tree, vendored code, the theme and the conventions |
+| [docs/backend.md](docs/backend.md) | the backend tree, the contract, the conventions, the store and the schema |
+| [docs/development.md](docs/development.md) | the root tree, the gate, the tiers, the comment ban, working in one half |
 | [docs/schema.md](docs/schema.md) | what the migration system is, what it will not do, and how to move to Alembic |
-| [docs/deployment.md](docs/deployment.md) | serving the two halves, the release step, and two ways to ship something broken |
+| [docs/deployment.md](docs/deployment.md) | serving the two halves, the release step, and ways to ship something broken |
 | [docs/installation.md](docs/installation.md) | prerequisites, and taking a later template update |
-| [docs/adr/](docs/adr/) | the decisions, and [when to write one](docs/adr/README.md) |
+| [docs/adr/](docs/adr/) | the decisions, and [when one earns a file](docs/adr/README.md) |
 
 This project was generated from
 [agent-ready-fullstack-ts-python](https://github.com/CodeMocsh/agent-ready-fullstack-ts-python)
-and can receive its later changes — see `docs/installation.md`. It ships
-[Entire](https://entire.io) session hooks and an agent guard in `.claude/`; both are
-optional; the guard says why it refused, in the refusal. Entire pushes each session to the
-remote as `refs/entire/*` once its CLI is installed, so `enabled: false` in
-`.entire/settings.json` is what a repository with readers you do not choose wants.
-
+and can take its later changes: see `docs/installation.md`. Entire session hooks and an agent
+guard ship in `.claude/`. Entire pushes each session to the remote as `refs/entire/*`, so set
+`enabled: false` in `.entire/settings.json` if people you do not choose can read the repository.

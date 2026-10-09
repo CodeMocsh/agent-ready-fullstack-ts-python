@@ -2,7 +2,7 @@
 
 The project owns this module: the template writes it once and an update never touches it, so
 add your refusals here. Raise one, and name it in `responses(...)` on the route.
-`app/refusal.py` is the mechanism. `docs/adr/template/0017`.
+`app/refusal.py` is the mechanism. `docs/adr/template/0015`.
 """
 
 from typing import final

@@ -47,7 +47,7 @@ hooks:
 # The gate. `gate` is the list and the place a new check goes; `pre-commit` is how it is
 # run, by the hook and by hand alike: queued behind any other gate of this project, held
 # to a budget, and skipped for a tree that already passed -- devtools/gate.sh, and
-# docs/adr/template/0015 for why. CI runs `gate` itself, so nothing there is skipped.
+# docs/adr/template/0014 for why. A CI runs `gate` itself, so nothing there is skipped.
 # backend/tests/test_gate.py fails if the list, the runner and the hook stop agreeing.
 pre-commit:
 	@sh devtools/gate.sh
@@ -115,7 +115,7 @@ ifdef TEST_DATABASE_URL
 else
 	@name=db-test-$$$$; \
 	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
-	docker run -d --rm -P -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
+	docker run -d --rm -p 127.0.0.1::5432 -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
 	port=$$(docker port $$name 5432/tcp | head -1 | sed 's/.*://'); \
 	printf 'postgres on %s' "$$port"; \
 	until docker exec $$name pg_isready -h 127.0.0.1 -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
@@ -164,7 +164,7 @@ observe-test:
 test-contract-db:
 	@name=contract-db-$$$$; \
 	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
-	docker run -d --rm -P -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
+	docker run -d --rm -p 127.0.0.1::5432 -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
 	port=$$(docker port $$name 5432/tcp | head -1 | sed 's/.*://'); \
 	printf 'postgres on %s' "$$port"; \
 	until docker exec $$name pg_isready -h 127.0.0.1 -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
@@ -206,13 +206,13 @@ export POSTGRES_PASSWORD = $(DB_SUPERUSER_PASSWORD)
 
 db:
 	docker compose -f $(COMPOSE) up -d --wait postgres
-	@cd backend && DATABASE_OWNER_URL=postgres://postgres:$(DB_SUPERUSER_PASSWORD)@localhost:$(DB_PORT)/postgres \
+	@cd backend && DATABASE_OWNER_URL=postgres://postgres:$(DB_SUPERUSER_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres \
 		uv run --no-sync python -m app.migrate
 	@echo ""
 # The printed URL assumes APP_DB_PASSWORD needs no percent-encoding, which the default does
 # not. It is a convenience for a local development database; a real deployment sets
 # DATABASE_URL itself and never comes through here.
-	@echo "export DATABASE_URL=postgres://app_app:$(APP_DB_PASSWORD)@localhost:$(DB_PORT)/postgres"
+	@echo "export DATABASE_URL=postgres://app_app:$(APP_DB_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres"
 	@echo "# then: make dev-backend. That role holds DML and no CREATE, so the app verifies"
 	@echo "# the schema and cannot apply it -- run 'make migrate' when you add an entry."
 
@@ -221,13 +221,13 @@ db:
 observe:
 	docker compose -f $(COMPOSE) --profile observe up -d --wait observe
 	@echo ""
-	@echo "export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:$(OTLP_PORT) OTEL_SERVICE_NAME=api"
-	@echo "# then: make dev. Grafana is on http://localhost:$(OBSERVE_PORT) -- Explore, then Tempo"
+	@echo "export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:$(OTLP_PORT) OTEL_SERVICE_NAME=api"
+	@echo "# then: make dev. Grafana is on http://127.0.0.1:$(OBSERVE_PORT) -- Explore, then Tempo"
 	@echo "# for traces and Prometheus for http_server_request_duration_seconds."
 
 # Isolation, made visible. Everything else about it is proved by tests nobody watches.
 db-demo:
-	@cd backend && DATABASE_URL=$${DATABASE_URL:-postgres://app_app:$(APP_DB_PASSWORD)@localhost:$(DB_PORT)/postgres} \
+	@cd backend && DATABASE_URL=$${DATABASE_URL:-postgres://app_app:$(APP_DB_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres} \
 		uv run --no-sync python devtools/isolation_demo.py
 
 # deploy/schema.sql, deploy/roles.sql and backend/.schema-baseline.json are generated from

@@ -9,8 +9,8 @@ const USAGE = `usage: node devtools/comments.mjs <paths...> [options]
 
   --exclude <pattern>   skip a path; repeatable, and trailing /** is optional
 
-Reads comments.exclude from package.json as well. See AGENTS.md for
-what this refuses, and for the two things it deliberately does not read.`;
+Reads comments.exclude from package.json as well. See docs/development.md
+for what this refuses, and for the two things it deliberately does not read.`;
 
 function isDirective(text, index) {
   const lineStart = text.lastIndexOf("\n", index) + 1;
@@ -58,8 +58,8 @@ function report(found) {
   process.stderr.write(
     `\nFAIL: ${count(found.length, "comment")} above. AGENTS.md bans them, and the\n` +
       "rule is not about tidiness: an explanation beside the code is the copy that\n" +
-      "goes stale silently. Rationale belongs in the commit message, a decision in\n" +
-      "docs/adr/, and a contract in a name or a type.\n\n" +
+      "goes stale silently. Rationale belongs in the commit message, an architectural\n" +
+      "decision also in docs/adr/, and a contract in a name or a type.\n\n" +
       "A suppression is the half most worth refusing. `biome-ignore` and\n" +
       "`@ts-expect-error` are threshold decisions taken silently at the point of\n" +
       "pain; make it a fix in the code, or a reviewable line in biome.json or\n" +

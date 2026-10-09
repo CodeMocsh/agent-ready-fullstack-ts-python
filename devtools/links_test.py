@@ -54,6 +54,8 @@ CASES = (
     Case("an address", {"a.md": "[m](mailto:someone@example.com)\n"}, 0, never_says=("mailto",)),
     Case("a path that resolves", {"a.md": "[up](./docs/x.md)\n"}, 0),
     Case("a bare filename the tree answers", {"a.md": "the layout lists `x.md`\n"}, 0),
+    Case("a rendered name whose source is jinja",
+         {"a.md": "see `docs/t.md`\n", "template/docs/t.md.jinja": "# T\n"}, 0),
     Case("a path relative to a directory this does not have",
          {"sub/deep/m.py": 'DOC = "../../x.md"\n'}, 0),
     Case("anything under a directory the sweep skips, listed by git",

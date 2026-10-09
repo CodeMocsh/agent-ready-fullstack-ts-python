@@ -20,6 +20,7 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
 VARIANT="${1:-default}"
 FAST="${FAST:-0}"
 export UV_EXCLUDE_NEWER="14 days"
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RENDER="$REPO/devtools/render.sh"
@@ -305,6 +306,65 @@ python3 "$REPO/devtools/links.py" "$OUT" \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     || fail "the generated project names a document that does not exist, or orphans one."
 
+echo "==> assert decision records are numbered from 0001 with no gaps"
+# Numbers are a reading order -- docs/adr/README.md. A gap is a record removed or moved
+# without the renumbering the rule asks for, and a repeat is two branches that both took a
+# number. Both fail here, in the change that made them.
+numbered_without_gaps() {
+    expected=1
+    for record in "$1"/[0-9][0-9][0-9][0-9]-*.md; do
+        [ -e "$record" ] || return 0
+        want="$(printf '%04d' "$expected")"
+        [ "$(basename "$record" | cut -c1-4)" = "$want" ] \
+            || fail "$1: record $want is next, and $(basename "$record") is there. Renumber, and update every citation in the tree in the same change."
+        expected=$((expected + 1))
+    done
+}
+GAPPED="$(mktemp -d)"
+touch "$GAPPED/0001-a.md" "$GAPPED/0003-c.md"
+if (numbered_without_gaps "$GAPPED") 2>/dev/null; then
+    fail "numbered_without_gaps passed a gap, so the sweep below would prove nothing."
+fi
+rm -rf "$GAPPED"
+for records in "$REPO/docs/adr" "$OUT/docs/adr/template" "$OUT/docs/adr"; do
+    numbered_without_gaps "$records"
+done
+
+echo "==> assert a test the template owns stands without the identity stub"
+# identity_stub=false hands app/identity.py, its tests and the tenant routes' guarantee to a
+# project that replaces the seam, under whatever names it chooses. A test the template keeps
+# updating that reaches for the seam, the tenant requirement or the stub's doubles fails to
+# import there, on the first update after it lands. copier.yml names the stub's files.
+python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || fail "a test the template owns depends on the identity stub"
+import ast
+import re
+import sys
+from pathlib import Path
+
+copier, backend = Path(sys.argv[1]).read_text(), Path(sys.argv[2])
+owned = set(re.findall(r"not (?:identity_stub|example_resource) and _copier_operation == 'update' %\}backend/([^{]+)\{%", copier))
+if not owned:
+    sys.exit("check: copier.yml names no file for identity_stub, so this check would pass over nothing")
+REACHES = ("tenant_for", "app.routes.tenant", "tests.identity")
+found = []
+for test in sorted((backend / "tests").rglob("*.py")):
+    if str(test.relative_to(backend)) in owned:
+        continue
+    for node in ast.walk(ast.parse(test.read_text())):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names = [node.module, *(f"{node.module}.{one.name}" for one in node.names), *(one.name for one in node.names)]
+        elif isinstance(node, ast.Import):
+            names = [one.name for one in node.names]
+        else:
+            continue
+        hits = [name for name in names if name in REACHES or name.startswith(("app.routes.tenant.", "tests.identity."))]
+        if hits:
+            found.append(f"{test.relative_to(backend)}:{node.lineno} imports {hits[0]}")
+for line in found:
+    print(f"check: {line}, which a project that replaced the identity seam does not have", file=sys.stderr)
+sys.exit(1 if found else 0)
+PY
+
 echo "==> assert every workflow is valid, here and in what ships"
 # A workflow cannot report its own breakage. A malformed check.yml does not fail the
 # check -- it fails to start, and the pull request shows nothing where the gate should
@@ -384,7 +444,7 @@ done
 split="$(sort -u "$WORK/action-pins" | awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' | sort | tr '\n' ' ')"
 [ -z "$split" ] || fail "pinned to more than one commit across both trees: ${split% }. Pin every use of that action to one commit; .github/dependabot.yml bumps both trees in one pull request."
 
-# The generated project's backend/tests/test_gate.py refuses a workflow that re-lists the
+# The generated project's backend/tests/test_workflow.py refuses a workflow that re-lists the
 # gate's steps instead of naming the target. This repo asserts the same of its own, because
 # a rule the template asserts and its own generator ignores is a rule nobody believes.
 #
@@ -547,6 +607,65 @@ PY
         grep -q "^$question: false$" "$DECLINED/.copier-answers.yml" \
             || fail "$question=false is not recorded, so the next update would bring its files back"
     done
+
+    echo "==> assert a project that declines keeps its own files through an update"
+    # An update renders the old version with the project's last answers. Flip a question with
+    # --data on the update itself and the old render still holds the owned files while the new
+    # one does not, so Copier deletes them, edited or not. template/docs/installation.md has
+    # the answer recorded in .copier-answers.yml first. This holds the template to that
+    # procedure: an owned file the project edited survives an update that changes it in the
+    # template, with the project's edit and without the template's.
+    G="git -c user.email=check@example.com -c user.name=check -c commit.gpgsign=false"
+    BASE="$(sh "$RENDER" --into "$WORK/update")"
+    MARK="kept by the project"
+    OWNED="$(sed -n "s/.*not [a-z_]* and _copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
+    (
+        cd "$BASE"
+        git init -q && $G add -A && $G commit -qm copy
+        for owned in $OWNED; do echo "$MARK" >>"$owned"; done
+        sed -i.bak -e 's/^example_resource: true$/example_resource: false/' \
+            -e 's/^identity_stub: true$/identity_stub: false/' .copier-answers.yml
+        rm .copier-answers.yml.bak
+        grep -q '^example_resource: false$' .copier-answers.yml \
+            && grep -q '^identity_stub: false$' .copier-answers.yml \
+            || fail "the answers were not recorded false, so the update below declines nothing"
+        $G commit -qam "the project replaces the example and the stub"
+    )
+    for owned in $OWNED; do
+        [ -f "$WORK/update/src/template/$owned" ] || fail "copier.yml owns $owned, which the template does not have"
+        echo "a later template change" >>"$WORK/update/src/template/$owned"
+    done
+    echo "a later template change" >>"$WORK/update/src/template/docs/schema.md"
+    $G -C "$WORK/update/src" commit -qam "a later template"
+    (cd "$BASE" && uvx --exclude-newer "14 days" "$COPIER_SPEC" update --defaults --quiet \
+        --trust --vcs-ref=HEAD) >"$WORK/update.log" 2>&1 \
+        || { cat "$WORK/update.log" >&2; fail "copier update failed on a project that declined both questions"; }
+    grep -q "a later template change" "$BASE/docs/schema.md" \
+        || fail "the update did not bring the later template, so the check below proves nothing"
+    for owned in $OWNED; do
+        [ -f "$BASE/$owned" ] || fail "an update after declining deleted $owned"
+        [ "$(tail -1 "$BASE/$owned")" = "$MARK" ] || fail "an update after declining overwrote $owned"
+        ! grep -q "a later template change" "$BASE/$owned" \
+            || fail "an update after declining still brought the template's change to $owned"
+    done
+
+    echo "==> assert a copy without the GitHub workflow names no workflow"
+    # github_ci=false acts on a copy, unlike the two questions above. The workflow and its test
+    # go together: the test alone fails on a missing workflow, and the workflow alone is a
+    # file the project asked not to have. A doc that still sends the reader to ci.yml is the
+    # quiet half of the same failure.
+    NO_CI="$(sh "$RENDER" --into "$WORK/no-ci" -- --data github_ci=false)"
+    [ ! -e "$NO_CI/.github" ] || fail "a copy with github_ci=false still ships .github/"
+    [ ! -e "$NO_CI/backend/tests/test_workflow.py" ] \
+        || fail "a copy with github_ci=false still ships the test of a workflow it does not have"
+    grep -q '^github_ci: false$' "$NO_CI/.copier-answers.yml" \
+        || fail "github_ci=false is not recorded, so the next update would bring the workflow back"
+    # Every file, not only Markdown: a comment in a script that says the workflow runs the gate
+    # is the same false promise. A decision record may name the workflow, as the place a
+    # project that ships it runs the gate.
+    named="$(cd "$NO_CI" && grep -rIl --exclude-dir=adr 'ci\.yml' .)" \
+        && fail "a copy with github_ci=false still names ci.yml in: $(echo $named)"
+    [ $? -eq 1 ] || fail "grep could not read the copy with github_ci=false"
 fi
 
 echo "==> assert the agent guard"
@@ -622,7 +741,7 @@ need_no_grep '^gate:.*db-test' Makefile
 need_no_grep '^gate:.*observe-test' Makefile
 need_no_grep '^gate:.*test-contract-db' Makefile
 # `pre-commit` runs the list through devtools/gate.sh, which queues one gate per machine and
-# skips a tree that already passed -- docs/adr/template/0015.
+# skips a tree that already passed -- docs/adr/template/0014.
 need_exec devtools/gate.sh
 need_exec devtools/worktree-tree.sh
 need_exec devtools/hold-the-gate.pl
@@ -687,9 +806,10 @@ need_grep '^SHELL := /bin/bash' Makefile
 # A workflow ships, and it runs `make gate` -- the list the git hook runs, so the two cannot
 # drift. Not `make pre-commit`, whose runner passes a clone with a half missing. The hook checks the machine that commits; the workflow checks a fresh
 # checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
-# well as in test_gate.py because that test walks the workflows it finds, and a directory
+# well as in test_workflow.py because that test walks the workflows it finds, and a directory
 # that stopped existing is a walk over nothing.
 need .github/workflows/ci.yml
+need backend/tests/test_workflow.py
 need_grep 'make gate' .github/workflows/ci.yml
 need_no_grep 'make pre-commit' .github/workflows/ci.yml
 need_no_grep '\.jinja' .github/workflows/ci.yml
@@ -707,25 +827,25 @@ sed 's/#.*//' .github/workflows/ci.yml | grep -q 'make db-test' \
 # distinguishes a working check from a green one. Break what the check exists to catch,
 # require it to fail, put the file back. The passing direction is the line above it.
 echo "==> assert the gate's own checks fail on what they are for"
-python3 - <<'PY' || fail "a check in test_gate.py did not refuse what it is written to refuse"
+python3 - <<'PY' || fail "a check in test_gate.py or test_workflow.py did not refuse what it is written to refuse"
 import pathlib
 import shutil
 import sys
 
 sys.path.insert(0, "backend")
 try:
-    from tests import test_gate
+    from tests import test_gate, test_workflow
 except ImportError as error:
-    print(f"check: test_gate.py could not be imported, which is not the same as passing: {error}",
+    print(f"check: test_gate.py or test_workflow.py could not be imported, which is not the same as passing: {error}",
           file=sys.stderr)
     sys.exit(1)
 
 failures = []
 
 
-def refused(name):
+def refused(name, module=test_gate):
     try:
-        getattr(test_gate, name)()
+        getattr(module, name)()
     except AssertionError:
         return True
     return False
@@ -761,10 +881,10 @@ def emptied_tier(name, root, holds, declares, describes):
     mutated(name, originals, declares, declares.replace("test", "check"), describes, root)
 
 
-for name in ("test_every_tier_is_selected_by_a_file_that_still_names_it",
-             "test_every_tier_still_holds_tests",
-             "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
-    if refused(name):
+for module, name in ((test_gate, "test_every_tier_is_selected_by_a_file_that_still_names_it"),
+                     (test_gate, "test_every_tier_still_holds_tests"),
+                     (test_workflow, "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it")):
+    if refused(name, module):
         failures.append(f"{name} fails on the tree as rendered, before any mutation")
 
 mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
@@ -791,7 +911,7 @@ planted.parent.mkdir(parents=True, exist_ok=True)
 planted.write_text("jobs:\n  gate:\n    steps:\n      - run: sh devtools/check_template.sh\n",
                    encoding="utf-8")
 try:
-    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it"):
+    if not refused("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it", test_workflow):
         failures.append("test_a_workflow_runs_the_gate_rather_than_a_copy_of_it passed a "
                         "workflow that runs check_template.sh, which is a script in the "
                         "generator repository and not a file a generated project holds")
@@ -862,6 +982,7 @@ need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
 # whatever else is listening, which in a second checkout is the other checkout's app.
 need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts
 need_grep 'process.env.FRONTEND_PORT' frontend/playwright.live.config.ts
+need frontend/e2e/signed-in.ts
 need_no_grep 'localhost:5173' frontend/playwright.live.config.ts
 # Reuse is the other half of the same bug and it is worse, because it produces a green
 # run rather than a failure: Playwright checks that something answers on the URL, never
@@ -943,23 +1064,25 @@ need backend/app/main.py
 need backend/app/models/__init__.py
 need backend/app/models/shared.py
 need_absent backend/app/models.py
-# The layering is a written list, and this test is what holds it -- docs/adr/template/0013.
+# The layering is a written list, and this test is what holds it -- docs/adr/template/0007.
 need backend/tests/models/test_layering.py
 need backend/app/routes/public.py
 need backend/app/routes/tenant/__init__.py
 need_absent backend/app/routes.py
-# Every refusal is a class, declared from that class -- docs/adr/template/0012. The test is what holds it.
+# Every refusal is a class, declared from that class -- docs/adr/template/0006. The test is what holds it.
 need backend/app/errors.py
 need backend/tests/errors/test_errors.py
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
+need backend/app/request_line.py
+need backend/app/log_lines.py
 need backend/app/deployment.py
 need backend/app/refusal.py
 need backend/tests/tier.py
 need backend/tests/models/layers.py
 need backend/app/lifespan.py
-# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0014.
+# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0010.
 need_grep 'refuse_development_settings' backend/app/lifespan.py
 need_grep 'APP_ENV=development' devtools/dev.sh
 need_grep 'APP_ENV=development' devtools/contract-test.sh
@@ -1003,19 +1126,19 @@ need CONTEXT.md
 for adr in 0001-two-substrates-behind-one-contract \
            0002-tenant-isolation-is-forced-and-always-on \
            0003-the-application-never-applies-ddl \
-           0005-a-test-never-decides-whether-to-run \
-           0006-the-one-origin-entrypoint-is-the-edge \
-           0007-the-spec-describes-what-the-service-actually-does \
-           0008-a-route-cannot-escape-the-identity-seam \
-           0009-every-log-line-is-declared-and-written-as-json-to-stdout \
-           0010-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns \
-           0011-routes-are-split-by-what-a-caller-presents \
-           0012-a-refusal-is-a-class-declared-once \
-           0013-the-models-are-a-layering-written-down \
-           0014-the-environment-is-read-in-one-place-and-run-in-another \
-           0015-the-gate-runs-once-per-tree-and-one-at-a-time \
-           0016-the-template-s-decisions-are-numbered-apart-from-yours \
-           0017-the-template-owns-the-mechanism-and-the-project-owns-its-list; do
+           0004-a-route-cannot-escape-the-identity-seam \
+           0005-routes-are-split-by-what-a-caller-presents \
+           0006-a-refusal-is-a-class-declared-once \
+           0007-the-models-are-a-layering-written-down \
+           0008-the-spec-describes-what-the-service-actually-does \
+           0009-the-one-origin-entrypoint-is-the-edge \
+           0010-the-environment-is-read-in-one-place-and-run-in-another \
+           0011-every-log-line-is-declared-and-written-as-json-to-stdout \
+           0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns \
+           0013-a-test-never-decides-whether-to-run \
+           0014-the-gate-runs-once-per-tree-and-one-at-a-time \
+           0015-the-template-owns-the-mechanism-and-the-project-owns-its-list \
+           0016-the-template-s-decisions-are-numbered-apart-from-yours; do
     need "docs/adr/template/$adr.md"
 done
 
@@ -1046,6 +1169,27 @@ need_grep 'service_completed_successfully' deploy/compose.yaml
 # on the unix socket only, so a socket probe reports healthy while init is still running.
 need_grep 'pg_isready -h 127.0.0.1' deploy/compose.yaml
 need_no_grep 'pg_isready -q' Makefile
+
+need_grep '"127.0.0.1:\${DB_PORT:-5433}:5432"' deploy/compose.yaml
+awk '/^ *#/ { next }
+     /^ *ports:/ { if ($0 !~ /ports: *$/) exit 1; inside = 1; next }
+     inside && /^ *- / { if ($0 !~ /^ *- "127\.0\.0\.1:/) exit 1; next }
+     { inside = 0 }' deploy/compose.yaml \
+    || fail "deploy/compose.yaml publishes a port beyond 127.0.0.1"
+need_no_grep 'network_mode' deploy/compose.yaml
+awk '{ cmd = joined ? cmd " " $0 : $0; joined = /\\$/ }
+     joined { next }
+     { n = split(cmd, f, /[ \t]+/); on = 0
+       for (i = 2; i <= n; i++) {
+         if (f[i] == "run" && (f[i - 1] == "docker" || f[i - 1] == "container")) { on = 1; continue }
+         if (!on) continue
+         if (f[i] ~ /^--publish-all/ || f[i] ~ /^-[a-zA-Z]*P/) exit 1
+         if (f[i] ~ /^(-[a-zA-Z]*p|--publish)$/ && f[i + 1] !~ /^127\.0\.0\.1:/) exit 1
+         if (f[i] ~ /^(-[a-zA-Z]*p|--publish=)./ && f[i] !~ /^(-[a-zA-Z]*p|--publish=)127\.0\.0\.1:/) exit 1
+         if (f[i] ~ /;$/ || f[i] ~ /^(&&|\|\||\|)$/) on = 0 } }' Makefile \
+    || fail "a docker run in the Makefile publishes a port beyond 127.0.0.1"
+need_no_grep 'localhost:\$(' Makefile
+
 need backend/devtools/schema.py
 need_grep 'CREATE TABLE IF NOT EXISTS tasks' deploy/schema.sql
 need_grep 'applied_once' deploy/schema.sql
@@ -1620,6 +1764,35 @@ echo "==> backend: install, lint, test"
 run "uv sync" sh -c 'cd backend && uv sync --all-groups'
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
+if [ "$VARIANT" = "default" ]; then
+    # The copy without the workflow keeps test_gate.py and loses test_workflow.py. Run what it
+    # keeps, on this install, so a test that still needs the workflow fails here.
+    run "test_gate.py without the workflow" sh -c \
+        "cd '$NO_CI/backend' && '$OUT/backend/.venv/bin/python' -m pytest -q -p no:cacheprovider tests/test_gate.py"
+fi
+
+echo "==> assert basedpyright checks a call a test makes through the test client's portal"
+cat >backend/tests/test_portal_is_typed.py <<'PY'
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+
+async def needs(app: FastAPI) -> FastAPI:
+    return app
+
+
+def calls(client: TestClient) -> None:
+    assert client.portal is not None
+    client.portal.call(needs, 0)
+PY
+out="$(cd backend && uv run --no-sync basedpyright tests/test_portal_is_typed.py 2>&1)" && typed=no || typed=yes
+rm backend/tests/test_portal_is_typed.py
+[ "$typed" = yes ] || fail "basedpyright accepted an int where a FastAPI is expected: it sees TestClient.portal as Unknown"
+printf '%s\n' "$out" | grep -q 'reportCallIssue' || {
+    echo "basedpyright failed, but not on the call through the portal:" >&2
+    printf '%s\n' "$out" >&2
+    exit 1
+}
 
 echo "==> frontend: install, lint, test, build"
 run "pnpm install" pnpm -C frontend install --prefer-offline

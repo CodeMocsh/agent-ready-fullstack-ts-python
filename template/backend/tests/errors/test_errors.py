@@ -1,7 +1,7 @@
 """A refusal a route raises is declared on it, and a refusal declared is raised somewhere.
 
 Read from the source rather than driven, so a raise on a branch no test reaches still counts.
-`docs/adr/template/0012`.
+`docs/adr/template/0006`.
 """
 
 import ast

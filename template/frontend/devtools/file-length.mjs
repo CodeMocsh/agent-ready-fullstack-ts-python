@@ -16,7 +16,7 @@ const SOURCE = /\.(?:ts|tsx|mts|cts|mjs|js|jsx)$/;
 const USAGE = `usage: node devtools/file-length.mjs <paths...>
 
 Reads complexity.maxFileLines, complexity.overCap and complexity.exclude from
-package.json. See AGENTS.md for what to do when a file crosses the cap.`;
+package.json. See docs/frontend.md for what to do when a file crosses the cap.`;
 
 function settings() {
   const { maxFileLines, overCap, exclude } = section("complexity");

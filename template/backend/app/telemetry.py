@@ -1,8 +1,9 @@
 """Traces and metrics, sent over OTLP to the Collector a deployment names.
 
 Nothing here runs unless `wiring.build_telemetry` returns settings. When it does, every request
-is a server span named by its route template, every query a database span, and every request
-adds to `http.server.request.duration`; `/health` and `/ready` are left out. A pooled substrate
+is a server span named by its route template, every query it makes a database span, and every
+request adds to `http.server.request.duration`; `/health` and `/ready` are left out. Only a
+request starts a trace. A query exports a span only inside a traced request. A pooled substrate
 reports its connections as `db.client.connection.count`, by state, and as
 `db.client.connection.max`. This module instruments and `app.log` reads the current span; ruff
 refuses `opentelemetry` anywhere else.
@@ -12,7 +13,7 @@ refuses `opentelemetry` anywhere else.
 metric keeps only `METRIC_ATTRIBUTES` and carries no exemplars. A span attribute left out is reported once, by
 name. A caller's trace context
 is continued only when the deployment trusts its callers, and is otherwise a link on a new
-trace. `docs/adr/template/0010` holds the reasoning.
+trace. `docs/adr/template/0012` holds the reasoning.
 """
 
 import os
@@ -43,9 +44,16 @@ from opentelemetry.sdk.metrics.view import View
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, Span, SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter, SpanExportResult
-from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
-from opentelemetry.trace import Link, SpanContext, Status, TraceState
+from opentelemetry.sdk.trace.sampling import (
+    Decision,
+    ParentBased,
+    Sampler,
+    SamplingResult,
+    TraceIdRatioBased,
+)
+from opentelemetry.trace import Link, SpanContext, SpanKind, Status, TraceState
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from opentelemetry.util.types import Attributes
 
 from app import log
 from app.deployment import SEMCONV_ENV, STABLE_SEMCONV
@@ -166,7 +174,8 @@ def instrument(
     )
     resource = Resource.create({"service.name": settings.service})
     tracer_provider = TracerProvider(
-        sampler=ParentBased(TraceIdRatioBased(settings.sampling_ratio)), resource=resource
+        sampler=ParentBased(_RequestsOnly(TraceIdRatioBased(settings.sampling_ratio))),
+        resource=resource,
     )
     tracer_provider.add_span_processor(_LinkTheCaller())
     tracer_provider.add_span_processor(BatchSpanProcessor(_Declared(spans)))
@@ -219,6 +228,36 @@ class _CallerAsLink(TextMapPropagator):
     @override
     def fields(self) -> set[str]:
         return self._w3c.fields
+
+
+@final
+class _RequestsOnly(Sampler):
+    """Hands a server span to `requests` and drops a span of any other kind. Use it only as the
+    root of `ParentBased`, which asks it only about a span with no parent."""
+
+    def __init__(self, requests: Sampler) -> None:
+        self._requests = requests
+
+    @override
+    def should_sample(
+        self,
+        parent_context: Context | None,
+        trace_id: int,
+        name: str,
+        kind: SpanKind | None = None,
+        attributes: Attributes = None,
+        links: Sequence[Link] | None = None,
+        trace_state: TraceState | None = None,
+    ) -> SamplingResult:
+        if kind is not SpanKind.SERVER:
+            return SamplingResult(Decision.DROP)
+        return self._requests.should_sample(
+            parent_context, trace_id, name, kind, attributes, links, trace_state
+        )
+
+    @override
+    def get_description(self) -> str:
+        return f"RequestsOnly{{{self._requests.get_description()}}}"
 
 
 class _LinkTheCaller(SpanProcessor):

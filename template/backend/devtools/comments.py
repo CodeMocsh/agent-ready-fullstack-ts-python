@@ -9,7 +9,7 @@ from typing import NoReturn
 FIX = """
 AGENTS.md bans them, and the rule is not about tidiness: an explanation beside the
 code is the copy that goes stale silently. Rationale belongs in the commit message,
-a decision in docs/adr/, and a contract in a name or a type.
+an architectural decision also in docs/adr/, and a contract in a name or a type.
 
 A suppression is the half most worth refusing. `# noqa` and `# type: ignore` are
 threshold decisions taken silently at the point of pain; make it a fix in the code,

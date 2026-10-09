@@ -23,8 +23,10 @@ from app.identity import (
     tenant_for,
 )
 from app.main import create_app
+from app.routes import tenant
 from tests.conftest import Logged
 from tests.identity.doubles import failing, refusing, refusing_async, resolving_async
+from tests.widgets import router as widgets_router
 
 SEAM = "app.identity.tenant_for"
 """What the probe reads. Patched there rather than where it is imported, because
@@ -203,3 +205,27 @@ def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
     assert len(said) == 1, said
     assert said[0]["severity"] == "INFO"
     assert "verified" in said[0]["message"]
+
+
+def test_a_route_under_the_tenant_requirement_names_the_tenant_the_seam_resolved(
+    logged: Logged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The widgets carry whatever the shipped tenant requirement carries, so a requirement that
+    reaches the seam without naming its tenant fails here, in a project with no tenant route
+    yet. `docs/adr/template/0011`."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    app = create_app()
+    app.include_router(widgets_router, dependencies=tenant.router.dependencies)
+
+    def named(request: Request) -> str:
+        return request.headers["x-test-tenant"]
+
+    app.dependency_overrides[tenant_for] = named
+    with TestClient(app) as client:
+        logged()
+        client.get("/widgets", headers={"x-test-tenant": "tenant-a"})
+        client.get("/widgets", headers={"x-test-tenant": "tenant-b"})
+
+    lines = [line for line in logged() if line["message"] == "request completed"]
+
+    assert [line["tenant_id"] for line in lines] == ["tenant-a", "tenant-b"]

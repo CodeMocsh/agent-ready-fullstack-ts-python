@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { TaskList } from "@/components/task-list";
 import { server } from "@/mocks/node";
+import { heldUntilTheTestEnds } from "../held.ts";
 import { renderWithQuery } from "../render.tsx";
 
 describe("TaskList", () => {
@@ -12,6 +13,7 @@ describe("TaskList", () => {
 
     expect(await screen.findByText("Read AGENTS.md")).toBeInTheDocument();
     expect(screen.getByText("Run the app in mock mode")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
   });
 
   it("says which half is answering", async () => {
@@ -55,6 +57,13 @@ describe("TaskList", () => {
     await waitFor(() => {
       expect(within(row as HTMLElement).getByRole("checkbox")).toBeChecked();
     });
+  });
+
+  it("says it is loading while the request for tasks is unanswered", async () => {
+    server.use(http.get("/api/tasks", () => heldUntilTheTestEnds()));
+    renderWithQuery(<TaskList />);
+
+    expect(await screen.findByText("Loading…")).toBeInTheDocument();
   });
 
   it("surfaces a failing request", async () => {

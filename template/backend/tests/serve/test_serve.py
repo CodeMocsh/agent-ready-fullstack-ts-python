@@ -180,7 +180,7 @@ def test_the_policy_confines_scripts_and_framing_to_this_origin(client: TestClie
 
 def test_the_transport_policy_does_not_claim_subdomains(client: TestClient) -> None:
     """Neither `includeSubDomains` nor `preload` ships from a template. Both are decisions
-    about a domain rather than about this code, and `docs/adr/template/0006` says why."""
+    about a domain rather than about this code, and `docs/adr/template/0009` says why."""
     transport = client.get("/").headers["strict-transport-security"]
     assert transport.startswith("max-age=")
     assert "includeSubDomains" not in transport

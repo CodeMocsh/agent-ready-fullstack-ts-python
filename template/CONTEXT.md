@@ -58,7 +58,8 @@ _Avoid_: surface, access level, guard.
 
 **Example resource**:
 `tasks`: the one resource the template ships, so every layer has something real to carry. A
-project replaces it, then answers `example_resource=false` so `copier update` stops bringing it.
+project replaces it, then records `example_resource: false` in `.copier-answers.yml` so
+`copier update` stops bringing it.
 _Avoid_: demo, sample, worked example.
 
 **Refusal**:
@@ -68,15 +69,15 @@ _Avoid_: error response, exception (an exception is how a refusal is raised, not
 
 **Identity stub**:
 `app/identity.py` as the template ships it: every request resolves to the sentinel tenant. A
-project that authenticates replaces it, then answers `identity_stub=false` so `copier update`
-stops bringing it.
+project that authenticates replaces it, then records `identity_stub: false` in
+`.copier-answers.yml` so `copier update` stops bringing it.
 _Avoid_: fake auth, no-auth mode.
 
 ## Logs
 
 **Log line**:
-One JSON object on stdout. Each one the application writes is a function in `app/log.py`, and
-its parameters are the only fields it may carry.
+One JSON object on stdout. Each one the application writes is a function in `app/log.py` or
+`app/log_lines.py`, and its parameters are the only fields it may carry.
 _Avoid_: log message (the `message` is one field of a line), log entry, event.
 
 **Client event**:
@@ -117,7 +118,7 @@ The concept is what the template is sure of. The word is yours.
 
 ## Decisions
 
-`docs/adr/` holds the design decisions that would otherwise look like they could be simpler.
+`docs/adr/` holds the architectural decisions, as its README defines them.
 `docs/adr/template/` holds the ones that came with the template — the store's two substrates,
 forced tenant isolation, why the application never applies DDL — and `copier update` keeps
 them there. Yours go in `docs/adr/` itself, numbered from `0001`. Each file's name is the

@@ -9,120 +9,55 @@ The four sections that follow — *Approach*, *Fail loudly*, *Zero comments*, *S
 English* — are the rules a generated project lives under, and this repo lives under them too. A
 rule the template asserts and its own generator ignores is a rule nobody believes. **Keep them
 word-for-word in step with [template/AGENTS.md.jinja](template/AGENTS.md.jinja)**; everything
-below them is this repo's own and is expected to differ. Where an example names a route or a mock handler, it names the
-code you write into `template/`.
+below them is this repo's own and is expected to differ. Where an example names a route, it names
+the code you write into `template/`.
 
 ## Approach
 
-You are a principal engineer. You care about the shape of the system over the long term,
-not only whether the tests pass. Elegance is less code doing more: every line must earn
-its keep.
+You are a principal engineer. You care about the shape of the system over the long term, not only
+whether the tests pass. Elegance is less code doing more: every line must have a purpose.
 
-Resolve ambiguity before building, not after. A request you could satisfy two different
-ways is a request you do not understand yet. Ask, or state the assumption you are
-proceeding on and why. Guessing and building is the expensive failure; asking costs one
-round.
+Resolve ambiguity before you build. If a request has two readings, ask, or state the assumption
+you proceed on and why.
 
-Code is the source of truth for behaviour; docs are the source of truth for intent. When
-they disagree the doc is wrong. Fix the doc, not the code.
+Code is the source of truth for behaviour; docs are the source of truth for intent. When they
+disagree, fix the doc.
 
-Tests validate outcomes, not implementation. A test earns its keep by failing when
-behaviour breaks: one that mirrors the implementation only makes refactoring expensive,
-and one that cannot fail is dead weight. Cover the seams and the edges that actually
-bite. Coverage percentage is not the goal, and deleting a test that no longer
-distinguishes anything is a real improvement.
+Tests validate outcomes, not implementation. A test is useful only if it fails when behaviour
+breaks. Delete a test that no longer distinguishes anything.
+
+**When you report, be extremely concise.** In a report, concision comes before grammar.
 
 ## Fail loudly
 
-No code path continues past a condition it did not plan for. Four bans, and both halves
-are in scope:
+No code path continues past a condition it did not plan for. In both halves:
 
 - No `except Exception`, and no `catch` that continues.
-- No default standing in for a failure — no `or {}`, no `?? []`, no quietly returned
-  `None` or `undefined`.
-- No failure signalled by a return value a caller can drop. If continuing would be
-  wrong, raise or throw.
+- No default in place of a failure: no `or {}`, no `?? []`, no quietly returned `None` or
+  `undefined`.
+- No failure signalled by a return value a caller can drop. Raise or throw.
 - No warning where the code cannot correctly proceed.
 
-**The first ban is mechanised on the backend half**: ruff's `BLE` refuses `except Exception`,
-and the one place a blind catch is right carries a line in `pyproject.toml` under
-`per-file-ignores` rather than a suppression at the point of pain. The other three bans, and
-the frontend half, are prose. A rule nothing enforces does not hold, so those are the ones
-that rot first.
-
-Not crashing is legitimate only when all three of these hold: the design plans for the
-condition, the contract names it, and the code reports it. Fewer than three, and it
-raises.
-
-This is not a style preference, because in an app with two halves **a silent failure
-looks like an empty screen**. A route that swallows a store error answers `200 []` and
-the table renders "No tasks yet". A `catch` around a mutation leaves the optimistic
-update on screen and the write on the floor. A mock handler that answers a case the
-backend refuses makes the contract suite green against a shape the real service never
-returns. Every one of those reads as working software — and a test that asserts the
-*absence* of an effect passes just as happily against the bug. Assert the failure
-itself.
-
-The contract is where this is cheapest to get right: declare every status code a route
-can return, with a model for anything that has a body, and the other half then cannot
-fail to handle it without a type error.
+Not crashing is legitimate only when the design plans for the condition, the contract names it,
+and the code reports it. In an app with two halves, a silent failure looks like an empty screen:
+a route that ignores a store error answers `200 []`, and the table says "No tasks yet". Assert
+the failure itself, never the absence of an effect.
 
 ## Zero comments
 
-No explanatory comments, no TODO/FIXME notes, no lint or type suppression directives
-(`biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`, `# type: ignore`), no
-commented-out code. Shebangs and TypeScript `///` directives are executable directives,
-not comments.
+No comments in source, tests or scripts, suppression directives included: `make lint` refuses
+them. Express intent through names, structure, types and tests.
 
-Express intent through names, structure, types, and tests. Rationale goes in the commit
-message; a decision goes in `docs/adr/`. This relocates rationale rather than removing it,
-so a repo that adopts the rule and still writes `fix: bug` has simply deleted the
-explanation.
-
-**An ADR cites nothing by section number.** Name the thing — the route, the function,
-the rule, the invariant — and let the reader grep. A section number points into one
-revision of one document, and an ADR outlives the document whose structure it borrowed.
-
-**A Python docstring is not a comment, and the gates already say so.** `comments.py`
-refuses comment tokens, and a docstring is a string bound to the symbol -- reachable
-through `help()`, part of the interface rather than an aside about the line below. A
-module, class or function may carry one. TypeScript has no equivalent: `/** */` is a
-comment token and `comments.mjs` refuses it, JSDoc included.
-
-What a docstring may say is the constraint. Contracts, not reasoning: behaviour, failure,
-timing, ownership, safe use. Link the rationale; don't restate it. One that walks through
-the body is the banned comment wearing a different quote character.
-
-Scope: source, tests, scripts. Config files may carry comments where the format offers no
-other way to explain a rule, and that includes `frontend/*.config.ts`, which is
-configuration that happens to be written in TypeScript. **Vendored and generated code is
-out of scope entirely.**
-
-**The rule is enforced, because on its own it does not hold.** `make lint` fails on any
-comment token under `frontend/{src,tests,e2e,devtools}` and `backend/{app,tests,devtools}`
-— `frontend/devtools/comments.mjs` and `backend/devtools/comments.py` are the two gates.
-An agent reads this file at the top of a session and explains in place anyway, because
-that is what the training data does. The suppression half is the half most worth
-mechanising: refusing the spelling turns a threshold decision taken silently at the point
-of pain into either a fix in the code or a reviewable line in `biome.json`,
-`tsconfig.json` or `pyproject.toml`.
+Rationale goes in the commit message. Only an architectural decision also goes in `docs/adr/`,
+and most decisions are not one: [what earns a file](docs/adr/README.md). A Python docstring may
+state a contract -- behaviour, failure, timing, ownership, safe use -- never the reasoning.
 
 ## Simplified technical English
 
-Every word a human or an agent reads is written the way ASD-STE100 says to write a maintenance
-manual: one idea per sentence, active voice, and one meaning per term. That covers prose and code
-alike — docs, commit messages, decisions, identifiers, test names, log lines, and the message a
-failure carries.
-
-**Take the rules, not the dictionary.** ASD-STE100 ships a controlled vocabulary chosen for
-aircraft maintenance, and this repo has its own nouns. `CONTEXT.md` is the word list that binds
-here: one term per concept, and that term every time the concept appears — in a sentence, in a
-symbol name, in the text of an error.
-
-This is what makes *Zero comments* affordable. With no comment to fall back on, the name and the
-failure message are the whole explanation, so they are worth the care the code gets.
-
-**When you report, be extremely concise.** Sacrifice grammar for concision.
+Write every word a person or an agent reads the way ASD-STE100 says: one idea per sentence,
+active voice, one meaning per term. That covers docs, commit messages, decisions, identifiers,
+test names, log lines and failure messages. `CONTEXT.md` is the word list: one term per concept,
+and that term every time.
 
 ## The template is inert
 
@@ -171,9 +106,7 @@ reaches to write something down, and both grow one reasonable-looking paragraph 
 A new rule belongs in this file only if it is a principle. Anything with detail in it goes in
 `docs/` and gets a link from the index below.
 
-**A decision record is for a decision, not for an explanation.** The test is the cost of change:
-a choice earns a file when undoing it later would be expensive, and one you could make
-differently next week is an implementation detail. Most changes need neither —
+**A decision record is for an architectural decision, and most changes are not one** —
 [what earns a file](docs/adr/README.md).
 
 ## Layout

@@ -2,8 +2,8 @@
 how production refuses what only development may carry.
 
 The template owns this module and updates it. What production refuses is the project's, in
-`app/environment.py`, which the template writes once. `docs/adr/template/0014` and
-`docs/adr/template/0017`.
+`app/environment.py`, which the template writes once. `docs/adr/template/0010` and
+`docs/adr/template/0015`.
 
 **An unset `APP_ENV` is production**, so a deployment that forgets the variable is checked
 rather than waved through.
@@ -16,7 +16,7 @@ DATABASE_URL_ENV: Final = "DATABASE_URL"
 BUNDLE_ENV: Final = "FRONTEND_BUNDLE"
 ACKNOWLEDGED_ENV: Final = "UNAUTHENTICATED_IS_INTENTIONAL"
 """Set by a deployment that means to serve everybody, so it is told at `INFO` rather than
-warned on every boot. It changes a log level and nothing else -- `docs/adr/template/0008`."""
+warned on every boot. It changes a log level and nothing else -- `docs/adr/template/0004`."""
 
 OTLP_ENDPOINT_ENV: Final = "OTEL_EXPORTER_OTLP_ENDPOINT"
 SERVICE_NAME_ENV: Final = "OTEL_SERVICE_NAME"
@@ -25,6 +25,9 @@ TRUST_INBOUND_CONTEXT_ENV: Final = "TRUST_INBOUND_TRACE_CONTEXT"
 SEMCONV_ENV: Final = "OTEL_SEMCONV_STABILITY_OPT_IN"
 STABLE_SEMCONV: Final = "http,database"
 """The only value of `SEMCONV_ENV` this process accepts, and the one it sets itself."""
+RESOURCE_ATTRIBUTES_ENV: Final = "OTEL_RESOURCE_ATTRIBUTES"
+"""Read for `service.version`, which every log line carries whether or not telemetry is on. The
+SDK reads the whole of it for the spans and metrics."""
 PROTOCOL_ENV: Final = "OTEL_EXPORTER_OTLP_PROTOCOL"
 HEADERS_ENV: Final = "OTEL_EXPORTER_OTLP_HEADERS"
 
@@ -52,11 +55,12 @@ NOT_READ: Final = (
 TELEMETRY_ENV: Final = (
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
+    RESOURCE_ATTRIBUTES_ENV,
     SEMCONV_ENV,
     *NEEDS_THE_ENDPOINT,
     *NOT_READ,
 )
-"""Every variable `wiring.build_telemetry` reads."""
+"""Every variable `wiring.build_telemetry` and `wiring.build_service_version` read."""
 
 STATEMENT_TIMEOUT_ENV: Final = "DATABASE_STATEMENT_TIMEOUT"
 IDLE_IN_TRANSACTION_TIMEOUT_ENV: Final = "DATABASE_IDLE_IN_TRANSACTION_TIMEOUT"

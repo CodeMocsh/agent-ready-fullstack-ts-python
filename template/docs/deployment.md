@@ -14,7 +14,7 @@ The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --p
 because the in-memory substrate loses every row when the process exits. `make dev`, the
 contract suite and the tests set `APP_ENV=development`; a deployment sets nothing, or
 `APP_ENV=production`. Any other value is refused. `app/environment.py` holds the rule and
-[adr/template/0014](adr/template/0014-the-environment-is-read-in-one-place-and-run-in-another.md) says why.
+[adr/template/0010](adr/template/0010-the-environment-is-read-in-one-place-and-run-in-another.md) says why.
 
 Something has to strip the `/api` prefix, because the backend serves bare paths. In development
 the Vite proxy does it. In a deployment, one of three:
@@ -47,7 +47,7 @@ browser reached over plaintext discards it, so sign-in fails by returning quietl
 sign-in screen with nothing saying why.
 
 With nothing in front, this process is the edge: read `SECURITY_HEADERS` and `MAX_BODY_BYTES`
-in `app/serve.py` first, and [adr/template/0006](adr/template/0006-the-one-origin-entrypoint-is-the-edge.md) for
+in `app/serve.py` first, and [adr/template/0009](adr/template/0009-the-one-origin-entrypoint-is-the-edge.md) for
 why `app.main` sets neither.
 
 ## The release step
@@ -67,8 +67,9 @@ migrates and then serves must drop the credential in between:
 **The database must have applied exactly the entries the build carries**, in both directions
 ([adr/template/0003](adr/template/0003-the-application-never-applies-ddl.md)). The cost, worth knowing before
 your first rolling deploy: between the release step and the last old instance being replaced,
-any instance of the *previous* version that restarts will not come back up. Already-running
-instances are fine. If that window matters, make the migration and the rollout one step — scale
+any instance of the *previous* version that restarts will not come back up. An instance that is
+already running keeps answering, but its `GET /ready` fails, so a platform that probes it takes it
+out of rotation. If that window matters, make the migration and the rollout one step — scale
 down, migrate, scale up — and plan a rollback as a schema rollback.
 
 ## Timeouts
@@ -105,7 +106,7 @@ The backend writes one JSON object per line to stdout, and nothing else. Every c
 runtime collects stdout with no agent and no SDK, so there is nothing to configure in the
 application. The names are the ones Cloud Logging reads as they are, and the HTTP fields follow
 the OpenTelemetry semantic conventions.
-[adr/template/0009](adr/template/0009-every-log-line-is-declared-and-written-as-json-to-stdout.md) says why every
+[adr/template/0011](adr/template/0011-every-log-line-is-declared-and-written-as-json-to-stdout.md) says why every
 line is declared.
 
 | Field | What it holds |
@@ -114,9 +115,18 @@ line is declared.
 | `severity` | `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
 | `message` | a constant sentence; values go in fields of their own |
 | `logger` | `app` for this project's lines, a library's name for its own |
+| `service.version` | the `service.version` in `OTEL_RESOURCE_ATTRIBUTES`; null when it names none |
 | `request_id` | while a request is served; the response carries it as `X-Request-ID` |
 | `trace_id`, `span_id` | while a traced request is served; the ids its spans carry |
 | `exception` | the whole traceback, when there is one |
+| `tenant_id` | on `request completed`; null on a public route, or when the identity seam refused |
+
+A field declared in `app/request_line.py`, such as `user.id`, is on `request completed` too, and
+null when the request did not name it.
+
+**Set `OTEL_RESOURCE_ATTRIBUTES=service.version=<your build>` on every deployment**, with or
+without a Collector. A session that spans a deploy is read by version, and a line with none
+cannot be placed. An entry that is not `key=value` refuses to start.
 
 **What each cloud does with it:**
 
@@ -128,9 +138,26 @@ line is declared.
   arrive. It is billed per GB scanned, and it is worth having as a second layer.
 - **Azure.** Container Apps stores the line as one string. Read it with `parse_json` in KQL.
 
+**A line names its trace only by `trace_id` and `span_id`.** No cloud's console opens a line from
+a trace by those fields alone: Cloud Logging links only by its own `logging.googleapis.com/trace`
+fields, and CloudWatch and Azure Monitor link stdout by nothing. Find a trace's lines by
+`trace_id` instead. X-Ray writes the same id as `1-`, its first 8 hex digits, `-` and the other
+24; Application Insights calls it `operation_Id`. A project that wants the one-click link adds its
+cloud's fields itself, because this application names no vendor --
+[adr/template/0012](adr/template/0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md).
+
 **Retention is yours to set, and shorter is safer.** The log holds personal data even when
 nobody meant it to: an exception's message is written as the library wrote it. 14 to 30 days
 suits operational logs. When you add security events, PCI DSS asks for 12 months.
+
+**The platform keeps a request log of its own, and nothing here controls it.** Cloud Run writes
+every request to `run.googleapis.com/requests`, with the full URL and its query string, the
+client IP and the user agent. An AWS load balancer's access log, and an Azure Front Door or
+Application Gateway access log, hold the same once they are on. A value this application keeps
+out of its own lines is still in that log when it was in the URL. A deployment that must keep
+values out of its logs keeps them out of URLs, and excludes that log or gives it a short
+retention: an exclusion filter on Cloud Logging's `_Default` sink, a lifecycle rule on the S3
+bucket the access logs go to, a retention on the Log Analytics table.
 
 **Browser failures arrive here too**, as lines whose `message` is `client event` and whose
 `source` is `client`. Anybody can post one, so read them as a report and never as evidence.
@@ -138,7 +165,7 @@ suits operational logs. When you add security events, PCI DSS asks for 12 months
 ## Traces and metrics
 
 Off until `OTEL_EXPORTER_OTLP_ENDPOINT` names a Collector, which the application posts to over
-OTLP/HTTP. [adr/template/0010](adr/template/0010-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md)
+OTLP/HTTP. [adr/template/0012](adr/template/0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md)
 says why the application stops there.
 
 | Variable | What it does |
@@ -153,7 +180,8 @@ refuses to start. Beside the endpoint, so does a variable the SDK would honour a
 process does not -- a
 per-signal endpoint, a sampler, exporter or propagator choice, `OTEL_SDK_DISABLED`, header
 capture, or a protocol other than `http/protobuf`. The SDK reads `OTEL_RESOURCE_ATTRIBUTES` for
-labels such as `deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
+`service.version`, the same value every log line carries, and for labels such as
+`deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS`, `_TIMEOUT` and
 `_CERTIFICATE` for a Collector that needs them.
 
 **Run the Collector beside the application, and point it at your destination.**
@@ -166,6 +194,10 @@ labels such as `deployment.environment`, and its own `OTEL_EXPORTER_OTLP_HEADERS
 - **Azure.** The Container Apps managed agent, or a Collector, exporting to Azure Monitor. It
   needs delta temporality, which the Collector's `cumulativetodelta` processor provides.
 - **Anything else** that takes OTLP: Grafana, Jaeger, Datadog, Honeycomb.
+
+**Only a request starts a trace.** A query is a span only inside a traced request. A query in a
+probe, or in work outside any request, exports no span. A probe still writes its `request
+completed` line. The pool metrics still count the connections that work uses.
 
 Add the Collector's `redaction` processor as a second layer; the application already sends only
 declared attributes. Sampling beyond a fixed ratio -- keeping every error and every slow
@@ -204,5 +236,5 @@ and writes everything it holds. This one does complain — find the line whose `
 `identity:` and read its `severity`. `WARNING` means nobody has replaced it. Serving everybody
 is a real thing to do for a while, behind an authenticating proxy or on an internal tool; set
 `UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
-level and nothing else. [adr/template/0008](adr/template/0008-a-route-cannot-escape-the-identity-seam.md) says
+level and nothing else. [adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says
 what a replacement owes.

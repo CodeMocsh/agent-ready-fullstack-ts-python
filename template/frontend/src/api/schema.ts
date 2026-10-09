@@ -16,7 +16,7 @@ export interface paths {
         /**
          * Record Client Events
          * @description Failures the browser saw, written to this process's log. Public, and so untrusted:
-         *     `ClientEvent` takes no free text. `docs/adr/template/0009`.
+         *     `ClientEvent` takes no free text. `docs/adr/template/0011`.
          */
         post: operations["record_client_events_client_events_post"];
         delete?: never;
