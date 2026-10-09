@@ -100,6 +100,10 @@ required-version = ">=0.11.25"
 # Safe project-level default for every uv command. The Makefile repeats it so copied
 # commands and tool execution outside project discovery retain the same policy.
 exclude-newer = "14 days"
+# This project does not declare starlette; fastapi does. Below 1.7.0 starlette types
+# TestClient.portal with a name anyio 4.15 keeps only at run time, so basedpyright sees the
+# portal as Unknown and checks no call a test makes through it.
+constraint-dependencies = ["starlette>=1.7.0"]
 # An application, not a package: nothing here is installed into the environment, so
 # `app` is importable from the project root rather than from site-packages. That is
 # why pytest sets pythonpath below and devtools/export_openapi.py adjusts sys.path.
