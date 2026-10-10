@@ -18,7 +18,7 @@ authors = [
 {%- if package_license == 'None' %}
 # No license chosen yet. When you pick one, set an SPDX expression here and add a
 # LICENSE file at the repository root, or re-answer the template question:
-# uvx --exclude-newer "14 days" copier@9.17.1 update --data package_license=MIT
+# uvx --exclude-newer "7 days" copier@9.17.1 update --data package_license=MIT
 {%- else %}
 license = "{{ 'LicenseRef-Proprietary' if package_license == 'Proprietary' else package_license }}"
 {%- endif %}
@@ -94,12 +94,12 @@ dev = [
 [tool.uv]
 # Fail fast on old uv versions rather than misbehave. 0.11.25 is the floor where
 # exclude-newer accepts a relative duration rather than only an absolute date: 0.9.7
-# rejects "14 days" outright, and the failure names a date-parsing error rather than
+# rejects "7 days" outright, and the failure names a date-parsing error rather than
 # the version, which is a bad afternoon.
 required-version = ">=0.11.25"
 # Safe project-level default for every uv command. The Makefile repeats it so copied
 # commands and tool execution outside project discovery retain the same policy.
-exclude-newer = "14 days"
+exclude-newer = "7 days"
 # This project does not declare starlette; fastapi does. Below 1.7.0 starlette types
 # TestClient.portal with a name anyio 4.15 keeps only at run time, so basedpyright sees the
 # portal as Unknown and checks no call a test makes through it.
@@ -108,6 +108,21 @@ constraint-dependencies = ["starlette>=1.7.0"]
 # `app` is importable from the project root rather than from site-packages. That is
 # why pytest sets pythonpath below and devtools/export_openapi.py adjusts sys.path.
 package = false
+
+# The cool-off delays a security fix exactly as long as it delays anything else. When a fix
+# cannot wait, let that one release through, in two parts. The floor is the fix:
+# `name>=1.2.3,<2` in dependencies, or `name>=1.2.3` in constraint-dependencies when another
+# package brings it in. The exclusion here is the moment just after the fix was uploaded, as an
+# RFC 3339 timestamp: `name = "2026-09-23T12:00:00Z"`. For that package it replaces the cool-off,
+# so it admits the fix and nothing published after it.
+#
+# uv cannot exclude one version, so the moment is what keeps the exclusion narrow. `false` or a
+# moment in the future admits every later release too, and a duration gives every later release
+# a shorter cool-off. Each is a permanent hole opened to close a temporary one. A moment older
+# than the cool-off holds the package at that moment for good, so delete the exclusion once the
+# fix has aged past the cool-off. tests/test_supply_chain.py refuses each of these.
+# frontend/pnpm-workspace.yaml describes the frontend's counterpart, minimumReleaseAgeExclude.
+[tool.uv.exclude-newer-package]
 
 [tool.ruff]
 line-length = 100

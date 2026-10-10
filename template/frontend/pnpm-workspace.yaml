@@ -1,9 +1,9 @@
 # Supply-chain policy applied to every install in this project. Each setting below
 # carries its own reasoning.
 
-# Cool-off period, in minutes (14 days). A release younger than this is not
+# Cool-off period, in minutes (7 days). A release younger than this is not
 # considered during resolution; most malicious publishes are caught within days.
-minimumReleaseAge: 20160
+minimumReleaseAge: 10080
 
 # Fail when a package's trust evidence gets weaker than the version you already
 # have -- a trusted-publisher release replaced by one with only provenance, or
@@ -23,26 +23,21 @@ trustPolicy: no-downgrade
 trustPolicyExclude:
   - 'semver@6.3.1'
 
-# The cool-off has a cost, and this is what it looks like: a patch that fixes a
-# high-severity advisory is unavailable for the same fortnight as everything else,
-# so a fresh install resolves the vulnerable version instead. nanoid reaches this
-# project through vite -> postcss, and every version below 3.3.18 carries
-# GHSA-2v37-7h3g-55p8 (a custom generator can loop forever when size is 0).
+# The cool-off has a cost: a patch that fixes a high-severity advisory is unavailable
+# for as long as everything else, so a fresh install resolves the vulnerable version.
+# When a fix cannot wait, let that one release through, in two parts. The floor is the
+# fix, an entry under overrides below. The exclusion lets the floor resolve before the
+# fix ages past the cool-off: a top-level `minimumReleaseAgeExclude:` list, holding an
+# entry pinned to that exact version, such as 'name@1.2.3'.
 #
-# The floor is the fix and stays. The exclusion is what lets the floor resolve
-# before 3.3.18 matures, and it is pinned to that exact version -- the same shape
-# as trustPolicyExclude above and for the same reason. A bare `nanoid` here would
-# exempt every future release of it from the cool-off, which is a permanent hole
-# opened to close a temporary one. Once 3.3.19 exists, this entry buys nothing and
-# should go.
+# That is the same shape as trustPolicyExclude above, for the same reason. A bare
+# `name` would exempt every future release of it from the cool-off, which is a
+# permanent hole opened to close a temporary one. Once the fix has aged past the
+# cool-off, the exclusion buys nothing and should go. The floor stays.
 #
-# source-map-js is the same case: it reaches this project through vite -> postcss,
-# and every version below 1.2.2 carries GHSA-68fv-2mgg-jv7q. Once 1.2.2 has aged
-# past the cool-off, its entry buys nothing and should go.
-minimumReleaseAgeExclude:
-  - 'nanoid@3.3.18'
-  - 'source-map-js@1.2.2'
-
+# nanoid and source-map-js reach this project through vite -> postcss. Every nanoid
+# below 3.3.18 carries GHSA-2v37-7h3g-55p8 (a custom generator can loop forever when
+# size is 0), and every source-map-js below 1.2.2 carries GHSA-68fv-2mgg-jv7q.
 overrides:
   nanoid: '^3.3.18'
   source-map-js: '^1.2.2'

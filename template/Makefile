@@ -9,7 +9,7 @@ SHELL := /bin/bash
 
 # Repeated here because uvx and tool invocations run outside project discovery and
 # would otherwise miss the setting in backend/pyproject.toml.
-UV_EXCLUDE_NEWER ?= 14 days
+UV_EXCLUDE_NEWER ?= 7 days
 export UV_EXCLUDE_NEWER
 
 # CONTRACT_BASE_URL is deliberately not set here. devtools/contract-test.sh derives it

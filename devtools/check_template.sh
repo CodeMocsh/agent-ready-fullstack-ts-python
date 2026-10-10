@@ -19,7 +19,7 @@ unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
 
 VARIANT="${1:-default}"
 FAST="${FAST:-0}"
-export UV_EXCLUDE_NEWER="14 days"
+export UV_EXCLUDE_NEWER="7 days"
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -637,7 +637,7 @@ PY
     done
     echo "a later template change" >>"$WORK/update/src/template/docs/schema.md"
     $G -C "$WORK/update/src" commit -qam "a later template"
-    (cd "$BASE" && uvx --exclude-newer "14 days" "$COPIER_SPEC" update --defaults --quiet \
+    (cd "$BASE" && uvx --exclude-newer "7 days" "$COPIER_SPEC" update --defaults --quiet \
         --trust --vcs-ref=HEAD) >"$WORK/update.log" 2>&1 \
         || { cat "$WORK/update.log" >&2; fail "copier update failed on a project that declined both questions"; }
     grep -q "a later template change" "$BASE/docs/schema.md" \
@@ -1600,7 +1600,7 @@ need_grep '\.lucide' frontend/src/index.css
 need_grep 'stroke-width: var(--icon-stroke)' frontend/src/index.css
 
 echo "==> assert the supply-chain policy"
-need_grep 'minimumReleaseAge: 20160' frontend/pnpm-workspace.yaml
+need_grep 'minimumReleaseAge: 10080' frontend/pnpm-workspace.yaml
 # The dlx cache is held for a month so `make pre-commit` does not reach the registry
 # on the first commit of each day. That is only safe while every dlx call names an
 # exact version, so assert the one we ship still does.
@@ -1608,7 +1608,7 @@ need_grep 'dlxCacheMaxAge' frontend/pnpm-workspace.yaml
 need_grep 'openapi-typescript@7\.13\.0' frontend/package.json
 need_grep 'trustPolicy: no-downgrade' frontend/pnpm-workspace.yaml
 need_grep 'semver@6.3.1' frontend/pnpm-workspace.yaml
-need_grep 'exclude-newer = "14 days"' backend/pyproject.toml
+need_grep 'exclude-newer = "7 days"' backend/pyproject.toml
 # An exclusion buys back one specific package from one specific policy, and the whole
 # value of that is in how narrow it is. A bare name exempts every future release of
 # it too, which is a permanent hole opened to close a temporary one.
@@ -1634,7 +1634,7 @@ deps = tomllib.load(open("backend/pyproject.toml", "rb"))["project"]["dependenci
 unbounded = [dep for dep in deps if "<" not in dep]
 assert not unbounded, f"runtime dependencies with no upper bound: {unbounded}"
 PY
-# A relative duration needs a uv new enough to parse one. 0.9.7 rejects "14 days"
+# A relative duration needs a uv new enough to parse one. 0.9.7 rejects "7 days"
 # with a date-parsing error that names neither uv nor the version, so the floor has to
 # be at least this wherever the project is installed.
 need_grep 'required-version = ">=0.11.25"' backend/pyproject.toml
@@ -1799,7 +1799,7 @@ run "pnpm install" pnpm -C frontend install --prefer-offline
 
 echo "==> assert a fresh install ships no known high-severity vulnerability"
 # The cool-off delays a security patch exactly as long as it delays anything else,
-# so for a fortnight after a fix the only resolvable version is the vulnerable one.
+# so until a fix ages past it the only resolvable version is the vulnerable one.
 # No file in this repository changes when that happens and no other check notices:
 # the audit runs against what a new project actually resolved, today. The fix is an
 # exact minimumReleaseAgeExclude entry naming the patched version, never a wider

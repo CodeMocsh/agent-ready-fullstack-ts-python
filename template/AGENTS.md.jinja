@@ -119,8 +119,11 @@ fans out to both. Each half works without the other's toolchain.
 
 **Dependencies**
 
-- A package published in the last fortnight does not resolve, in either half, and that includes
+- A package published in the last 7 days does not resolve, in either half, and that includes
   `pnpm dlx shadcn add`. Pick an older version. Commit both lockfiles.
+- A security fix published in those 7 days gets an exclusion for that one release, and nothing
+  wider: `minimumReleaseAgeExclude` in `frontend/pnpm-workspace.yaml`,
+  `[tool.uv.exclude-newer-package]` in `backend/pyproject.toml`. Each file says how.
 
 ## Commands
 

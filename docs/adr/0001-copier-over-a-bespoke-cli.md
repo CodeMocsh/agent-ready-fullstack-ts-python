@@ -40,7 +40,7 @@ already needs uv, so `uvx` adds no new requirement.
   `{% if package_license != 'None' %}LICENSE{% endif %}.jinja`. It renders to no file when the
   answer is `None`. The license bodies are one if/elif chain inside it.
 - One Copier version is pinned, in `COPIER_SPEC` in `devtools/render.sh`. Every render runs it
-  through `uvx --exclude-newer "14 days"`. `devtools/check_template.sh` refuses any other
+  through `uvx --exclude-newer "7 days"`. `devtools/check_template.sh` refuses any other
   `copier@` version that a doc, script or workflow in the repo names.
 - A release is a git tag `v` plus the contents of `VERSION`, because `copier update` resolves
   against tags. `.github/workflows/release.yml` cuts the tag when the gate passes on main.
