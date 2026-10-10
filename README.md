@@ -34,7 +34,7 @@ they do.
 ## Usage
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.17.1 copy \
+uvx --exclude-newer "7 days" copier@9.17.1 copy \
   gh:CodeMocsh/agent-ready-fullstack-ts-python my-app
 ```
 
@@ -54,7 +54,7 @@ Commit before `make install`: the installer activates the project's git hooks, a
 repository to install them into.
 
 Projects record their answers in `.copier-answers.yml`, so
-`uvx --exclude-newer "14 days" copier@9.17.1 update` pulls later template improvements as a
+`uvx --exclude-newer "7 days" copier@9.17.1 update` pulls later template improvements as a
 three-way merge. Review the diff, resolve any `.rej` files, and run `make openapi` if the
 contract artifacts were among them — the generated project's own `docs/installation.md` says
 what else to expect.

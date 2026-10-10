@@ -66,7 +66,7 @@ green run means the two agree.
 is what lets a later template change reach a project generated months ago:
 
 ```bash
-uvx --exclude-newer "14 days" copier@9.17.1 update
+uvx --exclude-newer "7 days" copier@9.17.1 update
 make install
 make openapi
 make lint
@@ -94,7 +94,7 @@ What to expect, because it is not all free:
   example's files, your edits included. The file says never to edit it by hand. This one edit
   is expected, and Copier keeps the value when it writes the file again.
 - **Drop the GitHub workflow if your checks run somewhere else.** Answer once, on the update
-  itself: `uvx --exclude-newer "14 days" copier@9.17.1 update --data github_ci=false`. On this
+  itself: `uvx --exclude-newer "7 days" copier@9.17.1 update --data github_ci=false`. On this
   question the update is meant to delete: it removes the workflow and
   `backend/tests/test_workflow.py`, even a workflow you edited, so commit first. A project
   generated before 0.33.0 keeps its `.github/`: delete it yourself. `docs/development.md` is
@@ -114,6 +114,12 @@ What to expect, because it is not all free:
   are generated from your `ddl.py`, which by then holds your entries as well as the template's.
   A merged copy of either describes neither project, and `make pre-commit` says so. `make schema`
   rewrites both. Commit them with the update.
+- **A uv exclusion table you already have can come in twice.** From 0.35.0
+  `backend/pyproject.toml` ships an empty `[tool.uv.exclude-newer-package]`. The merge can keep
+  both headers with no conflict, and uv then refuses the file. Keep one header and move your
+  entries under it. `backend/tests/test_supply_chain.py` then refuses each entry that is not a
+  timestamp inside the cool-off with a floor, and its message says what to do. Your own
+  `docs/development.md` keeps the cool-off it states, so correct it by hand.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

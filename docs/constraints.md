@@ -116,8 +116,10 @@ file added under `frontend/src/` afterwards.
 
 A `>=` floor whose value is the *latest* release **cannot resolve**: the cool-off forbids the
 only version that satisfies it. When bumping in either half, pick the highest version published
-outside the window rather than the newest. `pnpm-workspace.yaml` carries the mechanism and the
-exceptions it currently needs, each pinned to an exact version.
+outside the window rather than the newest. A security fix that cannot wait gets an exclusion.
+`pnpm-workspace.yaml` and `pyproject.toml.jinja` each say how. `check_template.sh` holds a pnpm
+exclusion to one exact version. A generated project's `backend/tests/test_supply_chain.py` holds
+a uv exclusion to one timestamp inside the cool-off, with a floor.
 
 ## `apps/web` + `apps/api` was rejected, and stays rejected
 

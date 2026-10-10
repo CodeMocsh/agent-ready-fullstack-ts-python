@@ -38,7 +38,7 @@ if [ "${1:-}" = "--spec" ]; then
     exit 0
 fi
 
-export UV_EXCLUDE_NEWER="14 days"
+export UV_EXCLUDE_NEWER="7 days"
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=maintenance.auto GIT_CONFIG_VALUE_0=false
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -124,7 +124,7 @@ git -C "$SRC" -c user.email=check@example.com -c user.name=check \
     -c commit.gpgsign=false commit -qm "working tree under test"
 
 # shellcheck disable=SC2086
-uvx --exclude-newer "14 days" "$COPIER_SPEC" copy --defaults --quiet --trust \
+uvx --exclude-newer "7 days" "$COPIER_SPEC" copy --defaults --quiet --trust \
     --vcs-ref=HEAD \
     $LICENSE "$@" \
     "$SRC" "$OUT" >&2
