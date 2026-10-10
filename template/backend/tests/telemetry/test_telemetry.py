@@ -396,14 +396,15 @@ def test_a_collector_that_hangs_slows_no_request_and_holds_shutdown_to_two_timeo
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", str(EXPORT_TIMEOUT_SECONDS))
 
     with TestClient(with_widgets(create_app())) as client:
+        routed = client.get("/widgets")
         started = time.monotonic()
         answered = client.get("/widgets")
         answering = time.monotonic() - started
         stopping = time.monotonic()
     stopped = time.monotonic() - stopping
 
-    assert answered.status_code == 200
-    assert answering < EXPORT_TIMEOUT_SECONDS
+    assert routed.status_code == answered.status_code == 200
+    assert answering < EXPORT_TIMEOUT_SECONDS / 2
     assert stopped < 2 * EXPORT_TIMEOUT_SECONDS + 1.5
 
 
