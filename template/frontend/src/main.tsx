@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { startClientEvents } from "@/client-events";
+import { reloadOnceOnMissingChunk } from "@/missing-chunk";
 import { router } from "@/router";
 import "@/index.css";
 
@@ -25,6 +26,7 @@ if (rootElement === null) {
 const record = startClientEvents();
 window.addEventListener("error", (event) => record("uncaught", event.error));
 window.addEventListener("unhandledrejection", (event) => record("uncaught", event.reason));
+reloadOnceOnMissingChunk(window, () => sessionStorage, import.meta.url);
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({ onError: (error) => record("query", error) }),

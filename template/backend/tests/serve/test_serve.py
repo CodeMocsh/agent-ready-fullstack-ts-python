@@ -32,6 +32,8 @@ from app.wiring import BundleMissing, build_bundle
 SHELL = "<!doctype html><title>the shell</title>"
 SCRIPT = "export const built = 1;\n"
 HASHED = f"{ASSETS}/index-abc123.js"
+NESTED = f"{ASSETS}/fonts/geist-abc123.woff2"
+UNHASHED = "favicon.svg"
 SECRET = "the private key nobody asked this process for"
 BESIDE = "secret.txt"
 UNROUTED = "/api/no-route-answers-this"
@@ -61,6 +63,9 @@ def bundle(tmp_path: Path) -> Path:
     (built / ASSETS).mkdir(parents=True)
     (built / INDEX).write_text(SHELL)
     (built / HASHED).write_text(SCRIPT)
+    (built / NESTED).parent.mkdir()
+    (built / NESTED).write_text(SCRIPT)
+    (built / UNHASHED).write_text("<svg/>")
     return built
 
 
@@ -118,6 +123,18 @@ def test_a_missing_asset_is_a_404_and_never_the_shell(client: TestClient) -> Non
     answered = client.get(f"/{ASSETS}/index-deadbee.js")
     assert answered.status_code == 404
     assert answered.text != SHELL
+
+
+@pytest.mark.parametrize("path", [HASHED, NESTED])
+def test_a_file_under_assets_is_kept_for_a_year(client: TestClient, path: str) -> None:
+    assert client.get(f"/{path}").headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+@pytest.mark.parametrize("path", ["/", "/some/client/route", f"/{INDEX}", f"/{UNHASHED}"])
+def test_every_other_file_is_asked_for_again_on_each_load(client: TestClient, path: str) -> None:
+    answered = client.get(path)
+    assert answered.status_code == 200
+    assert answered.headers["cache-control"] == "no-cache"
 
 
 def test_a_path_cannot_escape_the_bundle(client: TestClient) -> None:
