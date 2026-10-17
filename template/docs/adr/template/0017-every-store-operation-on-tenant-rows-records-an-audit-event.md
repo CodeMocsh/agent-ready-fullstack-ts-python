@@ -39,18 +39,28 @@ its record succeed or fail together.
   in an audit event is a second copy of the data, with none of its protection.
   `test_an_event_holds_no_value_a_row_holds` holds this.
 - **A read records the ids it returned.** A list records one event that names every row in it.
-  An operation on a row that is not there records nothing, because it touched nothing.
+- **An operation that finds no row records the id it looked for, with the outcome `absent`.**
+  A row that never existed, one already removed and one in another tenant look the same under
+  the policy, so an attempt on another tenant's ids is recorded as well.
+  `test_an_operation_on_an_absent_task_records_the_id_it_looked_for` holds this.
+- **A request the identity seam refuses records no audit event.** It has no tenant, so it is not
+  tenant data, and anybody can send one, so recording each would let anybody fill the table.
+  Its `request completed` line names it, with a `401` and a null tenant.
+  `test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line` holds this.
 - **An actor is recorded as a snapshot**: its issuer, subject and name at the time, never a
   reference to a row. A person who is renamed or removed does not change what an event says.
   `on_behalf_of` is recorded one level deep. `audit_event` raises `UnrecordableActor` for a
   deeper chain, because dropping a level would forget a person.
 - **`audit_events` is tenant data, and append-only.** It is in `TENANT_TABLES`, so its policy is
-  forced like every other. The application role holds `INSERT` and `SELECT` on it, and never
-  `UPDATE` or `DELETE`. `APPEND_ONLY_ENTRY_KEY` in `app/store/ddl.py` revokes both on every
-  release step, after the default privileges grant them, and so does `deploy/schema.sql`.
-  `deploy/roles.sql` revokes them again after its own grants.
-  `test_the_application_role_cannot_update_or_delete_an_event` and
-  `test_applying_the_roles_again_does_not_grant_update_or_delete_again` hold each.
+  forced like every other. The application role holds `SELECT`, and no `UPDATE` or `DELETE`, so
+  it cannot change or remove an event. It holds `INSERT` on every column but `seq` and
+  `recorded_at`, which the database fills, so it cannot backdate or reorder one.
+  `writes_withheld_sql` in `app/store/roles.py` sets this, after the default privileges grant
+  `SELECT`, `INSERT`, `UPDATE` and `DELETE`. `apply` runs it after the last entry,
+  `deploy/schema.sql` ends with it, and `deploy/roles.sql` ends with it after its own grants.
+  `test_the_application_role_cannot_change_remove_or_backdate_an_event`,
+  `test_applying_the_roles_again_grants_no_forbidden_write_on_an_event` and
+  `test_the_schema_script_withholds_the_same_writes_as_a_migration` hold each.
 - **Every event belongs to exactly one tenant.** `tenant_id` on `audit_events` is `NOT NULL` and
   never empty, as on every tenant table, and a recorded event names it.
 - **Work outside a request is recorded under the actor its caller passes.** A job or an agent is
@@ -73,24 +83,24 @@ its record succeed or fail together.
 - **An event with the row's values.** That is a copy of the data in a table with weaker
   controls. A project that needs earlier values keeps them in its own tables, under their own
   policy.
-- **The revoke as a step of `migrate.py`, as `_revoke_ledger` is for the ledger.** Then
-  `deploy/schema.sql` does not carry it, and a deployment whose own tool applies that script
-  keeps `UPDATE` and `DELETE`. The entry names the application role, and does nothing where
-  the role does not exist yet. `deploy/roles.sql`, applied after the table exists, revokes at
-  once, and so does the next release step.
+- **The grant as an entry in `ddl.py`.** It has to run after every repair, so its key would be
+  the highest for good, and the schema version a person reads would stop changing.
 
 ## Consequences
 
 - Every store method a project adds takes the actor and records its event, and its contract
   tests assert the event the way `tests/store_contract.py` asserts the example's.
 - A read costs one insert. A list costs one insert, whatever its length.
-- The application can insert an event that did not happen, with any time. The events prove
-  what the application recorded, not more. A deployment that needs evidence against the
-  application itself ships the table to storage the application cannot write, and runs
-  `pgaudit` beside it.
-- An operation on a row that is not there records nothing, and neither does a request the
-  identity seam refuses. Only the request line, which is lossy, names those. A project that must
-  review refused access records an event for it where it refuses.
+- The application can insert an event that did not happen. It cannot choose when the event
+  happened, or where it sorts. The events prove what the application recorded, not more. A
+  deployment that needs evidence against the application itself ships the table to storage
+  the application cannot write, and runs `pgaudit` beside it.
+- A failed sign-in is the identity provider's record. A credential the seam rejects, because it
+  is expired, forged or for another audience, is recorded only on its `request completed`
+  line, which is lossy and does not say why.
+- A project that refuses a signed-in actor inside a tenant, for a role it lacks, records an
+  event for that refusal where it refuses. A new outcome needs a repair that replaces the
+  `audit_events_outcome_known` constraint.
 - Reading the audit events records no event. No route serves them. A project that serves them
   records the read where it serves them.
 - An action on a tenant itself is recorded in that tenant, and an action across tenants records

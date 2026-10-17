@@ -17,11 +17,13 @@ import asyncpg
 import pytest
 
 from app.store.ddl import TENANT_GUC, TENANT_TABLES
-from app.store.migrate import SchemaBehindError, apply, check
+from app.store.migrate import SchemaBehindError, apply, check, emit_sql
+from app.store.roles import app_role, emit_roles_sql, owner_role
 from tests.integration.conftest import (
     Provisioned,
     a_fresh_schema_name,
     connect,
+    deprovision,
     drop_schema,
     postgres_dsn,
 )
@@ -212,8 +214,7 @@ async def test_no_security_definer_function_exists_in_the_schema(
         await conn.close()
 
 
-async def test_the_application_role_cannot_rewrite_the_ledger(provisioned: Provisioned) -> None:
-    """The role that verifies the schema must not be able to forge its own answer."""
+async def assert_the_app_role_cannot_write_the_ledger(provisioned: Provisioned) -> None:
     conn: Any = await connect(provisioned.app_dsn)
     try:
         await conn.execute(f'SET search_path TO "{provisioned.schema}"')
@@ -222,6 +223,108 @@ async def test_the_application_role_cannot_rewrite_the_ledger(provisioned: Provi
             await conn.execute("INSERT INTO applied_once(key) VALUES ('9999_forged')")
     finally:
         await conn.close()
+
+
+async def test_the_application_role_cannot_rewrite_the_ledger(provisioned: Provisioned) -> None:
+    """The role that verifies the schema must not be able to forge its own answer."""
+    await assert_the_app_role_cannot_write_the_ledger(provisioned)
+
+
+async def test_applying_the_roles_again_does_not_give_the_ledger_back(
+    provisioned: Provisioned,
+) -> None:
+    """`deploy/roles.sql` grants every write on every table that exists. Applied again after a
+    migration, it takes the ledger away again in the same script, not at the next migration."""
+    admin: Any = await connect(provisioned.admin_dsn)
+    try:
+        await admin.execute(emit_roles_sql(provisioned.schema))
+    finally:
+        await admin.close()
+
+    await assert_the_app_role_cannot_write_the_ledger(provisioned)
+
+
+_EVENT_COLUMNS = (
+    "tenant_id, actor_issuer, actor_subject, actor_name, action, outcome, resource_type, "
+    "resource_ids, fields"
+)
+_EVENT_VALUES = "$1, 'a-test', 'the-suite', 'The suite', 'read', 'done', 'tasks', '{}', '{}'"
+
+_FORBIDDEN_ON_EVENTS = (
+    "UPDATE audit_events SET actor_subject = 'somebody else'",
+    "DELETE FROM audit_events",
+    f"INSERT INTO audit_events (recorded_at, {_EVENT_COLUMNS}) "
+    f"VALUES (now() - interval '1 week', {_EVENT_VALUES})",
+    f"INSERT INTO audit_events (seq, {_EVENT_COLUMNS}) VALUES (1, {_EVENT_VALUES})",
+)
+"""Every write the application role is refused on an audit event: changing one, removing one,
+and setting the time or the sequence the database fills."""
+
+
+async def assert_the_app_role_records_events_and_nothing_more(provisioned: Provisioned) -> None:
+    conn: Any = await connect(provisioned.app_dsn)
+    await conn.execute(f'SET search_path TO "{provisioned.schema}"')
+    try:
+        async with conn.transaction():
+            await conn.execute("SELECT set_config($1, $2, true)", TENANT_GUC, ACME)
+            await conn.execute(
+                f"INSERT INTO audit_events ({_EVENT_COLUMNS}) VALUES ({_EVENT_VALUES})", ACME
+            )
+        for statement in _FORBIDDEN_ON_EVENTS:
+            async with conn.transaction():
+                await conn.execute("SELECT set_config($1, $2, true)", TENANT_GUC, ACME)
+                with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                    await conn.execute(statement, *([ACME] if "$1" in statement else []))
+    finally:
+        await conn.close()
+
+
+async def test_the_application_role_cannot_change_remove_or_backdate_an_event(
+    provisioned: Provisioned,
+) -> None:
+    await assert_the_app_role_records_events_and_nothing_more(provisioned)
+
+
+async def test_applying_the_roles_again_grants_no_forbidden_write_on_an_event(
+    provisioned: Provisioned,
+) -> None:
+    """`deploy/roles.sql` grants every write on every table that exists. Applied again after a
+    migration, it withholds the same writes again in the same script."""
+    admin: Any = await connect(provisioned.admin_dsn)
+    try:
+        await admin.execute(emit_roles_sql(provisioned.schema))
+    finally:
+        await admin.close()
+
+    await assert_the_app_role_records_events_and_nothing_more(provisioned)
+
+
+async def test_the_schema_script_withholds_the_same_writes_as_a_migration() -> None:
+    """A deployment whose own tool applies `deploy/schema.sql` gets what `make migrate` gives."""
+    dsn = postgres_dsn()
+    schema = a_fresh_schema_name()
+    admin: Any = await connect(dsn)
+    try:
+        await admin.execute(emit_roles_sql(schema))
+        await admin.execute(f'SET ROLE "{owner_role(schema)}"')
+        await admin.execute(emit_sql(schema))
+        app = app_role(schema)
+        assert not await admin.fetchval(
+            "SELECT has_table_privilege($1, $2, 'INSERT')", app, f'"{schema}".applied_once'
+        )
+        assert not await admin.fetchval(
+            "SELECT has_column_privilege($1, $2, 'recorded_at', 'INSERT')",
+            app,
+            f'"{schema}".audit_events',
+        )
+        assert await admin.fetchval(
+            "SELECT has_column_privilege($1, $2, 'actor_subject', 'INSERT')",
+            app,
+            f'"{schema}".audit_events',
+        )
+    finally:
+        await admin.close()
+        await deprovision(dsn, schema)
 
 
 async def test_the_migration_leaves_every_object_owned_by_the_owner_role(

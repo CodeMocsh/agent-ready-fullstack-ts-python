@@ -17,6 +17,10 @@ from app.identity.shared import Actor
 
 Action = Literal["read", "create", "update", "delete"]
 
+Outcome = Literal["done", "absent"]
+"""`done` when the operation read or wrote the rows it names, and `absent` when it found no row
+with the id it names: one that never existed, one that was removed, or one in another tenant."""
+
 
 class UnrecordableActor(ValueError):
     """The actor acted for an actor who acted for somebody else. An audit event records one
@@ -27,8 +31,9 @@ class AuditEvent(BaseModel):
     """One operation on rows, as a store records it.
 
     `resource_ids` are the rows the operation returned or changed, in the order it returned
-    them. `fields` are the names of the fields it wrote. `request_id` and `trace_id` are `None`
-    for an operation outside a request or outside a sampled trace.
+    them, or the id it looked for when `outcome` is `absent`. `fields` are the names of the
+    fields it wrote. `request_id` and `trace_id` are `None` for an operation outside a request
+    or outside a sampled trace.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
@@ -38,6 +43,7 @@ class AuditEvent(BaseModel):
     resource_type: str
     resource_ids: tuple[str, ...]
     fields: tuple[str, ...]
+    outcome: Outcome
     request_id: str | None
     trace_id: str | None
 
@@ -77,6 +83,12 @@ def audit_event(
         resource_type=resource_type,
         resource_ids=resource_ids,
         fields=fields,
+        outcome="done",
         request_id=log.current_request_id(),
         trace_id=log.current_trace_id(),
     )
+
+
+def absent(event: AuditEvent) -> AuditEvent:
+    """`event` for an operation that found no row: the same id, no field written."""
+    return event.model_copy(update={"outcome": "absent", "fields": ()})

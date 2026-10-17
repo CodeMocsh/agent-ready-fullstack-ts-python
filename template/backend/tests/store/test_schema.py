@@ -147,8 +147,8 @@ def repairs_out_of_step(entries: list[tuple[str, str]]) -> list[str]:
     reaches no database that already has the table, the `ALTER` alone leaves the `CREATE` lying
     about it, and an `ALTER` keyed below its `CREATE` runs before the table exists.
 
-    Taken as an argument rather than read from `ddl.SCHEMA`, because the template ships no
-    repair yet: driven only by the live schema every assertion here would be vacuous.
+    Taken as an argument rather than read from `ddl.SCHEMA`, so each way of disagreeing is driven
+    whatever repairs the live schema happens to ship.
     """
     creates = {
         body.split(CREATE_TABLE, 1)[1].split()[0]: (key, body)
@@ -394,8 +394,9 @@ def test_no_shipped_entry_body_has_changed() -> None:
     assert not edited, (
         f"{edited} shipped, and the body has changed since. A database that already ran it "
         f"never gets the change: `CREATE TABLE IF NOT EXISTS` skips, every key still matches, "
-        f"and every query naming what you added fails. Restore the entry and add the change as "
-        f"a {ddl.REPAIR_BAND} repair, or hand-edit .schema-baseline.json if the edit is cosmetic."
+        f"and every query naming what you added fails. Restore the entry, or keep a new column in "
+        f"the CREATE, add it as a {ddl.REPAIR_BAND} repair, and re-record that one hash in "
+        f".schema-baseline.json by hand."
     )
 
 
