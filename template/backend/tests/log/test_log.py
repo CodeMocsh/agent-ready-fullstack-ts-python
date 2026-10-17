@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 
 from app import log
 from app.deployment import RESOURCE_ATTRIBUTES_ENV
-from app.identity import Unauthenticated
+from app.identity.shared import Actor, Principal, Unauthenticated
 from app.main import create_app
 from tests.conftest import Logged
 from tests.doubles import CANARY
@@ -31,19 +31,24 @@ SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 TENANT_HEADER = "x-test-tenant"
 
 
-def tenant_from_header(request: Request) -> str:
-    """A seam that resolves the tenant `TENANT_HEADER` names, and refuses a request naming none."""
+def principal_from_header(request: Request) -> Principal:
+    """A resolver whose principal is in the tenant `TENANT_HEADER` names, and which refuses a
+    request naming none."""
     named = request.headers.get(TENANT_HEADER)
     if named is None:
         raise Unauthenticated("this request names no tenant")
-    return named
+    return Principal(
+        tenant_id=named, actor=Actor(issuer="a-test", subject=f"actor-in-{named}", name="An actor")
+    )
 
 
-def named_tenant(request: Request, tenant: Annotated[str, Depends(tenant_from_header)]) -> str:
-    """The tenant `tenant_from_header` resolved, named on the request line the way the shipped
-    seam names its own."""
-    log.name_on_request_line(request, log.TENANT_ID, tenant)
-    return tenant
+def named_principal(
+    request: Request, principal: Annotated[Principal, Depends(principal_from_header)]
+) -> Principal:
+    """The principal `principal_from_header` resolved, named on the request line as
+    `app/deps.py` names its own."""
+    log.name_principal(request, principal)
+    return principal
 
 
 @pytest.fixture
@@ -62,7 +67,7 @@ def client(app: FastAPI, logged: Logged) -> Iterator[TestClient]:
 
 @pytest.fixture
 def guarded(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    """The app, also serving the widgets and `/raises` behind `named_tenant`."""
+    """The app, also serving the widgets and `/raises` behind `named_principal`."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     failing = APIRouter()
@@ -72,7 +77,7 @@ def guarded(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
         raise RuntimeError("the handler failed")
 
     for router in (widgets_router, failing):
-        app.include_router(router, dependencies=[Depends(named_tenant)])
+        app.include_router(router, dependencies=[Depends(named_principal)])
     return app
 
 
@@ -153,12 +158,12 @@ def test_a_request_to_a_prefixed_router_is_logged_by_the_whole_template(
     assert line["http.route"] == "/shelves/{shelf}/widgets/{id}"
 
 
-def test_each_request_is_logged_with_the_tenant_it_resolved(
+def test_each_request_is_logged_with_the_principal_it_resolved(
     guarded: FastAPI, logged: Logged
 ) -> None:
-    """What lets one tenant's requests be read apart from another's. A request that resolved a
-    tenant names it whatever it answered; one that resolved none -- a public route, or the seam
-    refusing -- names none."""
+    """What lets one tenant's requests, and one actor's, be read apart from another's. A request
+    that resolved a principal names its tenant and actor whatever it answered; one that resolved
+    none -- a public route, or the seam refusing -- names none of the template's fields."""
     with TestClient(guarded, raise_server_exceptions=False) as client:
         logged()
         client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
@@ -171,28 +176,48 @@ def test_each_request_is_logged_with_the_tenant_it_resolved(
     lines = completed(logged())
 
     assert [
-        (line["http.route"], line["http.response.status_code"], line["tenant_id"]) for line in lines
+        (
+            line["http.route"],
+            line["http.response.status_code"],
+            *(line[field] for field in log.TEMPLATE_FIELDS),
+        )
+        for line in lines
     ] == [
-        ("/widgets", 200, "tenant-a"),
-        ("/widgets", 200, "tenant-b"),
-        ("/widgets/{id}", 404, "tenant-a"),
-        ("/raises", 500, "tenant-b"),
-        ("/widgets", 401, None),
-        ("/health", 200, None),
+        ("/widgets", 200, "tenant-a", "a-test", "actor-in-tenant-a"),
+        ("/widgets", 200, "tenant-b", "a-test", "actor-in-tenant-b"),
+        ("/widgets/{id}", 404, "tenant-a", "a-test", "actor-in-tenant-a"),
+        ("/raises", 500, "tenant-b", "a-test", "actor-in-tenant-b"),
+        ("/widgets", 401, None, None, None),
+        ("/health", 200, None, None, None),
     ]
+
+
+def test_a_tenant_named_without_its_actor_is_refused(guarded: FastAPI) -> None:
+    """A line that names a tenant and no actor reads as a request nobody made."""
+
+    def naming_the_tenant_alone(request: Request) -> Principal:
+        log.name_on_request_line(request, log.TENANT_ID, "tenant-a")
+        return principal_from_header(request)
+
+    guarded.dependency_overrides[principal_from_header] = naming_the_tenant_alone
+    with (
+        TestClient(guarded) as client,
+        pytest.raises(log.UndeclaredRequestField, match="name_principal"),
+    ):
+        client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
 
 
 def test_a_field_the_project_declares_is_on_every_request_line(
     guarded: FastAPI, logged: Logged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A project that resolves more than a tenant names it the same way, once it declares it."""
-    monkeypatch.setattr(log, "PROJECT_FIELDS", frozenset({"user.id"}))
+    """A field the project declares is named the same way as the template's own."""
+    monkeypatch.setattr(log, "PROJECT_FIELDS", frozenset({"order.id"}))
 
-    def tenant_and_user(request: Request) -> str:
-        log.name_on_request_line(request, "user.id", "user-1")
-        return tenant_from_header(request)
+    def principal_and_order(request: Request) -> Principal:
+        log.name_on_request_line(request, "order.id", "order-1")
+        return principal_from_header(request)
 
-    guarded.dependency_overrides[tenant_from_header] = tenant_and_user
+    guarded.dependency_overrides[principal_from_header] = principal_and_order
     with TestClient(guarded) as client:
         logged()
         client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
@@ -200,8 +225,8 @@ def test_a_field_the_project_declares_is_on_every_request_line(
 
     lines = completed(logged())
 
-    assert [(line["tenant_id"], line["user.id"]) for line in lines] == [
-        ("tenant-a", "user-1"),
+    assert [(line["tenant_id"], line["order.id"]) for line in lines] == [
+        ("tenant-a", "order-1"),
         (None, None),
     ]
 
@@ -209,11 +234,11 @@ def test_a_field_the_project_declares_is_on_every_request_line(
 def test_a_field_nobody_declared_is_refused_rather_than_logged(
     guarded: FastAPI, logged: Logged
 ) -> None:
-    def naming_an_email(request: Request) -> str:
+    def naming_an_email(request: Request) -> Principal:
         log.name_on_request_line(request, "email", CANARY)
-        return tenant_from_header(request)
+        return principal_from_header(request)
 
-    guarded.dependency_overrides[tenant_from_header] = naming_an_email
+    guarded.dependency_overrides[principal_from_header] = naming_an_email
     with TestClient(guarded) as client, pytest.raises(log.UndeclaredRequestField):
         client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
 

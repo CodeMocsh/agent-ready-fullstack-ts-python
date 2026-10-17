@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
-from app.identity import tenant_for
+from app.identity import principal_for
 from app.main import create_app
 from tests import widgets
 from tests.identity.doubles import REFUSAL, refusing
@@ -71,7 +71,7 @@ def refused(monkeypatch: pytest.MonkeyPatch) -> Iterator[Refusing]:
     """
     monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
-    app.dependency_overrides[tenant_for] = refusing
+    app.dependency_overrides[principal_for] = refusing
     with TestClient(app) as client:
         yield Refusing(app, client)
 
@@ -122,7 +122,7 @@ def test_a_refused_request_says_so_in_the_contract_s_own_shape(refused: Refusing
     """A refusal a client can act on: the declared status, the header that names the scheme, and
     an `ErrorBody` rather than whatever a bare exception renders as. Without the handler in
     `app/main.py` this is a `500`, which a client retries."""
-    refused.app.include_router(widgets.router, dependencies=[Depends(tenant_for)])
+    refused.app.include_router(widgets.router, dependencies=[Depends(principal_for)])
 
     answer = refused.client.get("/widgets")
 

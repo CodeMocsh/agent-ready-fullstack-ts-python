@@ -1,11 +1,11 @@
-"""The seam itself: what the stub answers, and what a deployment running it is told.
+"""The identity stub: what it answers, and what a deployment running it is told.
 
 `tests/routes/test_guarantee.py` asserts that every route *reaches* this. These assert what
 happens once they get here, and what the process says out loud about it at startup.
 
-**Every seam is substituted in both shapes.** A replacement that verifies a credential reaches
+**Every resolver is substituted in both shapes.** A replacement that verifies a credential reaches
 a session store, so `async def` is what one is actually written as — and a suite that only ever
-swapped in a synchronous seam reported a fully authenticating deployment as authenticating
+swapped in a synchronous resolver reported a fully authenticating deployment as authenticating
 nothing, green, on every boot.
 """
 
@@ -16,102 +16,83 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from app.deployment import ACKNOWLEDGED_ENV
-from app.identity import (
+from app.identity import principal_for
+from app.identity.shared import (
+    SENTINEL_PRINCIPAL,
     SENTINEL_TENANT,
-    Unauthenticated,
+    Actor,
+    Principal,
     resolved_without_a_credential,
-    tenant_for,
 )
 from app.main import create_app
 from app.routes import tenant
 from tests.conftest import Logged
-from tests.identity.doubles import failing, refusing, refusing_async, resolving_async
+from tests.identity.doubles import (
+    AN_ASYNC_PRINCIPAL,
+    failing,
+    refusing,
+    refusing_async,
+    resolving_async,
+)
 from tests.widgets import router as widgets_router
-
-SEAM = "app.identity.tenant_for"
-"""What the probe reads. Patched there rather than where it is imported, because
-`resolved_without_a_credential` looks it up in its own module at call time."""
 
 
 def test_the_stub_resolves_every_request_to_the_sentinel() -> None:
-    """A deployment with no login is one where every row belongs to a single named tenant.
+    """A deployment with no login is one where every row belongs to a single named tenant, and
+    every action to a single named actor.
 
     Named rather than empty or null, so the eventual move to real tenancy is an unambiguous
     `UPDATE ... WHERE tenant_id = 'default'` rather than a hunt for empty strings.
     """
     request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
 
-    assert tenant_for(request) == SENTINEL_TENANT
-
-
-def test_a_refusal_is_declared_here_rather_than_by_whoever_replaces_the_stub() -> None:
-    """`Unauthenticated` lives in `app/identity.py` and `app/main.py` already answers it with a
-    `401`, so a replacement cannot ship the refusal and forget the answer — which would return
-    `500` to every request it meant to refuse, and a `500` is what a client retries."""
-    with pytest.raises(Unauthenticated, match="nobody"):
-        raise Unauthenticated("nobody")
+    assert principal_for(request) == SENTINEL_PRINCIPAL
 
 
 def test_the_seam_takes_a_request_so_a_replacement_has_something_to_read() -> None:
     """The parameter is underscored because this implementation has no use for it. Anything
     replacing it reads a header, a cookie or a session from it — and FastAPI injects on the
     annotation rather than the name, so the annotation is the part that has to survive."""
-    assert tenant_for.__annotations__["_request"] is Request
-    assert tenant_for.__annotations__["return"] is str
+    assert principal_for.__annotations__["_request"] is Request
+    assert principal_for.__annotations__["return"] is Principal
 
 
-async def test_the_probe_reports_the_tenant_a_bare_request_resolves_to() -> None:
+async def test_the_probe_reports_the_principal_a_bare_request_resolves_to() -> None:
     """What the startup message is decided from, asserted on its own.
 
-    A property rather than a flag: *if a request carrying nothing resolves to a tenant, this
+    A property rather than a flag: *if a request carrying nothing resolves to a principal, this
     deployment authenticates nobody.* True of any implementation, so it cannot go stale the way
     an `AUTHENTICATES = False` constant beside the seam would.
     """
-    assert await resolved_without_a_credential() == SENTINEL_TENANT
+    assert await resolved_without_a_credential(principal_for) == SENTINEL_PRINCIPAL
 
 
-async def test_the_probe_is_silent_when_a_synchronous_seam_refuses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(SEAM, refusing)
-
-    assert await resolved_without_a_credential() is None
+async def test_the_probe_is_silent_when_a_synchronous_resolver_refuses() -> None:
+    assert await resolved_without_a_credential(refusing) is None
 
 
-async def test_the_probe_is_silent_when_an_async_seam_refuses(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_the_probe_is_silent_when_an_async_resolver_refuses() -> None:
     """The shape a real resolver takes, and the one this got wrong.
 
     Calling an `async def` returns a coroutine rather than raising, so the refusal never
-    surfaced and the coroutine was read as a tenant — reporting a deployment that authenticates
-    perfectly as one that authenticates nobody, forever.
+    surfaced and the coroutine was read as a principal — reporting a deployment that
+    authenticates perfectly as one that authenticates nobody, forever.
     """
-    monkeypatch.setattr(SEAM, refusing_async)
-
-    assert await resolved_without_a_credential() is None
+    assert await resolved_without_a_credential(refusing_async) is None
 
 
-async def test_an_async_seam_that_hands_out_a_tenant_is_still_reported_as_one(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The other half of awaiting it: a coroutine must not be *silence* either. An `async` seam
-    that resolves everybody is a deployment that authenticates nothing, and the tenant reported
-    has to be the one it handed out rather than the object that carried it."""
-    monkeypatch.setattr(SEAM, resolving_async)
-
-    assert await resolved_without_a_credential() == "an-async-tenant"
+async def test_an_async_resolver_that_hands_out_a_principal_is_still_reported_as_one() -> None:
+    """The other half of awaiting it: a coroutine must not be *silence* either. An `async` resolver
+    that resolves everybody is a deployment that authenticates nothing, and the principal
+    reported has to be the one it handed out rather than the object that carried it."""
+    assert await resolved_without_a_credential(resolving_async) == AN_ASYNC_PRINCIPAL
 
 
-async def test_a_seam_that_breaks_in_its_own_way_is_silence_too(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Anything other than handing out a tenant is a resolver that did not serve this request,
-    which is all the probe asks. Quiet is the safe default: a false negative rather than a
-    deployment warned about a seam that works."""
-    monkeypatch.setattr(SEAM, failing)
-
-    assert await resolved_without_a_credential() is None
+async def test_a_resolver_that_breaks_in_its_own_way_is_silence_too() -> None:
+    """Anything other than handing out a principal is a resolver that did not serve this
+    request, which is all the probe asks. Quiet is the safe default: a false negative rather
+    than a deployment warned about a resolver that works."""
+    assert await resolved_without_a_credential(failing) is None
 
 
 def identity_lines(logged: Logged) -> list[dict[str, Any]]:
@@ -142,7 +123,7 @@ def test_a_deployment_that_authenticates_nothing_is_warned_at_every_boot(
     said = identity_lines(logged)
     assert len(said) == 1, said
     assert said[0]["severity"] == "WARNING"
-    assert "app/identity.py" in said[0]["message"]
+    assert "app/identity/__init__.py" in said[0]["message"]
     assert said[0]["tenant"] == SENTINEL_TENANT
 
 
@@ -188,17 +169,18 @@ def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
     logged: Logged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The third direction, and the one that decides whether any of this is worth keeping. A
-    project that replaced the seam must stop being warned without touching a flag, or the
+    project that replaced the stub must stop being warned without touching a flag, or the
     warning outlives the problem and becomes the noise it was supposed to avoid.
 
-    The seam here is `async`, because that is what a replacement is written as — and a
+    The resolver here is `async`, because that is what a replacement is written as — and a
     synchronous stand-in is what let this pass while the opposite was true.
     """
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
-    monkeypatch.setattr(SEAM, refusing_async)
+    app = create_app()
+    app.dependency_overrides[principal_for] = refusing_async
 
-    with TestClient(create_app()):
+    with TestClient(app):
         pass
 
     said = identity_lines(logged)
@@ -207,20 +189,24 @@ def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
     assert "verified" in said[0]["message"]
 
 
-def test_a_route_under_the_tenant_requirement_names_the_tenant_the_seam_resolved(
+def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resolved(
     logged: Logged, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The widgets carry whatever the shipped tenant requirement carries, so a requirement that
-    reaches the seam without naming its tenant fails here, in a project with no tenant route
+    reaches the seam without naming its principal fails here, in a project with no tenant route
     yet. `docs/adr/template/0011`."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
 
-    def named(request: Request) -> str:
-        return request.headers["x-test-tenant"]
+    def named(request: Request) -> Principal:
+        tenant_id = request.headers["x-test-tenant"]
+        return Principal(
+            tenant_id=tenant_id,
+            actor=Actor(issuer="a-test", subject=f"actor-in-{tenant_id}", name="An actor"),
+        )
 
-    app.dependency_overrides[tenant_for] = named
+    app.dependency_overrides[principal_for] = named
     with TestClient(app) as client:
         logged()
         client.get("/widgets", headers={"x-test-tenant": "tenant-a"})
@@ -228,4 +214,7 @@ def test_a_route_under_the_tenant_requirement_names_the_tenant_the_seam_resolved
 
     lines = [line for line in logged() if line["message"] == "request completed"]
 
-    assert [line["tenant_id"] for line in lines] == ["tenant-a", "tenant-b"]
+    assert [(line["tenant_id"], line["actor.issuer"], line["actor.subject"]) for line in lines] == [
+        ("tenant-a", "a-test", "actor-in-tenant-a"),
+        ("tenant-b", "a-test", "actor-in-tenant-b"),
+    ]

@@ -31,7 +31,7 @@ then leave the identity seam with it.
 - A resource is a module inside the requirement that it is under, for example
   `app/routes/tenant/tasks.py`. It declares a bare `APIRouter()`.
 - The package's `__init__.py` owns the requirement. In `app/routes/tenant/__init__.py` the router
-  carries `Depends(resolved_tenant)` and includes every module under the package. A route gets
+  carries `Depends(resolved_principal)` and includes every module under the package. A route gets
   the requirement because it is in the directory.
 - `create_app` in `app/main.py` includes one router per requirement and nothing else.
 - `tests/routes/test_guarantee.py` reads the routes off the assembled app. It fails on a route

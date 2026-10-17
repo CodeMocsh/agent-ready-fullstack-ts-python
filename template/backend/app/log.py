@@ -8,8 +8,8 @@ the HTTP fields follow the OpenTelemetry semantic conventions.
 **This module and `app/log_lines.py` are the only ones that may import `logging` or
 `structlog`**, and ruff refuses either anywhere else in the backend but `tests/log/`. This one
 holds the template's lines; the project's own are in `app/log_lines.py`. Every field a line can
-carry is a parameter of a function in one of the two, or, on `request completed`, `TENANT_ID`
-or a field `app/request_line.py` declares. Records from libraries pass through the same
+carry is a parameter of a function in one of the two, or, on `request completed`, a field of
+`TEMPLATE_FIELDS` or of `app/request_line.py`. Records from libraries pass through the same
 formatter with the message they wrote, and are heard only at `WARNING` and above.
 `docs/adr/template/0011` holds the reasoning.
 """
@@ -29,6 +29,7 @@ from starlette.routing import Match
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 from app.deployment import ACKNOWLEDGED_ENV
+from app.identity.shared import Principal
 from app.models import ClientEvent
 from app.request_line import FIELDS as PROJECT_FIELDS
 
@@ -37,9 +38,16 @@ _LOG: Final = structlog.stdlib.get_logger("app")
 TENANT_ID: Final = "tenant_id"
 """The field naming the tenant a request resolved to, on every `request completed` line."""
 
+ACTOR_ISSUER: Final = "actor.issuer"
+ACTOR_SUBJECT: Final = "actor.subject"
+
+TEMPLATE_FIELDS: Final = (TENANT_ID, ACTOR_ISSUER, ACTOR_SUBJECT)
+"""The fields `name_principal` names on `request completed`, before the project's own. They
+never include the actor's name."""
+
 
 class UndeclaredRequestField(RuntimeError):
-    """A field neither `TENANT_ID` nor `app/request_line.py` declares was named on a request."""
+    """A field `app/request_line.py` does not declare was named on a request."""
 
 
 def configure(service_version: str | None) -> None:
@@ -111,14 +119,32 @@ def identity_open(tenant: str, substrate: str) -> None:
     _LOG.warning(_IDENTITY_OPEN, tenant=tenant, substrate=substrate)
 
 
+def name_principal(request: Request, principal: Principal) -> None:
+    """Put the principal's tenant and actor on this request's `request completed` line, under
+    `TEMPLATE_FIELDS`. Raises `AttributeError` for a request `instrument` is not serving.
+    `docs/adr/template/0011`.
+    """
+    request.state.request_line.update(
+        {
+            TENANT_ID: principal.tenant_id,
+            ACTOR_ISSUER: principal.actor.issuer,
+            ACTOR_SUBJECT: principal.actor.subject,
+        }
+    )
+
+
 def name_on_request_line(request: Request, field: str, value: str) -> None:
     """Put `value` under `field` on this request's `request completed` line.
 
-    Raises `UndeclaredRequestField` for a field that is not `TENANT_ID` and not in
-    `app/request_line.py`, and `AttributeError` for a request `instrument` is not serving.
-    `docs/adr/template/0011`.
+    Raises `UndeclaredRequestField` for a field `app/request_line.py` does not declare, a field
+    of `TEMPLATE_FIELDS` included: `name_principal` names those together. Raises
+    `AttributeError` for a request `instrument` is not serving. `docs/adr/template/0011`.
     """
-    if field not in request_line_fields():
+    if field in TEMPLATE_FIELDS:
+        raise UndeclaredRequestField(
+            f"log.name_principal names {field!r} with the rest of the principal. Call it instead."
+        )
+    if field not in PROJECT_FIELDS:
         raise UndeclaredRequestField(
             f"{field!r} is not a field of request completed. Declare it in FIELDS in "
             f"app/request_line.py."
@@ -127,8 +153,8 @@ def name_on_request_line(request: Request, field: str, value: str) -> None:
 
 
 def request_line_fields() -> tuple[str, ...]:
-    """Every field `name_on_request_line` accepts, in the order the line carries them."""
-    return (TENANT_ID, *sorted(PROJECT_FIELDS))
+    """Every field `request completed` carries, in the order it carries them."""
+    return (*TEMPLATE_FIELDS, *sorted(PROJECT_FIELDS))
 
 
 def request_completed(
@@ -136,7 +162,7 @@ def request_completed(
 ) -> None:
     """One request, by the route that answered it -- never by its path, which carries values.
     Every field of `request_line_fields` is on it, `None` when the request did not name it: no
-    tenant on a public route, or when the identity seam refused the request."""
+    principal on a public route, or when the identity seam refused the request."""
     _LOG.info(
         "request completed",
         **{
@@ -175,9 +201,9 @@ _IDENTITY_OPEN_ON_PURPOSE: Final = (
 
 _IDENTITY_OPEN: Final = (
     f"identity: this deployment authenticates nothing. A request carrying no credential "
-    f"resolves to a tenant, so anyone who can reach this process can read and write everything "
-    f"it holds. Replace tenant_for() in app/identity.py -- or set {ACKNOWLEDGED_ENV}=1 to "
-    f"record that serving everybody is deliberate and see this as INFO."
+    f"resolves to a principal, so anyone who can reach this process can read and write "
+    f"everything it holds. Replace principal_for() in app/identity/__init__.py -- or set "
+    f"{ACKNOWLEDGED_ENV}=1 to record that serving everybody is deliberate and see this as INFO."
 )
 
 

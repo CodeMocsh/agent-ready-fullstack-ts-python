@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from app.identity import SENTINEL_TENANT
+from app.identity.shared import SENTINEL_TENANT
 from app.store import Database
 from app.store.memory import MemoryDatabase
 from tests.store_contract import TaskStoreContract

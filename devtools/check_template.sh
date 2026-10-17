@@ -330,12 +330,15 @@ for records in "$REPO/docs/adr" "$OUT/docs/adr/template" "$OUT/docs/adr"; do
     numbered_without_gaps "$records"
 done
 
-echo "==> assert a test the template owns stands without the identity stub"
-# identity_stub=false hands app/identity.py, its tests and the tenant routes' guarantee to a
-# project that replaces the seam, under whatever names it chooses. A test the template keeps
-# updating that reaches for the seam, the tenant requirement or the stub's doubles fails to
-# import there, on the first update after it lands. copier.yml names the stub's files.
-python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || fail "a test the template owns depends on the identity stub"
+echo "==> assert the code the template owns stands without the identity stub"
+# identity_stub=false hands app/identity/__init__.py, its tests and the tenant routes' guarantee
+# to a project that replaces the seam. That project keeps principal_for, the seam's contract, and
+# nothing else of the stub's. Code the template keeps updating that imports anything else from
+# app.identity but its shared module fails there on the first update after it lands. So does a
+# test that reaches principal_for, the tenant requirement or the stub's doubles, because each
+# asserts the stub's behaviour. test_shared.py reads the project's module to check it, and is the
+# one module that may import it whole. copier.yml names the stub's files.
+python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || fail "code the template owns depends on the identity stub"
 import ast
 import re
 import sys
@@ -345,21 +348,33 @@ copier, backend = Path(sys.argv[1]).read_text(), Path(sys.argv[2])
 owned = set(re.findall(r"not (?:identity_stub|example_resource) and _copier_operation == 'update' %\}backend/([^{]+)\{%", copier))
 if not owned:
     sys.exit("check: copier.yml names no file for identity_stub, so this check would pass over nothing")
-REACHES = ("tenant_for", "app.routes.tenant", "tests.identity")
 found = []
-for test in sorted((backend / "tests").rglob("*.py")):
-    if str(test.relative_to(backend)) in owned:
-        continue
-    for node in ast.walk(ast.parse(test.read_text())):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            names = [node.module, *(f"{node.module}.{one.name}" for one in node.names), *(one.name for one in node.names)]
-        elif isinstance(node, ast.Import):
-            names = [one.name for one in node.names]
-        else:
+WHOLE = "tests/identity/test_shared.py"
+def under(name, prefix):
+    return name == prefix or name.startswith(prefix + ".")
+for area, allowed in (("tests", {"shared"}), ("app", {"shared", "principal_for"}), ("devtools", {"shared", "principal_for"})):
+    for module in sorted((backend / area).rglob("*.py")):
+        if str(module.relative_to(backend)) in owned:
             continue
-        hits = [name for name in names if name in REACHES or name.startswith(("app.routes.tenant.", "tests.identity."))]
-        if hits:
-            found.append(f"{test.relative_to(backend)}:{node.lineno} imports {hits[0]}")
+        for node in ast.walk(ast.parse(module.read_text())):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module, *(f"{node.module}.{one.name}" for one in node.names)]
+            elif isinstance(node, ast.Import):
+                names = [one.name for one in node.names]
+            else:
+                continue
+            hits = []
+            if area == "tests":
+                hits = [name for name in names if under(name, "app.routes.tenant") or under(name, "tests.identity")]
+            if isinstance(node, ast.ImportFrom) and node.module == "app.identity":
+                hits += [f"app.identity.{one.name}" for one in node.names if one.name not in allowed]
+            whole = (isinstance(node, ast.Import) and "app.identity" in names) or (
+                isinstance(node, ast.ImportFrom) and node.module == "app" and any(one.name == "identity" for one in node.names)
+            )
+            if whole and str(module.relative_to(backend)) != WHOLE:
+                hits.append("app.identity")
+            if hits:
+                found.append(f"{module.relative_to(backend)}:{node.lineno} imports {hits[0]}")
 for line in found:
     print(f"check: {line}, which a project that replaced the identity seam does not have", file=sys.stderr)
 sys.exit(1 if found else 0)

@@ -157,8 +157,9 @@ depend on application code being correct.
 
 Two things carry the design. `Database.store(tenant_id)` is the only way to obtain a store and
 the tenant is a parameter on no method, so a store you can hold is a store already scoped. And
-`app/identity.py` is the single place that decides who a request is; it ships as a stub that
-authenticates nothing and returns the sentinel tenant, under one rule that outlives the stub:
+`principal_for` in `app/identity/__init__.py` is the single place that decides who a request is;
+it ships as a stub that authenticates nothing and returns the sentinel principal, under one rule
+that outlives the stub:
 **an unresolvable credential is a refusal, never an anonymous principal.** A missing, expired or
 malformed credential that quietly falls back to the sentinel hands one tenant's data to anybody
 who failed to log in.

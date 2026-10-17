@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app import log, telemetry
-from app.identity import Unauthenticated
+from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
 from app.routes import public, tenant

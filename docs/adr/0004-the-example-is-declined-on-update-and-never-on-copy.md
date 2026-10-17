@@ -14,8 +14,8 @@ store protocol, the schema and its row-level policy, the store contract, the fro
 paths. Each `copier update` then delivers the example again, as a conflict in every file the
 project rewrote. These are the largest conflicts in an update.
 
-The identity stub has the same problem. `app/identity.py` resolves every request to the sentinel
-tenant. The routes and the boot log are built on that seam, as
+The identity stub has the same problem. `principal_for` in `app/identity/__init__.py` resolves
+every request to the sentinel principal. The routes and the boot log are built on that seam, as
 `template/docs/adr/template/0004-a-route-cannot-escape-the-identity-seam.md` says. A real project
 replaces the stub with real authentication. The tests of the stub in the template then conflict
 with the tests of the project on every update.

@@ -18,11 +18,12 @@ supported releases.
 
 ## Some things are intentional, and none of them is a vulnerability
 
-**A generated project authenticates nothing.** `tenant_for()` in `backend/app/identity.py`
-resolves every request to the tenant `default`. Anyone who can reach the process can read and
-write everything it holds. Every startup says so, and `UNAUTHENTICATED_IS_INTENTIONAL=1` is how
-a deployment records that it meant it. Replacing that one function is the documented first step
-before a generated project is reachable by anyone you do not trust.
+**A generated project authenticates nothing.** `principal_for()` in
+`backend/app/identity/__init__.py` resolves every request to the tenant `default`. Anyone who can
+reach the process can read and write everything it holds. Every startup says so, and
+`UNAUTHENTICATED_IS_INTENTIONAL=1` is how a deployment records that it meant it. Replacing that one
+function is the documented first step before a generated project is reachable by anyone you do not
+trust.
 
 **The agent guard fails open.** `.claude/hooks/agent_guard.py` refuses a small set of
 unambiguously dangerous actions and allows everything it cannot parse. It is a seatbelt, not a
