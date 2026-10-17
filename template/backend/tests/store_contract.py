@@ -163,11 +163,13 @@ class TaskStoreContract:
         await store.remove(ACTOR, created.id)
 
         recorded = (await events.list())[before:]
-        assert [(e.action, e.resource_type, e.resource_ids, e.fields) for e in recorded] == [
-            ("create", TASKS, (created.id,), ("title",)),
-            ("update", TASKS, (created.id,), ("done",)),
-            ("read", TASKS, tuple(task.id for task in listed), ()),
-            ("delete", TASKS, (created.id,), ()),
+        assert [
+            (e.action, e.resource_type, e.resource_ids, e.fields, e.outcome) for e in recorded
+        ] == [
+            ("create", TASKS, (created.id,), ("title",), "done"),
+            ("update", TASKS, (created.id,), ("done",), "done"),
+            ("read", TASKS, tuple(task.id for task in listed), (), "done"),
+            ("delete", TASKS, (created.id,), (), "done"),
         ]
         assert [event.actor for event in recorded] == [ACTOR] * len(recorded)
         assert [event.tenant_id for event in recorded] == [SENTINEL_TENANT] * len(recorded)
@@ -181,16 +183,34 @@ class TaskStoreContract:
 
         assert "a value only the row may hold" not in repr((await events.list())[before:])
 
-    async def test_an_operation_on_an_absent_task_records_nothing(self, database: Database) -> None:
-        """It touched no row, so there is no row to name."""
+    async def test_an_operation_on_an_absent_task_records_the_id_it_looked_for(
+        self, database: Database
+    ) -> None:
+        """A task that never existed, one already removed, and one in another tenant look the
+        same from here, and each attempt is recorded."""
         store = database.store(SENTINEL_TENANT)
         events = database.audit_events(SENTINEL_TENANT)
+        theirs = await database.store(OTHER_TENANT).create(ACTOR, CreateTaskBody(title="theirs"))
+        removed = await store.create(ACTOR, CreateTaskBody(title="removed"))
+        await store.remove(ACTOR, removed.id)
         before = len(await events.list())
 
         await store.update(ACTOR, NOT_A_TASK_ID, UpdateTaskBody(done=True))
         await store.remove(ACTOR, NOT_A_TASK_ID)
+        await store.update(ACTOR, removed.id, UpdateTaskBody(done=True))
+        await store.remove(ACTOR, removed.id)
+        await store.update(ACTOR, theirs.id, UpdateTaskBody(done=True))
+        await store.remove(ACTOR, theirs.id)
 
-        assert len(await events.list()) == before
+        recorded = (await events.list())[before:]
+        assert [(e.action, e.resource_ids, e.fields, e.outcome) for e in recorded] == [
+            ("update", (NOT_A_TASK_ID,), (), "absent"),
+            ("delete", (NOT_A_TASK_ID,), (), "absent"),
+            ("update", (removed.id,), (), "absent"),
+            ("delete", (removed.id,), (), "absent"),
+            ("update", (theirs.id,), (), "absent"),
+            ("delete", (theirs.id,), (), "absent"),
+        ]
 
     async def test_an_app_acting_for_a_person_is_recorded_with_the_person(
         self, database: Database

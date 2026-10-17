@@ -11,7 +11,7 @@ real enough — the fast tier and the frontend's zero-backend mode both stand on
 
 from datetime import UTC, datetime
 
-from app.audit_events import AuditEvent, RecordedAuditEvent, audit_event, written
+from app.audit_events import AuditEvent, RecordedAuditEvent, absent, audit_event, written
 from app.identity.shared import Actor
 from app.models import CreateTaskBody, Task, UpdateTaskBody
 from app.store import TASKS, AuditEvents, TaskStore, TenantUnset
@@ -78,6 +78,7 @@ class MemoryTaskStore:
                 task.done = body.done
                 self._record(event)
                 return task
+        self._record(absent(event))
         return None
 
     async def remove(self, actor: Actor, id: str) -> bool:
@@ -87,6 +88,7 @@ class MemoryTaskStore:
                 del self._tasks[index]
                 self._record(event)
                 return True
+        self._record(absent(event))
         return False
 
 

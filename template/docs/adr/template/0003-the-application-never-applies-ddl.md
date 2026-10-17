@@ -29,10 +29,13 @@ build writes rows to a shape it does not know, and the write reports success.
     nothing serves traffic as it.
   - `<schema>_app` is the role the application connects as. It holds DML only: no `CREATE`, no
     `BYPASSRLS`.
-- The application role cannot write the ledger, `applied_once`. `_revoke_ledger` in
-  `app/store/migrate.py` revokes the write on every `apply`, because the ledger does not exist
-  before the first migration. The role that verifies the schema cannot forge its own answer.
-  `test_the_application_role_cannot_rewrite_the_ledger` holds this.
+- The application role cannot write the ledger, `applied_once`. `writes_withheld_sql` in
+  `app/store/roles.py` revokes the write. `apply` runs it after the last entry, because the ledger
+  does not exist before the first migration. `deploy/schema.sql` ends with it, and
+  `deploy/roles.sql` ends with it after its own grants. The role that verifies the schema
+  cannot forge its own answer.
+  `test_the_application_role_cannot_rewrite_the_ledger` and
+  `test_applying_the_roles_again_does_not_give_the_ledger_back` hold this.
 - The release step applies the schema. It is `make migrate`, which runs `python -m app.migrate`,
   and something that is not the web process runs it.
 - `app/migrate.py` is the only reader of `DATABASE_OWNER_URL`. `wiring.build()` raises
@@ -108,8 +111,9 @@ build writes rows to a shape it does not know, and the write reports success.
   up. Do not soften the check. Change this decision instead.
 - A rollback of the application needs a rollback of the schema. The previous version refuses to
   start against a migrated database. Roll the schema back, or roll forward to a fixed build.
-- A new column is a new repair entry, never an edit to its table's `CREATE`. `ddl.py` states the
-  pattern.
+- A new column lands twice: in its table's `CREATE`, and as a repair entry for a database that
+  already has the table. The `CREATE`'s hash is then re-recorded by hand in
+  `.schema-baseline.json`, in the same commit as the repair. `ddl.py` states the pattern.
 - A cosmetic edit to a shipped entry also fails the gate. Nothing can tell a reformat from a new
   column, and the failure it prevents is silent.
 - The hash check sees only a working tree. A build that did not pass the gate is not caught at

@@ -24,7 +24,7 @@ import hashlib
 
 from app.store.conn import Conn, migration_lock, quote_ident, resolve_schema, search_path_sql
 from app.store.ddl import APPLIED_ONCE_DDL, SCHEMA_ENTRY_KEY, statements
-from app.store.roles import app_role, owner_role
+from app.store.roles import owner_role, writes_withheld_sql
 
 _RECORD = "INSERT INTO applied_once(key) VALUES($1) ON CONFLICT DO NOTHING"
 
@@ -173,29 +173,17 @@ async def _become_owner(conn: Conn, schema: str | None) -> None:
         await conn.execute(f"SET ROLE {quote_ident(owner)}")
 
 
-async def _revoke_ledger(conn: Conn, schema: str | None) -> None:
-    """Take write on the ledger away from the application role.
+async def _withhold_writes(conn: Conn, schema: str | None) -> None:
+    """Run `writes_withheld_sql`: no write on the ledger for the application role, and only an
+    insert on the audit events into the columns the database does not fill.
 
-    The role that runs `check` must not be able to forge its own answer. It lives here rather
-    than in `roles.sql` because the ledger does not exist until the first migration has run.
-
-    Every `apply` runs it. `deploy/roles.sql` is applied before the first migration, so on a
-    provisioned database the run that creates the ledger is also the run that revokes on it. A
-    developer pointing at their own Postgres has no roles at all, and there the revoke does
-    nothing until they provision some; the next `apply` is what catches that database up.
-
-    Qualified rather than trusting the search path. `to_regclass` answers NULL for a missing
-    table rather than raising, so `AND` is safe here in a way it is not for `pg_has_role`.
+    The role that runs `check` cannot forge its own answer, and the application cannot change,
+    remove, backdate or reorder an event. Every `apply` runs it after the last entry, so it sees
+    every column a repair adds, and a database whose roles were provisioned after its first
+    migration is caught up by the next one.
     """
-    role = app_role(schema)
-    ledger = _ledger(schema)
-    await conn.execute(
-        "DO $app$\nBEGIN\n"
-        f"  IF to_regclass('{ledger}') IS NOT NULL\n"
-        f"     AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{role}') THEN\n"
-        f"    REVOKE INSERT, UPDATE, DELETE ON {ledger} FROM {quote_ident(role)};\n"
-        "  END IF;\nEND\n$app$"
-    )
+    for statement in writes_withheld_sql(schema):
+        await conn.execute(statement)
 
 
 async def _apply_all(conn: Conn, schema: str | None = None) -> str:
@@ -222,7 +210,7 @@ async def _apply_all(conn: Conn, schema: str | None = None) -> str:
         for key, sql in entries[1:]:
             await conn.execute(sql)
             await conn.execute(_RECORD, key)
-        await _revoke_ledger(conn, name)
+        await _withhold_writes(conn, name)
         return known_version(name)
     finally:
         await conn.execute("SELECT pg_advisory_unlock($1)", lock)
@@ -257,7 +245,9 @@ def emit_sql(schema: str | None = None) -> str:
     ]
     for key, sql in entries[1:]:
         lines += [f"-- {key}", f"{sql};", _record_line(key), ""]
-    return "\n".join(lines)
+    lines += ["-- The writes the application role is never granted.", ""]
+    lines += [f"{statement};" for statement in writes_withheld_sql(name)]
+    return "\n".join([*lines, ""])
 
 
 def _record_line(key: str) -> str:

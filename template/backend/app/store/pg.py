@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 from uuid import UUID, uuid4
 
-from app.audit_events import AuditEvent, RecordedAuditEvent, audit_event, written
+from app.audit_events import AuditEvent, RecordedAuditEvent, absent, audit_event, written
 from app.identity.shared import Actor
 from app.models import CreateTaskBody, Task, UpdateTaskBody
 from app.store import TASKS, AuditEvents, Connections, TaskStore, TenantUnset
@@ -46,13 +46,13 @@ _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
 _RECORD = (
     "INSERT INTO audit_events (tenant_id, actor_issuer, actor_subject, actor_name, "
     "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name, action, resource_type, "
-    "resource_ids, fields, request_id, trace_id) "
-    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+    "resource_ids, fields, outcome, request_id, trace_id) "
+    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"
 )
 _AUDIT_EVENTS = (
     "SELECT tenant_id, recorded_at, actor_issuer, actor_subject, actor_name, on_behalf_of_issuer, "
     "on_behalf_of_subject, on_behalf_of_name, action, resource_type, resource_ids, fields, "
-    "request_id, trace_id FROM audit_events ORDER BY seq"
+    "outcome, request_id, trace_id FROM audit_events ORDER BY seq"
 )
 
 
@@ -147,6 +147,7 @@ def _recorded(row: Any) -> RecordedAuditEvent:
         resource_type=row["resource_type"],
         resource_ids=tuple(row["resource_ids"]),
         fields=tuple(row["fields"]),
+        outcome=row["outcome"],
         request_id=row["request_id"],
         trace_id=row["trace_id"],
     )
@@ -198,6 +199,7 @@ class PostgresTaskStore:
             event.resource_type,
             list(event.resource_ids),
             list(event.fields),
+            event.outcome,
             event.request_id,
             event.trace_id,
         )
@@ -219,25 +221,18 @@ class PostgresTaskStore:
     async def update(self, actor: Actor, id: str, body: UpdateTaskBody) -> Task | None:
         parsed = _as_id(id)
         event = audit_event(actor, "update", TASKS, (_named(id, parsed),), written(body))
-        if parsed is None:
-            return None
         async with self._database.scoped(self._tenant_id) as conn:
-            row = await conn.fetchrow(_UPDATE, parsed, body.done)
-            if row is None:
-                return None
-            await self._record(conn, event)
-            return _task(row)
+            row = None if parsed is None else await conn.fetchrow(_UPDATE, parsed, body.done)
+            await self._record(conn, event if row is not None else absent(event))
+            return None if row is None else _task(row)
 
     async def remove(self, actor: Actor, id: str) -> bool:
         parsed = _as_id(id)
         event = audit_event(actor, "delete", TASKS, (_named(id, parsed),))
-        if parsed is None:
-            return False
         async with self._database.scoped(self._tenant_id) as conn:
-            if await conn.fetchval(_REMOVE, parsed) is None:
-                return False
-            await self._record(conn, event)
-            return True
+            removed = parsed is not None and await conn.fetchval(_REMOVE, parsed) is not None
+            await self._record(conn, event if removed else absent(event))
+            return removed
 
 
 class PostgresAuditEvents:

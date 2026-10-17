@@ -218,3 +218,20 @@ def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resol
         ("tenant-a", "a-test", "actor-in-tenant-a"),
         ("tenant-b", "a-test", "actor-in-tenant-b"),
     ]
+
+
+def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(
+    logged: Logged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It has no tenant to record an audit event in, and anybody can send one. Its `request
+    completed` line, with a `401` and a null tenant, is the record. `docs/adr/template/0017`."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    app = create_app()
+    app.include_router(widgets_router, dependencies=tenant.router.dependencies)
+    app.dependency_overrides[principal_for] = refusing
+    with TestClient(app) as client:
+        logged()
+        assert client.get("/widgets").status_code == 401
+
+    [line] = [line for line in logged() if line["message"] == "request completed"]
+    assert (line["http.response.status_code"], line["tenant_id"]) == (401, None)

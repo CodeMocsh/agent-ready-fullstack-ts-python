@@ -16,8 +16,9 @@ Each rule below exists because breaking it fails somewhere far from the edit:
   which stays the whole truth about that table, and as an `ALTER TABLE … ADD COLUMN IF NOT
   EXISTS` repair entry in the `0200_` band, never beside its table. Both statements are
   idempotent, so each is a no-op for the case the other covers.
-  `test_every_repair_is_in_step_with_its_create` holds the pair together, and
-  `test_no_shipped_entry_body_has_changed` refuses the edit that skips the repair.
+  `test_every_repair_is_in_step_with_its_create` holds the pair together.
+  `test_no_shipped_entry_body_has_changed` refuses the edited `CREATE` until its hash is
+  re-recorded by hand in `.schema-baseline.json`, in the commit that adds the repair.
 
 Statements are written **unqualified**; `conn.search_path_sql` selects the schema.
 `0001_schema` is the one entry that names it, because the search path cannot select a schema
@@ -33,7 +34,9 @@ SCHEMA_ENTRY_KEY = "0001_schema"
 APPEND_ONLY_ENTRY_KEY = "0032_audit_events_append_only"
 """The entry that revokes `UPDATE` and `DELETE` on `audit_events` from the application role, on
 every release step and in `deploy/schema.sql`. It runs after `0030_audit_events` creates the
-table, on which the default privileges grant both. `docs/adr/template/0017`."""
+table, on which the default privileges grant both. `writes_withheld_sql` in `app/store/roles.py`
+now withholds the same and more; this entry stays because a shipped key is never removed.
+`docs/adr/template/0017`."""
 
 REPAIR_BAND = "0200_"
 """Where an `ALTER TABLE … ADD COLUMN` goes. Above the table it repairs, so the table exists
@@ -90,6 +93,8 @@ SCHEMA: list[tuple[str, str]] = [
   on_behalf_of_subject  text,
   on_behalf_of_name     text,
   action                text NOT NULL,
+  outcome               text NOT NULL DEFAULT \'done\'
+    CONSTRAINT audit_events_outcome_known CHECK (outcome IN (\'done\', \'absent\')),
   resource_type         text NOT NULL,
   resource_ids          text[] NOT NULL,
   fields                text[] NOT NULL,
@@ -196,3 +201,14 @@ SCHEMA.extend((f"{100 + i:04d}_{t}_policy", _policy_sql(t)) for i, t in enumerat
 SCHEMA.extend((f"{120 + i:04d}_{t}_force", _force_sql(t)) for i, t in enumerate(TENANT_TABLES))
 """Every policy is created before any table is forced. The other order would enforce a table
 during the window before its own policy exists, and every statement in it would fail."""
+
+SCHEMA.extend(
+    [
+        (
+            "0200_audit_events_outcome",
+            "ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS outcome text NOT NULL DEFAULT 'done'"
+            " CONSTRAINT audit_events_outcome_known CHECK (outcome IN ('done', 'absent'))",
+        ),
+    ]
+)
+"""The repairs, keyed above the policies so the list stays in the order it is applied."""

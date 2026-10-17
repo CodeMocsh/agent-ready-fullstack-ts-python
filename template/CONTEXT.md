@@ -47,9 +47,9 @@ decides nothing.
 _Avoid_: user (an actor may be an app), author, owner.
 
 **Audit event**:
-One store operation that read or wrote tenant rows, recorded in the same transaction: the
-actor, the action, the ids of the rows and the names of the fields written. Never a value a row
-holds.
+One store operation on tenant rows, recorded in the same transaction: the actor, the action,
+the ids of the rows, the names of the fields written, and whether it found them. Never a value a
+row holds.
 _Avoid_: audit log entry, history, log line (a log line is lossy; an audit event is not).
 
 **Owner role**:

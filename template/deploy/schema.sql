@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS audit_events (
   on_behalf_of_subject  text,
   on_behalf_of_name     text,
   action                text NOT NULL,
+  outcome               text NOT NULL DEFAULT 'done'
+    CONSTRAINT audit_events_outcome_known CHECK (outcome IN ('done', 'absent')),
   resource_type         text NOT NULL,
   resource_ids          text[] NOT NULL,
   fields                text[] NOT NULL,
@@ -124,3 +126,35 @@ INSERT INTO applied_once(key) VALUES('0120_tasks_force') ON CONFLICT DO NOTHING;
 -- 0121_audit_events_force
 ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 INSERT INTO applied_once(key) VALUES('0121_audit_events_force') ON CONFLICT DO NOTHING;
+
+-- 0200_audit_events_outcome
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS outcome text NOT NULL DEFAULT 'done' CONSTRAINT audit_events_outcome_known CHECK (outcome IN ('done', 'absent'));
+INSERT INTO applied_once(key) VALUES('0200_audit_events_outcome') ON CONFLICT DO NOTHING;
+
+-- The writes the application role is never granted.
+
+DO $app$
+BEGIN
+  IF to_regclass('"app".applied_once') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_app') THEN
+    EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON "app".applied_once FROM %I', 'app_app');
+  END IF;
+END
+$app$;
+DO $app$
+DECLARE
+  writable name;
+BEGIN
+  IF to_regclass('"app".audit_events') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_app') THEN
+    EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON "app".audit_events FROM %I', 'app_app');
+    FOR writable IN
+      SELECT attname FROM pg_attribute
+      WHERE attrelid = '"app".audit_events'::regclass AND attnum > 0 AND NOT attisdropped
+        AND attname NOT IN ('seq', 'recorded_at')
+    LOOP
+      EXECUTE format('GRANT INSERT (%I) ON "app".audit_events TO %I', writable, 'app_app');
+    END LOOP;
+  END IF;
+END
+$app$;

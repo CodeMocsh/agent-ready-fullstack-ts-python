@@ -17,7 +17,8 @@ a single SQL statement, every one idempotent and additive.
   it carries, and refuses to serve when they differ in either direction —
   [adr/template/0003](adr/template/0003-the-application-never-applies-ddl.md).
 - **`deploy/schema.sql`** is the same statements as a script, for a deployment whose own tooling
-  owns the DDL. Regenerate with `make schema`.
+  owns the DDL. It ends with the writes the application role is never granted, as `make
+  migrate` does. Regenerate with `make schema`.
 - **`backend/.schema-baseline.json`** records a hash of each entry body. Editing or removing an
   entry that already shipped fails `make test`, in the pre-commit hook. It is generated from
   your `ddl.py`, so a template update needs `make schema` afterwards —
