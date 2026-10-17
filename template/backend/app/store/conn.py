@@ -36,26 +36,11 @@ class InvalidSchemaName(ValueError):
 
 @runtime_checkable
 class Conn(Protocol):
-    """The three methods the schema work needs. asyncpg's `Connection` satisfies it."""
+    """The methods the schema work needs. asyncpg's `Connection` satisfies it."""
 
     async def execute(self, query: str, *args: Any) -> Any: ...
 
     async def fetchval(self, query: str, *args: Any) -> Any: ...
-
-
-@runtime_checkable
-class Rows(Conn, Protocol):
-    """`Conn` plus the row readers the store needs.
-
-    Kept separate because `Conn` is deliberately the *smallest* surface `migrate()` needs —
-    small enough that a fake with no database behind it can drive the whole migration path in
-    a hermetic test. Widening it would take that away to serve modules that are not the
-    migration.
-    """
-
-    async def fetch(self, query: str, *args: Any) -> Any: ...
-
-    async def fetchrow(self, query: str, *args: Any) -> Any: ...
 
 
 def resolve_schema(name: str | None = None) -> str:

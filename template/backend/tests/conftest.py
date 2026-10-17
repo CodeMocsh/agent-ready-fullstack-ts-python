@@ -24,11 +24,19 @@ from typing import Any
 
 import pytest
 
-from app.deployment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV, TIMEOUTS_ENV
+from app.deployment import (
+    DATABASE_URL_ENV,
+    DEVELOPMENT,
+    ENVIRONMENT_ENV,
+    TELEMETRY_ENV,
+    TIMEOUTS_ENV,
+)
 
 os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
 os.environ["PYTHONASYNCIODEBUG"] = "1"
 
+from app.migrate import OWNER_URL_ENV
+from app.store.conn import SCHEMA_ENV
 from tests.event_loop import Reported, reported
 from tests.tiers import python_tiers
 
@@ -73,8 +81,10 @@ def asyncio_reports(asyncio_logged: Reported) -> Generator[Reported]:
 
 @pytest.fixture(autouse=True)
 def nothing_the_shell_exports(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test starts with no telemetry or timeout variable set, whatever the shell exports."""
-    for name in (*TELEMETRY_ENV, *TIMEOUTS_ENV):
+    """Every test starts with no database, telemetry or timeout variable set, whatever the shell
+    exports, so the app it builds runs on the in-memory substrate. A test that wants Postgres
+    sets `DATABASE_URL` and `DB_SCHEMA` itself."""
+    for name in (DATABASE_URL_ENV, OWNER_URL_ENV, SCHEMA_ENV, *TELEMETRY_ENV, *TIMEOUTS_ENV):
         monkeypatch.delenv(name, raising=False)
 
 

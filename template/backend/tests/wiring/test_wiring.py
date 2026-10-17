@@ -18,8 +18,10 @@ from app.deployment import (
     STATEMENT_TIMEOUT_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
 )
+from app.migrate import OWNER_URL_ENV
 from app.store.pg import TIMEOUTS, Timeouts
 from app.wiring import (
+    OwnerCredentialVisible,
     TelemetryMisconfigured,
     TelemetrySettings,
     TimeoutsMisconfigured,
@@ -184,4 +186,20 @@ def test_a_timeout_without_a_database_refuses_to_start(monkeypatch: pytest.Monke
     monkeypatch.setenv(ACQUIRE_TIMEOUT_ENV, "1")
 
     with pytest.raises(TimeoutsMisconfigured, match=ACQUIRE_TIMEOUT_ENV):
+        build()
+
+
+@pytest.mark.parametrize(
+    "database",
+    [{}, {DATABASE_URL_ENV: "postgres://app_app@db.internal:5432/app"}],
+    ids=["in-memory", "on-postgres"],
+)
+def test_a_process_that_can_see_the_owner_credential_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, database: dict[str, str]
+) -> None:
+    for name, value in database.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(OWNER_URL_ENV, "postgres://app_owner@db.internal:5432/app")
+
+    with pytest.raises(OwnerCredentialVisible, match=OWNER_URL_ENV):
         build()

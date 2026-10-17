@@ -1,7 +1,7 @@
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { API_BASE_URL } from "@/api/base";
-import { ApiError, clientEventsApi } from "@/api/client";
+import { ApiError, clientEventsApi, request } from "@/api/client";
 import { server } from "@/mocks/node";
 
 const REQUEST_ID = "0f8c2c1b9d2e4b6f8a1c3e5d7f9b0a2c";
@@ -30,5 +30,21 @@ describe("the api client", () => {
       requestId: REQUEST_ID,
       message: "POST /client-events failed with 422",
     });
+  });
+
+  it("sends the headers a caller passes, alongside its own content type", async () => {
+    const sent: Headers[] = [];
+    server.use(
+      http.get(`${API_BASE_URL}/echo`, ({ request: received }) => {
+        sent.push(received.headers);
+        return HttpResponse.json({});
+      }),
+    );
+
+    await request("/echo", { headers: { "x-caller": "kept" } });
+
+    expect(sent.map((headers) => [headers.get("x-caller"), headers.get("content-type")])).toEqual([
+      ["kept", "application/json"],
+    ]);
   });
 });

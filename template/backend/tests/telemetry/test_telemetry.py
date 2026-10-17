@@ -73,10 +73,7 @@ class Instrumented:
         ]
 
 
-def instrumented(
-    monkeypatch: pytest.MonkeyPatch, *, trust: bool, ratio: float = 1.0
-) -> Iterator[Instrumented]:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def instrumented(*, trust: bool, ratio: float = 1.0) -> Iterator[Instrumented]:
     app = with_widgets(create_app())
 
     @app.get("/raises")
@@ -97,23 +94,23 @@ def instrumented(
 
 
 @pytest.fixture
-def untrusting(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
-    yield from instrumented(monkeypatch, trust=False)
+def untrusting() -> Iterator[Instrumented]:
+    yield from instrumented(trust=False)
 
 
 @pytest.fixture
-def trusting(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
-    yield from instrumented(monkeypatch, trust=True)
+def trusting() -> Iterator[Instrumented]:
+    yield from instrumented(trust=True)
 
 
 @pytest.fixture
-def unsampled(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
-    yield from instrumented(monkeypatch, trust=False, ratio=0.0)
+def unsampled() -> Iterator[Instrumented]:
+    yield from instrumented(trust=False, ratio=0.0)
 
 
 @pytest.fixture
-def trusting_unsampled(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
-    yield from instrumented(monkeypatch, trust=True, ratio=0.0)
+def trusting_unsampled() -> Iterator[Instrumented]:
+    yield from instrumented(trust=True, ratio=0.0)
 
 
 def trace_of(span: ReadableSpan) -> str:
@@ -142,7 +139,7 @@ def everything_in(span: ReadableSpan) -> str:
 def versioned(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
     """A version that needs decoding: the one two readers of the variable could read apart."""
     monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, "service.version=1.4.2%2Bbuild.7")
-    yield from instrumented(monkeypatch, trust=False)
+    yield from instrumented(trust=False)
 
 
 def test_a_span_names_the_version_every_log_line_names(
@@ -365,10 +362,7 @@ def test_a_second_app_in_the_same_process_refuses_to_be_instrumented() -> None:
         )
 
 
-def test_an_app_with_no_endpoint_is_not_instrumented(
-    monkeypatch: pytest.MonkeyPatch, logged: Logged
-) -> None:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def test_an_app_with_no_endpoint_is_not_instrumented(logged: Logged) -> None:
     app = with_widgets(create_app())
 
     with TestClient(app) as client:
@@ -390,7 +384,6 @@ def silent_collector() -> Iterator[str]:
 def test_a_collector_that_hangs_slows_no_request_and_holds_shutdown_to_two_timeouts(
     monkeypatch: pytest.MonkeyPatch, silent_collector: str
 ) -> None:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(OTLP_ENDPOINT_ENV, silent_collector)
     monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", str(EXPORT_TIMEOUT_SECONDS))
@@ -434,7 +427,6 @@ def test_an_app_given_an_endpoint_exports_traces_and_metrics_to_it_over_otlp(
     monkeypatch: pytest.MonkeyPatch, collector: tuple[str, list[str]]
 ) -> None:
     endpoint, received = collector
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(OTLP_ENDPOINT_ENV, endpoint)
     monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
 

@@ -4,10 +4,6 @@ Seed rows are asserted here and nowhere else. `tests/store_contract.py` runs aga
 substrates and so may not know about them, and `frontend/tests/api/contract.test.ts` runs against
 this service and the mock handlers and may not either. This file is where "three tasks, and
 one of them is `2`" is allowed to be true.
-
-`DATABASE_URL` is unset per test rather than assumed absent. Without that, a developer with
-one exported would run this suite against Postgres, where none of the seed rows exist -- and
-the failure would look like a bug in the app.
 """
 
 from collections.abc import Iterator
@@ -20,21 +16,19 @@ from app.main import create_app
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def client() -> Iterator[TestClient]:
     """A fresh app per test, which is what replaced the store's `reset()`.
 
     The substrate is built by the lifespan, so a new client is a new store. That is why no
     production interface here carries a test-only method."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     with TestClient(create_app()) as fresh:
         yield fresh
 
 
-def test_it_comes_up_on_the_in_memory_substrate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_it_comes_up_on_the_in_memory_substrate() -> None:
     """Which substrate answered is a fact worth asserting rather than assuming. Every seed
     assertion below is true of this one and of no other, so a run that quietly reached a real
     database would fail further down and look like a bug in the app."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     with TestClient(app):
         assert app.state.database.name == "memory"
@@ -80,11 +74,10 @@ def test_a_trailing_slash_is_a_404_and_never_a_redirect(client: TestClient) -> N
     assert "location" not in response.headers
 
 
-def test_two_apps_do_not_share_a_store(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_two_apps_do_not_share_a_store() -> None:
     """The other half of dropping `reset()`. Two apps in one process, because that is the
     property the fixture relies on and the only way to assert it without depending on the
     order pytest happens to run these in."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     with TestClient(create_app()) as first, TestClient(create_app()) as second:
         assert first.delete("/tasks/1").status_code == 204
 
@@ -92,12 +85,9 @@ def test_two_apps_do_not_share_a_store(monkeypatch: pytest.MonkeyPatch) -> None:
         assert len(second.get("/tasks").json()) == 3
 
 
-def test_a_request_records_who_it_served_and_which_request_it_was(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_a_request_records_who_it_served_and_which_request_it_was() -> None:
     """The event names the actor the seam resolved, and the request id the response carries, so
     an auditor can join the event to the request's log line."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     with TestClient(app) as client:
         answered = client.get("/tasks")

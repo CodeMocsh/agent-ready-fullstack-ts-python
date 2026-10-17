@@ -34,6 +34,22 @@ need_exec() { [ -x "$1" ] || fail "expected executable file: $1"; }
 need_absent() { [ ! -e "$1" ] || fail "expected no such file: $1"; }
 need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2"; }
 need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
+# A list that asserts only what it names fails open: an entry added beside it passes unseen.
+# This holds a directory's entries of one find -type to the names given, in both directions.
+# A cache an earlier step wrote is not an entry.
+need_only() {
+    kind="$1" dir="$2"
+    shift 2
+    listed="$(mktemp)"
+    printf '%s\n' "$@" | LC_ALL=C sort >"$listed"
+    compared=0
+    drift="$(find "$dir" -mindepth 1 -maxdepth 1 -type "$kind" ! -name __pycache__ |
+        sed "s|^$dir/||" | LC_ALL=C sort | diff "$listed" -)" || compared=$?
+    rm -f "$listed"
+    [ "$compared" -le 1 ] || fail "diff could not compare $dir with the list in check_template.sh"
+    [ -z "$drift" ] || fail "$dir does not hold exactly what check_template.sh names (< named, > found):
+$drift"
+}
 
 
 # AGENTS.md tells an agent to keep the principle sections word-for-word in step with
@@ -64,6 +80,11 @@ for heading in Approach 'Fail loudly' 'Zero comments' 'Simplified technical Engl
         fail "the shared prose range in check_template.sh does not reach '## $heading'"
 done
 rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
+
+# `make hooks` runs the root copy, and a generated project runs the template's. The hook
+# activation section below exercises only the template's, so the two stay byte-identical.
+cmp -s "$REPO/devtools/install-hooks.sh" "$REPO/template/devtools/install-hooks.sh" ||
+    fail "devtools/install-hooks.sh and template/devtools/install-hooks.sh differ. Keep them identical."
 
 # One pin, many copies. devtools/render.sh owns it -- it is the script that runs copier
 # -- and the value read back through `--spec` above is also written wherever a doc shows
@@ -810,8 +831,10 @@ PY
 # project from piling every file at the top of tests/, and it is what the tier targets
 # select on. test_gate.py stays at the top because it covers no source: it reads this
 # Makefile, the hook and the workflow.
-for folder in deployment devtools environment errors identity integration lifespan log main \
-              models observe routes serve store telemetry wiring; do
+TEST_FOLDERS="audit_events deployment devtools environment errors identity integration lifespan
+              log main models observe routes serve store telemetry wiring"
+need_only d backend/tests $TEST_FOLDERS
+for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
 done
 # The db-test recipe traps on INT so an interrupted suite does not leak its container, and
@@ -1141,25 +1164,25 @@ need_exec deploy/credentials.sh
 need CONTEXT.md
 # Every decision that ships, named in full. links.py proves each is reachable and that no
 # citation dangles, which a record deleted together with everything naming it still passes.
-# This is the half that notices such a record left.
-for adr in 0001-two-substrates-behind-one-contract \
-           0002-tenant-isolation-is-forced-and-always-on \
-           0003-the-application-never-applies-ddl \
-           0004-a-route-cannot-escape-the-identity-seam \
-           0005-routes-are-split-by-what-a-caller-presents \
-           0006-a-refusal-is-a-class-declared-once \
-           0007-the-models-are-a-layering-written-down \
-           0008-the-spec-describes-what-the-service-actually-does \
-           0009-the-one-origin-entrypoint-is-the-edge \
-           0010-the-environment-is-read-in-one-place-and-run-in-another \
-           0011-every-log-line-is-declared-and-written-as-json-to-stdout \
-           0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns \
-           0013-a-test-never-decides-whether-to-run \
-           0014-the-gate-runs-once-per-tree-and-one-at-a-time \
-           0015-the-template-owns-the-mechanism-and-the-project-owns-its-list \
-           0016-the-template-s-decisions-are-numbered-apart-from-yours; do
-    need "docs/adr/template/$adr.md"
-done
+# This is the half that notices such a record left, or one added and not named here.
+need_only f docs/adr/template \
+    0001-two-substrates-behind-one-contract.md \
+    0002-tenant-isolation-is-forced-and-always-on.md \
+    0003-the-application-never-applies-ddl.md \
+    0004-a-route-cannot-escape-the-identity-seam.md \
+    0005-routes-are-split-by-what-a-caller-presents.md \
+    0006-a-refusal-is-a-class-declared-once.md \
+    0007-the-models-are-a-layering-written-down.md \
+    0008-the-spec-describes-what-the-service-actually-does.md \
+    0009-the-one-origin-entrypoint-is-the-edge.md \
+    0010-the-environment-is-read-in-one-place-and-run-in-another.md \
+    0011-every-log-line-is-declared-and-written-as-json-to-stdout.md \
+    0012-traces-and-metrics-leave-over-otlp-to-a-collector-the-deployment-owns.md \
+    0013-a-test-never-decides-whether-to-run.md \
+    0014-the-gate-runs-once-per-tree-and-one-at-a-time.md \
+    0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md \
+    0016-the-template-s-decisions-are-numbered-apart-from-yours.md \
+    0017-every-store-operation-on-tenant-rows-records-an-audit-event.md
 
 echo "==> assert tenant isolation is wired, not just described"
 # FORCE, not ENABLE. A table's owner bypasses its own policies by default, so with ENABLE
@@ -2473,6 +2496,36 @@ printf '{"callables": 2.0, "sum": 5.0, "mean": 1.900, "p90": 2.0}\n' >"$CX/basel
     | grep -q 'complexity sum did not move with the mean' \
     || fail "backend complexity reported an arithmetic drift as a rise"
 
+echo "==> the tree fingerprint sees a same-size edit made in the instant after a write"
+# Git trusts a file's size and timestamps unless the index was written no earlier than the file,
+# and an index copied without its own timestamp looks newer than every entry. The edit is missed
+# about once in a hundred tries, so one try proves nothing: this makes three hundred, and the
+# copy without its timestamp missed three of them. backend/tests/test_gate.py covers the
+# fingerprint's other cases.
+race="$(mktemp -d)"
+(
+    cd "$race"
+    git init -q
+    for _ in $(seq 1 300); do
+        printf 'one\n' >kept.txt
+        git add kept.txt
+        before="$(sh "$OUT/devtools/worktree-tree.sh")"
+        printf 'two\n' >kept.txt
+        [ "$(sh "$OUT/devtools/worktree-tree.sh")" != "$before" ] || exit 1
+    done
+) || { rm -rf "$race"; fail "devtools/worktree-tree.sh kept the tree of a file edited in the same instant"; }
+rm -rf "$race"
+
+echo "==> the gate runner skips a tree that already passed"
+# Recorded here rather than earned by a full `make pre-commit`, which would run every step
+# above a second time. What this proves is the path a commit after a green run takes in a real
+# project: both halves installed, a record for exactly this tree, and an exit before anything
+# runs. backend/tests/test_gate.py proves the fingerprint changes when the tree does.
+sh devtools/worktree-tree.sh >"$(git rev-parse --git-path gate-passed)"
+out="$(sh devtools/gate.sh 2>&1)" || fail "devtools/gate.sh failed on a tree recorded as passed: $out"
+printf '%s\n' "$out" | grep -q 'already passed the gate' \
+    || fail "devtools/gate.sh ran again over a tree recorded as passed: $out"
+
 echo "==> assert each half's fixing variant tightens and its checking variant refuses"
 # Tightening only means anything if exactly one of each half's two lint entry points
 # asks for it, and grepping for the flag cannot tell those apart -- a flag wired into
@@ -2586,35 +2639,5 @@ fi
 printf '%s\n' "$out" | grep -q 'baseline tightened'
 python3 -c "$compare" backend/.complexity-baseline.json 2.9 lt \
     || fail "backend lint reported tightening but left the baseline on disk"
-
-echo "==> the tree fingerprint sees a same-size edit made in the instant after a write"
-# Git trusts a file's size and timestamps unless the index was written no earlier than the file,
-# and an index copied without its own timestamp looks newer than every entry. The edit is missed
-# about once in a hundred tries, so one try proves nothing: this makes three hundred, and the
-# copy without its timestamp missed three of them. backend/tests/test_gate.py covers the
-# fingerprint's other cases.
-race="$(mktemp -d)"
-(
-    cd "$race"
-    git init -q
-    for _ in $(seq 1 300); do
-        printf 'one\n' >kept.txt
-        git add kept.txt
-        before="$(sh "$OUT/devtools/worktree-tree.sh")"
-        printf 'two\n' >kept.txt
-        [ "$(sh "$OUT/devtools/worktree-tree.sh")" != "$before" ] || exit 1
-    done
-) || { rm -rf "$race"; fail "devtools/worktree-tree.sh kept the tree of a file edited in the same instant"; }
-rm -rf "$race"
-
-echo "==> the gate runner skips a tree that already passed"
-# Recorded here rather than earned by a full `make pre-commit`, which would run every step
-# above a second time. What this proves is the path a commit after a green run takes in a real
-# project: both halves installed, a record for exactly this tree, and an exit before anything
-# runs. backend/tests/test_gate.py proves the fingerprint changes when the tree does.
-sh devtools/worktree-tree.sh >"$(git rev-parse --git-path gate-passed)"
-out="$(sh devtools/gate.sh 2>&1)" || fail "devtools/gate.sh failed on a tree recorded as passed: $out"
-printf '%s\n' "$out" | grep -q 'already passed the gate' \
-    || fail "devtools/gate.sh ran again over a tree recorded as passed: $out"
 
 echo "==> OK ($VARIANT)"
