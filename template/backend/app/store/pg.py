@@ -30,8 +30,10 @@ from dataclasses import dataclass
 from typing import Any, Final
 from uuid import UUID, uuid4
 
+from app.audit_events import AuditEvent, RecordedAuditEvent, audit_event, written
+from app.identity.shared import Actor
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import Connections, TaskStore, TenantUnset
+from app.store import TASKS, AuditEvents, Connections, TaskStore, TenantUnset
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
 from app.store.migrate import check, schema_version
@@ -41,6 +43,17 @@ _LIST = "SELECT id, title, done FROM tasks ORDER BY seq"
 _CREATE = "INSERT INTO tasks (id, tenant_id, title) VALUES ($1, $2, $3) RETURNING id, title, done"
 _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
+_RECORD = (
+    "INSERT INTO audit_events (tenant_id, actor_issuer, actor_subject, actor_name, "
+    "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name, action, resource_type, "
+    "resource_ids, fields, request_id, trace_id) "
+    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+)
+_AUDIT_EVENTS = (
+    "SELECT tenant_id, recorded_at, actor_issuer, actor_subject, actor_name, on_behalf_of_issuer, "
+    "on_behalf_of_subject, on_behalf_of_name, action, resource_type, resource_ids, fields, "
+    "request_id, trace_id FROM audit_events ORDER BY seq"
+)
 
 
 SMALLEST_BOUND: Final = 0.001
@@ -109,6 +122,42 @@ def _task(row: Any) -> Task:
     return Task(id=str(row["id"]), title=row["title"], done=row["done"])
 
 
+def _actor(issuer: str | None, subject: str | None, name: str | None) -> Actor | None:
+    """The actor the three columns name, `None` when all three are null. Raises
+    `pydantic.ValidationError` when only some are."""
+    if issuer is None and subject is None and name is None:
+        return None
+    return Actor.model_validate({"issuer": issuer, "subject": subject, "name": name})
+
+
+def _recorded(row: Any) -> RecordedAuditEvent:
+    acted_for = _actor(
+        row["on_behalf_of_issuer"], row["on_behalf_of_subject"], row["on_behalf_of_name"]
+    )
+    return RecordedAuditEvent(
+        tenant_id=row["tenant_id"],
+        recorded_at=row["recorded_at"],
+        actor=Actor(
+            issuer=row["actor_issuer"],
+            subject=row["actor_subject"],
+            name=row["actor_name"],
+            on_behalf_of=acted_for,
+        ),
+        action=row["action"],
+        resource_type=row["resource_type"],
+        resource_ids=tuple(row["resource_ids"]),
+        fields=tuple(row["fields"]),
+        request_id=row["request_id"],
+        trace_id=row["trace_id"],
+    )
+
+
+def _named(id: str, parsed: UUID | None) -> str:
+    """How an event names the task: the uuid as a row carries it, or the id as given when it is
+    not one."""
+    return id if parsed is None else str(parsed)
+
+
 def _as_id(id: str) -> UUID | None:
     """The path parameter as a uuid, or `None` when it is not one.
 
@@ -134,34 +183,81 @@ class PostgresTaskStore:
         self._database: PostgresDatabase = database
         self._tenant_id: str = tenant_id
 
-    @asynccontextmanager
-    async def _scoped(self) -> AsyncGenerator[Any]:
-        async with self._database.connection() as conn, conn.transaction():
-            await conn.execute(_SET_TENANT, TENANT_GUC, self._tenant_id)
-            yield conn
+    async def _record(self, conn: Any, event: AuditEvent) -> None:
+        acted_for = event.actor.on_behalf_of
+        await conn.execute(
+            _RECORD,
+            self._tenant_id,
+            event.actor.issuer,
+            event.actor.subject,
+            event.actor.name,
+            None if acted_for is None else acted_for.issuer,
+            None if acted_for is None else acted_for.subject,
+            None if acted_for is None else acted_for.name,
+            event.action,
+            event.resource_type,
+            list(event.resource_ids),
+            list(event.fields),
+            event.request_id,
+            event.trace_id,
+        )
 
-    async def list(self) -> list[Task]:
-        async with self._scoped() as conn:
-            return [_task(row) for row in await conn.fetch(_LIST)]
+    async def list(self, actor: Actor) -> list[Task]:
+        async with self._database.scoped(self._tenant_id) as conn:
+            tasks = [_task(row) for row in await conn.fetch(_LIST)]
+            await self._record(conn, audit_event(actor, "read", TASKS, tuple(t.id for t in tasks)))
+            return tasks
 
-    async def create(self, body: CreateTaskBody) -> Task:
-        async with self._scoped() as conn:
-            return _task(await conn.fetchrow(_CREATE, uuid4(), self._tenant_id, body.title))
+    async def create(self, actor: Actor, body: CreateTaskBody) -> Task:
+        id = uuid4()
+        event = audit_event(actor, "create", TASKS, (str(id),), written(body))
+        async with self._database.scoped(self._tenant_id) as conn:
+            task = _task(await conn.fetchrow(_CREATE, id, self._tenant_id, body.title))
+            await self._record(conn, event)
+            return task
 
-    async def update(self, id: str, body: UpdateTaskBody) -> Task | None:
+    async def update(self, actor: Actor, id: str, body: UpdateTaskBody) -> Task | None:
         parsed = _as_id(id)
+        event = audit_event(actor, "update", TASKS, (_named(id, parsed),), written(body))
         if parsed is None:
             return None
-        async with self._scoped() as conn:
+        async with self._database.scoped(self._tenant_id) as conn:
             row = await conn.fetchrow(_UPDATE, parsed, body.done)
-            return None if row is None else _task(row)
+            if row is None:
+                return None
+            await self._record(conn, event)
+            return _task(row)
 
-    async def remove(self, id: str) -> bool:
+    async def remove(self, actor: Actor, id: str) -> bool:
         parsed = _as_id(id)
+        event = audit_event(actor, "delete", TASKS, (_named(id, parsed),))
         if parsed is None:
             return False
-        async with self._scoped() as conn:
-            return await conn.fetchval(_REMOVE, parsed) is not None
+        async with self._database.scoped(self._tenant_id) as conn:
+            if await conn.fetchval(_REMOVE, parsed) is None:
+                return False
+            await self._record(conn, event)
+            return True
+
+
+class PostgresAuditEvents:
+    """`AuditEvents` against a pool, scoped to one tenant by the same policy as its rows."""
+
+    def __init__(self, database: "PostgresDatabase", tenant_id: str) -> None:
+        self._database: PostgresDatabase = database
+        self._tenant_id: str = tenant_id
+
+    async def list(self) -> list[RecordedAuditEvent]:
+        async with self._database.scoped(self._tenant_id) as conn:
+            return [_recorded(row) for row in await conn.fetch(_AUDIT_EVENTS)]
+
+
+def _refuse_unset(tenant_id: str) -> None:
+    if tenant_id.strip() == "":
+        raise TenantUnset(
+            "an unset tenant matches no rows under the policy, which is indistinguishable "
+            "from a tenant that owns none; refused here instead"
+        )
 
 
 class PostgresDatabase:
@@ -244,12 +340,20 @@ class PostgresDatabase:
         )
 
     def store(self, tenant_id: str) -> TaskStore:
-        if tenant_id.strip() == "":
-            raise TenantUnset(
-                "an unset tenant matches no rows under the policy, which is indistinguishable "
-                "from a tenant that owns none; refused here instead"
-            )
+        _refuse_unset(tenant_id)
         return PostgresTaskStore(self, tenant_id)
+
+    def audit_events(self, tenant_id: str) -> AuditEvents:
+        _refuse_unset(tenant_id)
+        return PostgresAuditEvents(self, tenant_id)
+
+    @asynccontextmanager
+    async def scoped(self, tenant_id: str) -> AsyncGenerator[Any]:
+        """A connection inside a transaction that has set `tenant_id`, which every statement
+        on tenant data runs in."""
+        async with self.connection() as conn, conn.transaction():
+            await conn.execute(_SET_TENANT, TENANT_GUC, tenant_id)
+            yield conn
 
     async def check(self) -> str:
         async with self.connection() as conn:

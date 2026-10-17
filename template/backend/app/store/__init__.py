@@ -10,6 +10,13 @@ rather than a habit — which matters because it is exactly the claim nobody can
 reading. Postgres enforces it underneath with a row-level security policy; the in-memory
 substrate has no policy to lean on, so its scoping is a promise and it fails closed loudly.
 
+**Every method takes the actor, and records who it served.** A `TaskStore` method that reads or
+writes rows records one audit event naming the actor, in the same transaction, and fails when it
+cannot.
+The actor is a parameter rather than fixed at construction, because one piece of work may act
+as several actors through one store. `Database.audit_events(tenant_id)` reads them back.
+`docs/adr/template/0017`.
+
 Two implementations, one contract suite. `tests/store_contract.py` holds the tests and each
 substrate runs all of them -- memory in `tests/store/test_store_contract.py`, Postgres in
 `tests/integration/test_store_contract.py` -- which is what makes this a contract rather than
@@ -24,9 +31,14 @@ is the only module that does.
 """
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
 
+from app.audit_events import RecordedAuditEvent
+from app.identity.shared import Actor
 from app.models import CreateTaskBody, Task, UpdateTaskBody
+
+TASKS: Final = "tasks"
+"""The resource type an audit event names for a task, on every substrate."""
 
 
 class TenantUnset(ValueError):
@@ -48,13 +60,23 @@ class TaskStore(Protocol):
     `openapi.json` — and the route reports it. Three out of three, so it stays.
     """
 
-    async def list(self) -> list[Task]: ...
+    async def list(self, actor: Actor) -> list[Task]: ...
 
-    async def create(self, body: CreateTaskBody) -> Task: ...
+    async def create(self, actor: Actor, body: CreateTaskBody) -> Task: ...
 
-    async def update(self, id: str, body: UpdateTaskBody) -> Task | None: ...
+    async def update(self, actor: Actor, id: str, body: UpdateTaskBody) -> Task | None: ...
 
-    async def remove(self, id: str) -> bool: ...
+    async def remove(self, actor: Actor, id: str) -> bool: ...
+
+
+@runtime_checkable
+class AuditEvents(Protocol):
+    """One tenant's audit events. Nothing updates or deletes one, and reading them records no
+    event."""
+
+    async def list(self) -> list[RecordedAuditEvent]:
+        """Every event, in the order it was recorded."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -89,6 +111,11 @@ class Database(Protocol):
 
         Raises `TenantUnset` on an empty tenant, on every substrate.
         """
+        ...
+
+    def audit_events(self, tenant_id: str) -> AuditEvents:
+        """One tenant's audit events. Raises `TenantUnset` on an empty tenant, on every
+        substrate."""
         ...
 
     async def check(self) -> str:

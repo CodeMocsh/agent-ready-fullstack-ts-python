@@ -8,7 +8,8 @@ two, and the split is the whole reason the application never applies DDL:
   a *member* and issuing `SET ROLE`.
 - **`<schema>_app`** is what the application connects as. DML only, never `CREATE`, and
   **never `BYPASSRLS`** — it is subject to every policy in `ddl.py`. It may read the migration
-  ledger and not write it, so the role that verifies the schema cannot forge its own answer.
+  ledger and not write it, so the role that verifies the schema cannot forge its own answer. It
+  may insert into `audit_events` and select from it, and never update or delete an event.
 
 There is deliberately **no third role**, and no `SECURITY DEFINER` function anywhere. A role
 holding `BYPASSRLS` exists only to answer a question that cannot know a tenant — a queue claim
@@ -30,6 +31,22 @@ applies `deploy/roles.sql` once, before the first migration. `make roles` regene
 from app.store.conn import quote_ident, resolve_schema
 
 _DML = "SELECT, INSERT, UPDATE, DELETE"
+
+APPEND_ONLY_TABLE = "audit_events"
+"""The table the application role may insert into and never update or delete from. `ddl.py`
+revokes both on every release step, and the script below revokes them again after its own
+grants."""
+
+
+def _revoke_update_and_delete_on_append_only(name: str, app: str) -> str:
+    """The revoke, guarded on the table: the script runs before the first migration creates it."""
+    table = f"{name}.{APPEND_ONLY_TABLE}"
+    return (
+        "DO $app$\nBEGIN\n"
+        f"  IF to_regclass('{table}') IS NOT NULL THEN\n"
+        f"    REVOKE UPDATE, DELETE ON {table} FROM {app};\n"
+        "  END IF;\nEND\n$app$;"
+    )
 
 
 def owner_role(schema: str | None = None) -> str:
@@ -85,6 +102,8 @@ def emit_roles_sql(schema: str | None = None) -> str:
             "-- Existing objects, for a schema that was migrated before these roles existed.",
             f"GRANT {_DML} ON ALL TABLES IN SCHEMA {name} TO {app};",
             f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA {name} TO {app};",
+            "-- Except change on the audit events, which are append-only.",
+            _revoke_update_and_delete_on_append_only(name, app),
             "",
             f"-- Everything {owner} creates from here on. Without this, the table added by the",
             "-- next migration is invisible to the application until somebody re-runs the GRANT.",

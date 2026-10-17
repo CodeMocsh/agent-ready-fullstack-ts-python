@@ -25,9 +25,15 @@ that does not exist yet.
 """
 
 from app.store.conn import quote_ident, resolve_schema
+from app.store.roles import app_role
 
 SCHEMA_ENTRY_KEY = "0001_schema"
 """The one entry that names the schema, and the one that has to run first."""
+
+APPEND_ONLY_ENTRY_KEY = "0032_audit_events_append_only"
+"""The entry that revokes `UPDATE` and `DELETE` on `audit_events` from the application role, on
+every release step and in `deploy/schema.sql`. It runs after `0030_audit_events` creates the
+table, on which the default privileges grant both. `docs/adr/template/0017`."""
 
 REPAIR_BAND = "0200_"
 """Where an `ALTER TABLE … ADD COLUMN` goes. Above the table it repairs, so the table exists
@@ -71,6 +77,44 @@ SCHEMA: list[tuple[str, str]] = [
         "0011_tasks_seq_idx",
         "CREATE UNIQUE INDEX IF NOT EXISTS tasks_seq_idx ON tasks (tenant_id, seq)",
     ),
+    (
+        "0030_audit_events",
+        """CREATE TABLE IF NOT EXISTS audit_events (
+  seq                   bigserial PRIMARY KEY,
+  tenant_id             text NOT NULL,
+  recorded_at           timestamptz NOT NULL DEFAULT clock_timestamp(),
+  actor_issuer          text NOT NULL,
+  actor_subject         text NOT NULL,
+  actor_name            text NOT NULL,
+  on_behalf_of_issuer   text,
+  on_behalf_of_subject  text,
+  on_behalf_of_name     text,
+  action                text NOT NULL,
+  resource_type         text NOT NULL,
+  resource_ids          text[] NOT NULL,
+  fields                text[] NOT NULL,
+  request_id            text,
+  trace_id              text,
+  CONSTRAINT audit_events_tenant_id_not_empty CHECK (tenant_id <> \'\'),
+  CONSTRAINT audit_events_action_known
+    CHECK (action IN (\'read\', \'create\', \'update\', \'delete\')),
+  CONSTRAINT audit_events_on_behalf_of_whole CHECK (
+    (on_behalf_of_issuer IS NULL) = (on_behalf_of_subject IS NULL)
+    AND (on_behalf_of_subject IS NULL) = (on_behalf_of_name IS NULL)
+  )
+)""",
+    ),
+    (
+        "0031_audit_events_seq_idx",
+        "CREATE UNIQUE INDEX IF NOT EXISTS audit_events_seq_idx ON audit_events (tenant_id, seq)",
+    ),
+    (
+        APPEND_ONLY_ENTRY_KEY,
+        "DO $app$\nBEGIN\n"
+        "  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {app_role_name}) THEN\n"
+        "    REVOKE UPDATE, DELETE ON audit_events FROM {app_role};\n"
+        "  END IF;\nEND\n$app$",
+    ),
 ]
 """Idempotent, additive, one statement each.
 
@@ -80,9 +124,15 @@ the run."""
 
 
 def statements(schema: str | None = None) -> list[tuple[str, str]]:
-    """`SCHEMA` with the one schema-naming entry filled in, sorted by key."""
+    """`SCHEMA` with the schema and the application role filled in, sorted by key."""
     name = resolve_schema(schema)
-    filled = {SCHEMA_ENTRY_KEY: {"schema": quote_ident(name), "schema_name": f"'{name}'"}}
+    filled = {
+        SCHEMA_ENTRY_KEY: {"schema": quote_ident(name), "schema_name": f"'{name}'"},
+        APPEND_ONLY_ENTRY_KEY: {
+            "app_role": quote_ident(app_role(name)),
+            "app_role_name": f"'{app_role(name)}'",
+        },
+    }
     return sorted((key, sql.format(**filled[key]) if key in filled else sql) for key, sql in SCHEMA)
 
 
@@ -96,7 +146,7 @@ NULL because nothing equals NULL, and the empty string because `tasks_tenant_id_
 refuses to store one.
 """
 
-TENANT_TABLES: tuple[str, ...] = ("tasks",)
+TENANT_TABLES: tuple[str, ...] = ("tasks", "audit_events")
 """Every table holding tenant data. `applied_once` is the ledger and is deliberately absent:
 the schema version is not anybody's data, and a policy on it would hide the ledger from the
 role whose only job is to read it."""

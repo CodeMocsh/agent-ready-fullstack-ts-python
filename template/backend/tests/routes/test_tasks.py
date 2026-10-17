@@ -15,6 +15,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from app.identity.shared import SENTINEL_PRINCIPAL, SENTINEL_TENANT
 from app.main import create_app
 
 
@@ -89,3 +90,22 @@ def test_two_apps_do_not_share_a_store(monkeypatch: pytest.MonkeyPatch) -> None:
 
         assert len(first.get("/tasks").json()) == 2
         assert len(second.get("/tasks").json()) == 3
+
+
+def test_a_request_records_who_it_served_and_which_request_it_was(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The event names the actor the seam resolved, and the request id the response carries, so
+    an auditor can join the event to the request's log line."""
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    app = create_app()
+    with TestClient(app) as client:
+        answered = client.get("/tasks")
+        assert client.portal is not None
+        events = client.portal.call(app.state.database.audit_events(SENTINEL_TENANT).list)
+
+    [event] = events
+    assert event.actor == SENTINEL_PRINCIPAL.actor
+    assert event.action == "read"
+    assert event.resource_ids == tuple(task["id"] for task in answered.json())
+    assert event.request_id == answered.headers["x-request-id"]

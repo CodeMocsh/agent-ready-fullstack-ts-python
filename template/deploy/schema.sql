@@ -46,6 +46,47 @@ INSERT INTO applied_once(key) VALUES('0010_tasks') ON CONFLICT DO NOTHING;
 CREATE UNIQUE INDEX IF NOT EXISTS tasks_seq_idx ON tasks (tenant_id, seq);
 INSERT INTO applied_once(key) VALUES('0011_tasks_seq_idx') ON CONFLICT DO NOTHING;
 
+-- 0030_audit_events
+CREATE TABLE IF NOT EXISTS audit_events (
+  seq                   bigserial PRIMARY KEY,
+  tenant_id             text NOT NULL,
+  recorded_at           timestamptz NOT NULL DEFAULT clock_timestamp(),
+  actor_issuer          text NOT NULL,
+  actor_subject         text NOT NULL,
+  actor_name            text NOT NULL,
+  on_behalf_of_issuer   text,
+  on_behalf_of_subject  text,
+  on_behalf_of_name     text,
+  action                text NOT NULL,
+  resource_type         text NOT NULL,
+  resource_ids          text[] NOT NULL,
+  fields                text[] NOT NULL,
+  request_id            text,
+  trace_id              text,
+  CONSTRAINT audit_events_tenant_id_not_empty CHECK (tenant_id <> ''),
+  CONSTRAINT audit_events_action_known
+    CHECK (action IN ('read', 'create', 'update', 'delete')),
+  CONSTRAINT audit_events_on_behalf_of_whole CHECK (
+    (on_behalf_of_issuer IS NULL) = (on_behalf_of_subject IS NULL)
+    AND (on_behalf_of_subject IS NULL) = (on_behalf_of_name IS NULL)
+  )
+);
+INSERT INTO applied_once(key) VALUES('0030_audit_events') ON CONFLICT DO NOTHING;
+
+-- 0031_audit_events_seq_idx
+CREATE UNIQUE INDEX IF NOT EXISTS audit_events_seq_idx ON audit_events (tenant_id, seq);
+INSERT INTO applied_once(key) VALUES('0031_audit_events_seq_idx') ON CONFLICT DO NOTHING;
+
+-- 0032_audit_events_append_only
+DO $app$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_app') THEN
+    REVOKE UPDATE, DELETE ON audit_events FROM "app_app";
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0032_audit_events_append_only') ON CONFLICT DO NOTHING;
+
 -- 0100_tasks_policy
 DO $app$
 BEGIN
@@ -61,6 +102,25 @@ END
 $app$;
 INSERT INTO applied_once(key) VALUES('0100_tasks_policy') ON CONFLICT DO NOTHING;
 
+-- 0101_audit_events_policy
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = current_schema()
+                   AND tablename = 'audit_events'
+                   AND policyname = 'audit_events_tenant_isolation') THEN
+    CREATE POLICY audit_events_tenant_isolation ON audit_events FOR ALL
+      USING (tenant_id = current_setting('app.tenant_id', true))
+      WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0101_audit_events_policy') ON CONFLICT DO NOTHING;
+
 -- 0120_tasks_force
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 INSERT INTO applied_once(key) VALUES('0120_tasks_force') ON CONFLICT DO NOTHING;
+
+-- 0121_audit_events_force
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
+INSERT INTO applied_once(key) VALUES('0121_audit_events_force') ON CONFLICT DO NOTHING;
