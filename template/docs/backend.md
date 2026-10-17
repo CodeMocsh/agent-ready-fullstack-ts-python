@@ -56,6 +56,13 @@ backend/
   variables and refuses, in production, what `app/environment.py` says only development may
   carry; `app/lifespan.py` reads nothing.** A `build_` function that reads no variable belongs
   in `lifespan.py`. Everything below them takes its DSN, schema and migrate mode as arguments.
+- **A step that holds the event loop is reported.** `make dev` runs asyncio's debug mode, which
+  logs a WARNING on the `asyncio` logger for each step longer than 0.1 s. The line names the
+  task, not the route; the request line beside it names the route. One such line at each start
+  is uvicorn importing the app. In the tests, a step longer than `HELD_SECONDS` in
+  `tests/event_loop.py` is an error at teardown of the test that held it. A fixture wider than
+  one test puts the error on the next test. A test that holds the event loop on purpose says so
+  with `asyncio_reports.held_on_purpose()`.
 - Nothing degrades from Postgres to memory. A bad `DATABASE_URL` fails at boot, and an unset one
   is refused unless `APP_ENV=development`. The application refuses to start if it can see
   `DATABASE_OWNER_URL`.

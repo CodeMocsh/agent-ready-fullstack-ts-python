@@ -9,6 +9,7 @@ Verified, never applied: DDL is a release step (`make migrate`) and this process
 rights to it. A skipped release step is a failed startup rather than a failed request.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -40,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await database.close()
         finally:
             if app.state.instruments is not None:
-                app.state.instruments.shutdown()
+                await asyncio.to_thread(app.state.instruments.shutdown)
 
 
 async def _say_what_this_deployment_authenticates(app: FastAPI, substrate: str) -> None:
