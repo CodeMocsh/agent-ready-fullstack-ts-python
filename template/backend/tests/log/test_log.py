@@ -52,8 +52,7 @@ def named_principal(
 
 
 @pytest.fixture
-def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def app() -> FastAPI:
     return with_widgets(create_app())
 
 
@@ -66,9 +65,8 @@ def client(app: FastAPI, logged: Logged) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def guarded(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+def guarded() -> FastAPI:
     """The app, also serving the widgets and `/raises` behind `named_principal`."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     failing = APIRouter()
 
@@ -108,7 +106,6 @@ def test_every_line_names_the_version_the_deployment_gave_and_none_when_it_gave_
     logged: Logged, monkeypatch: pytest.MonkeyPatch, said: str, version: str | None
 ) -> None:
     """What lets a session that spans a deploy be read: each line says which build wrote it."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
 
     with TestClient(with_widgets(create_app())) as client:

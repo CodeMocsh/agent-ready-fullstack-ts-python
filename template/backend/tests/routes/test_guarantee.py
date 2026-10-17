@@ -62,14 +62,13 @@ class Refusing(NamedTuple):
 
 
 @pytest.fixture
-def refused(monkeypatch: pytest.MonkeyPatch) -> Iterator[Refusing]:
+def refused() -> Iterator[Refusing]:
     """An identity seam that refuses everything, driven through a real client.
 
     `dependency_overrides` rather than monkeypatching the module, because the router holds the
     function object taken at import time and a patched module attribute would never reach it.
     The override is resolved per request, which is the path a real deployment's resolver takes.
     """
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     app.dependency_overrides[principal_for] = refusing
     with TestClient(app) as client:

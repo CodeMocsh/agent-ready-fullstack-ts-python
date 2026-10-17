@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 
 from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
-from app.migrate import OWNER_URL_ENV
 from app.store import Connections
 from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
@@ -114,7 +113,6 @@ async def test_a_closed_pool_counts_no_connections(
 async def test_the_bounds_a_deployment_sets_are_the_ones_postgres_holds(
     provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.delenv(OWNER_URL_ENV, raising=False)
     monkeypatch.setenv(DATABASE_URL_ENV, provisioned.app_dsn)
     monkeypatch.setenv(SCHEMA_ENV, provisioned.schema)
     monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, "0.25")

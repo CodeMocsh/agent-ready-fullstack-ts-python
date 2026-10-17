@@ -70,9 +70,8 @@ def bundle(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def client(bundle: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+def client(bundle: Path) -> Iterator[TestClient]:
     """The in-memory substrate, which is what no `DATABASE_URL` means."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     with TestClient(create_server(bundle)) as fresh:
         yield fresh
 
@@ -343,9 +342,7 @@ def test_a_refusal_still_carries_the_headers(client: TestClient) -> None:
     assert "content-security-policy" in answered.headers
 
 
-def test_a_server_error_still_carries_the_headers(
-    bundle: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_server_error_still_carries_the_headers(bundle: Path) -> None:
     """A policy that lapses exactly when something breaks is not a policy.
 
     Starlette wraps every user middleware in its own error handler, so headers applied *as* a
@@ -357,7 +354,6 @@ def test_a_server_error_still_carries_the_headers(
     deploy that swaps the directory beneath a live process is how this actually happens, it
     needs no private name to arrange, and the build-time check cannot catch it.
     """
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     server = create_server(bundle)
     (bundle / INDEX).unlink()
 
@@ -417,11 +413,10 @@ def test_the_server_adds_exactly_the_bundle_surface() -> None:
     )
 
 
-def test_the_service_on_its_own_sets_none_of_them(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_service_on_its_own_sets_none_of_them() -> None:
     """`app.main` is what runs behind a real proxy, and an edge's headers are that proxy's to
     set. Two `content-security-policy` headers are enforced as their intersection, so a second
     copy from here would silently narrow whatever the deployment's edge allowed."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     with TestClient(create_app()) as bare:
         headers = bare.get("/ready").headers
     for header in SECURITY_HEADERS:

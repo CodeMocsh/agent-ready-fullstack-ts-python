@@ -10,8 +10,7 @@ from app.main import create_app
 
 
 @pytest.fixture
-def app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def app() -> FastAPI:
     return create_app()
 
 

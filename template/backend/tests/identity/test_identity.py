@@ -114,7 +114,6 @@ def test_a_deployment_that_authenticates_nothing_is_warned_at_every_boot(
     is what stops the line being deleted by the first person who finds it noisy — and it asserts
     the message names the file to edit, because a warning nobody can act on is decoration.
     """
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
 
     with TestClient(create_app()):
@@ -138,7 +137,6 @@ def test_a_deployment_that_says_it_is_deliberate_is_told_rather_than_warned(
     authenticate?" is the first question asked of a service that turns out to have leaked, and
     the log has to answer it either way.
     """
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(ACKNOWLEDGED_ENV, "1")
 
     with TestClient(create_app()):
@@ -156,7 +154,6 @@ def test_a_spelling_of_no_does_not_acknowledge_anything(
 ) -> None:
     """`UNAUTHENTICATED_IS_INTENTIONAL=0` silencing the warning is the opposite of what somebody
     typing it meant, and the only way they would find out is by not being told."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv(ACKNOWLEDGED_ENV, denial)
 
     with TestClient(create_app()):
@@ -175,7 +172,6 @@ def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
     The resolver here is `async`, because that is what a replacement is written as — and a
     synchronous stand-in is what let this pass while the opposite was true.
     """
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
     app = create_app()
     app.dependency_overrides[principal_for] = refusing_async
@@ -190,12 +186,11 @@ def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
 
 
 def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resolved(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch
+    logged: Logged,
 ) -> None:
     """The widgets carry whatever the shipped tenant requirement carries, so a requirement that
     reaches the seam without naming its principal fails here, in a project with no tenant route
     yet. `docs/adr/template/0011`."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
 
@@ -220,12 +215,9 @@ def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resol
     ]
 
 
-def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(logged: Logged) -> None:
     """It has no tenant to record an audit event in, and anybody can send one. Its `request
     completed` line, with a `401` and a null tenant, is the record. `docs/adr/template/0017`."""
-    monkeypatch.delenv("DATABASE_URL", raising=False)
     app = create_app()
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
     app.dependency_overrides[principal_for] = refusing

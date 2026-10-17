@@ -26,7 +26,10 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method ?? "GET";
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...Object.fromEntries(new Headers(init?.headers)),
+    },
   });
   if (!response.ok) {
     const detail = await detailOf(response);

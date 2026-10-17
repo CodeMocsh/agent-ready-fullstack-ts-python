@@ -28,8 +28,7 @@ def an_event(**changed: Any) -> dict[str, Any]:
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, logged: Logged) -> Iterator[TestClient]:
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def client(logged: Logged) -> Iterator[TestClient]:
     with TestClient(create_app()) as fresh:
         logged()
         yield fresh
