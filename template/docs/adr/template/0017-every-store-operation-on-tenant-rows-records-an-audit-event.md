@@ -30,7 +30,8 @@ its record succeed or fail together.
   cannot be recorded, the operation fails and changes nothing.
   `test_a_write_whose_event_cannot_be_recorded_changes_nothing` holds this on Postgres. Both
   substrates build the event before they write anything, so an actor they cannot record
-  changes nothing.
+  changes nothing. `test_an_actor_that_cannot_be_recorded_changes_nothing` holds this on both
+  substrates, for a create, and for an update and a remove of a row that exists.
 - **`app/audit_events.py` builds the event, and the template owns it.** `audit_event` names the
   actor, the action, the resource type, the ids of the rows, the names of the fields written,
   and the request id and sampled trace id from `app/log.py`. A store calls it, and the substrate
