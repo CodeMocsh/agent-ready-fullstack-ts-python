@@ -247,7 +247,7 @@ dev-frontend:
 	pnpm -C frontend dev
 
 dev-backend:
-	cd backend && APP_ENV=development uv run uvicorn app.main:app --reload --port 8000
+	cd backend && APP_ENV=development PYTHONASYNCIODEBUG=1 uv run uvicorn app.main:app --reload --port 8000
 
 openapi:
 	cd backend && uv run python devtools/export_openapi.py ../openapi.json

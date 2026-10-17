@@ -3,6 +3,11 @@
 **The development loop is set before anything imports the app**, so a module that reads
 `APP_ENV` at import reads `development`.
 
+**A step that holds an event loop for longer than `HELD_SECONDS` in `tests/event_loop.py`
+fails its test.** asyncio runs in debug mode on every event loop here: the one `TestClient`
+serves the app on, and the one pytest-asyncio runs a test on. `asyncio_reports` fails a test on
+anything else asyncio logs, too.
+
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
 is silence: `pytest -q` reports what it collected and has no way to mention what it never
@@ -12,7 +17,7 @@ looked at. `pytest_terminal_summary` prints the tiers that were not in the run, 
 
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +26,9 @@ import pytest
 from app.deployment import DEVELOPMENT, ENVIRONMENT_ENV, TELEMETRY_ENV, TIMEOUTS_ENV
 
 os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
+os.environ["PYTHONASYNCIODEBUG"] = "1"
 
+from tests.event_loop import Reported, reported
 from tests.tiers import python_tiers
 
 
@@ -44,6 +51,20 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
+
+
+@pytest.fixture(autouse=True)
+def asyncio_reports() -> Iterator[Reported]:
+    """What asyncio logged while the test ran. Fails the test on each line `Reported.failures`
+    returns."""
+    with reported() as said:
+        yield said
+    failures = said.failures()
+    assert failures == [], (
+        "asyncio logged while this test ran. A step that held the event loop does CPU work on "
+        "it: make the route a `def` route, or move the work into `asyncio.to_thread`.\n"
+        + "\n".join(failures)
+    )
 
 
 @pytest.fixture(autouse=True)

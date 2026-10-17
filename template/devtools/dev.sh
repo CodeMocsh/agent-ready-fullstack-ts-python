@@ -12,6 +12,9 @@ BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
 export BACKEND_PORT FRONTEND_PORT
 export APP_ENV=development
+# asyncio's debug mode logs each step that holds the event loop for more than 0.1 s, and
+# names the task. Every other request waits while one step runs.
+export PYTHONASYNCIODEBUG=1
 
 # Job control, so vite runs as a foreground job of its own and keeps the terminal. It is
 # not what groups the backend: dash turns job control off when it has no controlling

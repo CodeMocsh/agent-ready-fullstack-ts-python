@@ -1086,6 +1086,10 @@ need backend/app/lifespan.py
 need_grep 'refuse_development_settings' backend/app/lifespan.py
 need_grep 'APP_ENV=development' devtools/dev.sh
 need_grep 'APP_ENV=development' devtools/contract-test.sh
+# asyncio's debug mode is what logs a step that holds the event loop, in both ways to start
+# the backend by hand. Without it the log says nothing while every other request waits.
+need_grep 'PYTHONASYNCIODEBUG=1' devtools/dev.sh
+need_grep 'APP_ENV=development PYTHONASYNCIODEBUG=1 uv run uvicorn' Makefile
 need backend/tests/routes/test_tasks.py
 # The one-origin entrypoint, for a deployment with no proxy to strip the /api prefix.
 # It mounts app.main and delegates that app's lifespan, because Starlette does not run a

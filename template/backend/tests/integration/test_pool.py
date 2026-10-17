@@ -15,6 +15,7 @@ from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
 from app.store.pg import AcquireTimedOut, PostgresDatabase, Timeouts
 from app.wiring import build
+from tests.event_loop import Reported
 from tests.integration.conftest import Provisioned
 
 SHORT = Timeouts(statement=0.2, idle_in_transaction=0.2, acquire=0.2)
@@ -59,7 +60,7 @@ async def test_a_transaction_left_idle_is_ended_by_postgres_and_its_connection_r
 
 
 async def test_a_transaction_ended_by_postgres_while_the_loop_was_busy_gives_its_slot_back(
-    one_connection: PostgresDatabase,
+    one_connection: PostgresDatabase, asyncio_reports: Reported
 ) -> None:
     begun = asyncio.Event()
 
@@ -78,6 +79,7 @@ async def test_a_transaction_ended_by_postgres_while_the_loop_was_busy_gives_its
 
     assert isinstance(ended, driver().InterfaceError)
     assert await one_connection.check() == known_version()
+    assert asyncio_reports.held_on_purpose() != []
 
 
 async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(

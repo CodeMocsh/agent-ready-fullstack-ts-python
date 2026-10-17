@@ -213,6 +213,8 @@ ignore = [
 "app/telemetry.py" = ["TID251"]
 "tests/telemetry/test_telemetry.py" = ["TID251"]
 "tests/integration/test_telemetry.py" = ["TID251"]
+# The one listener on asyncio's logger, which reports a step that held the event loop.
+"tests/event_loop.py" = ["TID251"]
 # The devtools are command-line scripts, and stdout is where they answer.
 "devtools/**" = ["T20"]
 
@@ -298,3 +300,7 @@ asyncio_mode = "auto"
 # asyncpg raises much later and somewhere else, so every async fixture here opens and closes
 # one inside a single test.
 asyncio_default_fixture_loop_scope = "function"
+# Debug mode on the event loop pytest-asyncio runs a test on. `PYTHONASYNCIODEBUG` does not
+# reach it: pytest-asyncio states the setting, and states it off unless this says otherwise.
+# `tests/conftest.py` says what a test does with what debug mode reports.
+asyncio_debug = true
