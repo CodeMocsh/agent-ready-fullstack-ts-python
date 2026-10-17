@@ -41,7 +41,7 @@ from app.deployment import (
     TRUST_INBOUND_CONTEXT_ENV,
     stated,
 )
-from app.identity import SENTINEL_TENANT
+from app.identity.shared import SENTINEL_TENANT
 from app.migrate import OWNER_URL_ENV
 from app.store import Database
 from app.store.conn import SCHEMA_ENV

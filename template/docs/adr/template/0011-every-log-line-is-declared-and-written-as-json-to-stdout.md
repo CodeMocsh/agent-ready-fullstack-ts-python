@@ -40,15 +40,19 @@ middleware that writes the line after the response.
   `request completed` replaces it and names the route template, never the path.
   `test_nothing_the_request_carried_reaches_the_log` sends a canary in each place a request
   carries a value, and fails if the canary reaches the log.
-- `request completed` names the tenant. The tenant requirement's router carries
-  `app/deps.py::resolved_tenant`, which depends on `tenant_for` and calls
-  `app/log.py::name_on_request_line`. That function writes to `request.state`. `request.state` is
-  the one place where a dependency can leave a value that the middleware reads after the
-  response. `tenant_id` is null when the request resolves no tenant: on a public route, or when
-  the identity seam refuses the request.
-  `test_each_request_is_logged_with_the_tenant_it_resolved` holds this.
+- `request completed` names the tenant and the actor, under the fields of `TEMPLATE_FIELDS` in
+  `app/log.py`. It never names the actor's name, because a name is text that a person typed. The
+  tenant requirement's router carries `app/deps.py::resolved_principal`, which depends on
+  `principal_for` and calls `app/log.py::name_principal`. That function writes to
+  `request.state`. `request.state` is the one place where a dependency can leave a value that
+  the middleware reads after the response. Every field of `TEMPLATE_FIELDS` is null when the
+  request resolves no principal: on a public route, or when the identity seam refuses the
+  request. `test_each_request_is_logged_with_the_principal_it_resolved` holds this.
+- `name_principal` names the tenant and the actor together, and nothing else names either.
+  `name_on_request_line` refuses a field of `TEMPLATE_FIELDS`, so a line never names a tenant
+  without its actor. `test_a_tenant_named_without_its_actor_is_refused` holds this.
 - A project declares more fields on `request completed` in `FIELDS` in `app/request_line.py`,
-  and names each one with `name_on_request_line`. A field is an id such as `user.id`, never a
+  and names each one with `name_on_request_line`. A field is an id such as `order.id`, never a
   name, an email or text that a person typed. A field nobody declared raises
   `UndeclaredRequestField` and does not reach the log.
   `test_a_field_nobody_declared_is_refused_rather_than_logged` holds this.

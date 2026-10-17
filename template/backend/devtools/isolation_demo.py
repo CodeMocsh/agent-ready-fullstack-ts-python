@@ -13,7 +13,7 @@ from typing import Any
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.deployment import DATABASE_URL_ENV
-from app.identity import SENTINEL_TENANT
+from app.identity.shared import SENTINEL_TENANT
 from app.store.conn import SCHEMA_ENV, resolve_schema
 from app.store.ddl import TENANT_GUC
 

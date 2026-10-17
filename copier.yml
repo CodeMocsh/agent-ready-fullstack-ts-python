@@ -67,14 +67,15 @@ example_resource:
     the example's files, your edits included.
   default: true
 
-# The same, for the identity stub: `app/identity.py`, which resolves every request to the
-# sentinel tenant, and its tests. A project that has replaced it with real authentication
-# records false the same way, and an update stops bringing the stub back.
+# The same, for the identity stub: `app/identity/__init__.py`, which resolves every request to
+# the sentinel principal, and its tests. A project that has replaced it with real authentication
+# records false the same way, and an update stops bringing the stub back. `app/identity/shared.py`
+# is not the stub: an update brings it to every project.
 identity_stub:
   type: bool
   help: >-
-    Keep updating the identity stub (`app/identity.py`) on `copier update`? To stop, set it to
-    false in .copier-answers.yml and commit before you update. Changing it to no during an
+    Keep updating the identity stub (`app/identity/__init__.py`) on `copier update`? To stop,
+    set it to false in .copier-answers.yml and commit before you update. Changing it to no during an
     update deletes the stub and its tests, your edits included.
   default: true
 
@@ -105,7 +106,7 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks-client-events.live.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tenant_scoping.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/integration/test_tasks_on_postgres.py{% endif %}"
-  - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity.py{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity/__init__.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/routes/test_guarantee.py{% endif %}"
@@ -177,8 +178,8 @@ _message_after_copy: |
 
   The backend authenticates nothing yet. Every request resolves to the tenant `default`,
   which is what lets this run with no issuer and no key -- and it means anyone who can
-  reach the process can read and write everything it holds. Replace `tenant_for()` in
-  `backend/app/identity.py` before it is reachable by anyone you do not trust. Until you
+  reach the process can read and write everything it holds. Replace `principal_for()` in
+  `backend/app/identity/__init__.py` before it is reachable by anyone you do not trust. Until you
   do, every startup says so; `UNAUTHENTICATED_IS_INTENTIONAL=1` records that you meant it.
 
   The agent-ready layer is opt-in. To use it, install Entire and enable it:

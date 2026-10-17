@@ -6,8 +6,8 @@ The template owns this module and updates it. The refusals themselves are the pr
 declare. `docs/adr/template/0006` and `docs/adr/template/0015`.
 
 A misconfigured deployment raises from `app/wiring.py` and stops the process. A request with no
-tenant raises `Unauthenticated` from `app/identity.py`, which `docs/adr/template/0004` keeps out
-of the spec.
+principal raises `Unauthenticated` from `app/identity/shared.py`, which `docs/adr/template/0004`
+keeps out of the spec.
 """
 
 from typing import Any, ClassVar, final

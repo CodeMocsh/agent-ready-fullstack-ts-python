@@ -8,11 +8,12 @@ Accepted.
 
 ## Context
 
-`tenant_for` in `app/identity.py` is where a request becomes a tenant. The identity stub resolves
-every request to `SENTINEL_TENANT`. A project replaces it.
+`principal_for` in `app/identity/__init__.py` is where a request becomes a principal: a tenant
+and an actor. The identity stub resolves every request to `SENTINEL_PRINCIPAL`. A project
+replaces it.
 
 The obvious design lets `StoreDep` resolve the tenant, because a route that touches data needs a
-store. That design fails silently. A route that takes no store resolves no tenant and answers
+store. That design fails silently. A route that takes no store resolves no principal and answers
 everybody. Nobody decides this. It comes from the dependency graph, and the next route without a
 store gets the same result.
 
@@ -20,17 +21,21 @@ The stub is a correct default, because a fresh clone must run with no issuer and
 But from outside, the stub looks the same as a service that should authenticate and does not.
 
 A replacement verifies a credential against a session store or a key set, so it is an
-`async def`. A call to it returns a coroutine. It does not return a tenant, and it does not raise.
+`async def`. A call to it returns a coroutine. It does not return a principal, and it does not
+raise.
+
+A project that replaces the resolver stops receiving the stub. Anything the template shares with
+every resolver must then live in a module the project does not replace.
 
 ## Decision
 
 - The router carries the seam, not the handler. `app/routes/tenant/__init__.py` declares
-  `APIRouter(dependencies=[Depends(resolved_tenant)])`. `resolved_tenant` in `app/deps.py`
-  depends on `tenant_for`, and names the tenant on the request's log line
+  `APIRouter(dependencies=[Depends(resolved_principal)])`. `resolved_principal` in `app/deps.py`
+  depends on `principal_for`, and names the tenant and the actor on the request's log line
   ([0011](0011-every-log-line-is-declared-and-written-as-json-to-stdout.md)).
-- Every route under that router resolves a tenant before its handler runs, with or without a
-  store. An override of `tenant_for` reaches every route under it.
-- `tests/routes/test_guarantee.py` holds the rule. It overrides `tenant_for` with `refusing` from
+- Every route under that router resolves a principal before its handler runs, with or without a
+  store. An override of `principal_for` reaches every route under it.
+- `tests/routes/test_guarantee.py` holds the rule. It overrides `principal_for` with `refusing` from
   `tests/identity/doubles.py`. It reads the routes off the running app with `routes_of` from
   `tests/routes/walk.py`, drives each one, and fails on any route that answers.
 - The test reads the routes off the app, not off a list. A list is a second place to remember,
@@ -45,14 +50,26 @@ A replacement verifies a credential against a session store or a key set, so it 
 - Paths match whole, never by prefix. A prefix gives the exemption to every future route with that
   spelling: a prefix match on `/docs` also exempts `/docs-internal`. `generated_by_fastapi` in
   `walk.py` reads FastAPI's own schema and docs paths off the app, as exact paths.
-- `tenant_for` returns a tenant or raises `Unauthenticated`. It never returns the sentinel tenant
-  for a credential it cannot resolve.
+- `principal_for` returns a principal or raises `Unauthenticated`. It never returns the sentinel
+  principal for a credential it cannot resolve. That fallback hands one tenant's data to anybody
+  who failed to log in.
+- A principal is a tenant and an actor. An actor is named by `issuer` and `subject` together,
+  because a subject is unique only within its issuer.
+  `test_an_actor_is_named_by_its_issuer_and_subject_together` holds this. An actor that acts for a
+  person names that person in `on_behalf_of`.
+- `app/identity/shared.py` is the template's, and an update brings it to every project. It holds
+  what every resolver shares: `Principal`, `Actor`, `Unauthenticated`, the sentinel principal and
+  the probe. `app/identity/__init__.py` holds `principal_for` and re-exports the shared names.
+  `test_app_identity_defines_none_of_the_mechanism_itself` fails on a project that defines a
+  shared name itself
+  ([0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md)).
 - `app/main.py` answers `Unauthenticated` with `401`, `WWW-Authenticate: Bearer` and an
   `ErrorBody`, though the stub never raises it. A replacement that must add its own handler
   answers `500` until somebody notices, and a client retries a `500`.
-- At startup, the lifespan calls `resolved_without_a_credential()`. It asks whether a request that
-  carries nothing resolves to a tenant. It awaits an awaitable result, so an `async` replacement
-  is not read as a tenant.
+- At startup, the lifespan calls `resolved_without_a_credential` with the seam the app serves
+  with: `principal_for`, or what `app.dependency_overrides` puts in its place. It asks whether a
+  request that carries nothing resolves to a principal. It awaits an awaitable result, so an
+  `async` replacement is not read as a principal.
 - Every boot logs the answer. Only the level changes:
   - `log.identity_verified` at `INFO` when the seam refuses the request.
   - `log.identity_open` at `WARNING` when the seam resolves it.
@@ -64,7 +81,8 @@ A replacement verifies a credential against a session store or a key set, so it 
 - The guarantee ships with the identity stub. `test_guarantee.py`, `tests/identity/doubles.py`
   and `tests/identity/test_identity.py` test the seam as the stub ships it. The answer
   `identity_stub: false`, recorded in `.copier-answers.yml`, stops `copier update` from bringing
-  them, beside `app/identity.py`.
+  them, beside `app/identity/__init__.py`. `tests/identity/test_shared.py` tests the shared names,
+  and reaches every project.
 - `tests/routes/walk.py` imports nothing about identity. Other suites that walk the routes keep
   working after a project replaces the stub.
 
@@ -89,6 +107,11 @@ A replacement verifies a credential against a session store or a key set, so it 
   permission model is another dependency declared beside the route. When one level of access
   becomes many, the change is that dependency and a data migration, not a rewrite of every
   handler.
+- **One file, `app/identity.py`, for the resolver and what it shares.** A project that replaces
+  the resolver then stops receiving the shared names too. `Unauthenticated` and the sentinel
+  stop changing for it, and the template can add nothing to identity that reaches it.
+- **A `user_id` beside the tenant.** An actor may be an app that acts for a person, and a user id
+  says neither. A subject without its issuer names two people when two issuers vouch for it.
 - **A credential verifier.** Verification needs a signing key, two lifetimes and a rotation
   policy. A template does not choose those for a project. The guarantee does not need them. It
   needs a seam that refuses, and `refusing` is that seam.

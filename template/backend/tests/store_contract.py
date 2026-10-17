@@ -21,7 +21,7 @@ be talked into answering for a tenant it was not scoped to.
 
 import pytest
 
-from app.identity import SENTINEL_TENANT
+from app.identity.shared import SENTINEL_TENANT
 from app.models import CreateTaskBody, UpdateTaskBody
 from app.store import Database, TenantUnset
 

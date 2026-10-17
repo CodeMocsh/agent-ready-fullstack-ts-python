@@ -102,7 +102,14 @@ What to expect, because it is not all free:
   its first copy.
 - **Stop receiving the identity stub once you authenticate.** Record the answer the same way:
   set `identity_stub: false` in `.copier-answers.yml`, commit, then update. An update then leaves
-  `app/identity.py` and its tests alone. Given on the update itself, the answer deletes them.
+  `app/identity/__init__.py` and its tests alone, and still brings `app/identity/shared.py`. Given
+  on the update itself, the answer deletes them. A project generated before 0.36.0 has its
+  resolver in `app/identity.py`. With `identity_stub: false`, move that file to
+  `app/identity/__init__.py` and commit before the update: a folder without `__init__.py` loses
+  to a module of the same name. After the update, rename `tenant_for` to `principal_for`, return
+  a `Principal`, and import `Unauthenticated` and the other shared names from
+  `app.identity.shared`. With `identity_stub: true`, the update deletes `app/identity.py` and any
+  edit in it.
 - **Files you rewrote come back as conflicts.** The modules under `app/models/` and
   `app/routes/tenant/` are the first any real project replaces. You are porting a pattern rather than accepting a patch.
 - **Regenerate the contract and the complexity baseline afterwards.** `openapi.json`,

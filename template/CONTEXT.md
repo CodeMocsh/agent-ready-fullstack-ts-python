@@ -20,6 +20,32 @@ authentication. A named constant rather than a null or an empty string, so the e
 to real tenancy is an unambiguous `UPDATE ... WHERE tenant_id = 'default'`.
 _Avoid_: anonymous, public, system, null tenant.
 
+**Sentinel principal**:
+The sentinel tenant, and an actor with issuer `sentinel`, subject `default` and name
+`Unauthenticated`. What the identity stub resolves every request to.
+_Avoid_: anonymous user, guest.
+
+**Identity seam**:
+`principal_for` in `app/identity/__init__.py`: the one place that decides who a request is.
+Every tenant route reaches it through its router.
+_Avoid_: auth hook, middleware.
+
+**Resolver**:
+A function that can stand in the identity seam: the identity stub, a test's double, or the
+project's own. It returns a principal or raises `Unauthenticated`.
+_Avoid_: authenticator, provider.
+
+**Principal**:
+Who a request is: a tenant and an actor, resolved together from one credential. It decides
+what the request may see. Only a resolver builds one.
+_Avoid_: user, caller, identity, session.
+
+**Actor**:
+Who acted: a person, or an app acting for itself or for a person. Named by an issuer and a
+subject together, because a subject alone is unique only within its issuer. It records; it
+decides nothing.
+_Avoid_: user (an actor may be an app), author, owner.
+
 **Owner role**:
 `<schema>_owner`. Owns the schema and every table in it and applies the DDL. `NOLOGIN` —
 nothing serves traffic as it, and `make migrate` reaches it with `SET ROLE`.
@@ -68,9 +94,10 @@ its sentence.
 _Avoid_: error response, exception (an exception is how a refusal is raised, not what it is).
 
 **Identity stub**:
-`app/identity.py` as the template ships it: every request resolves to the sentinel tenant. A
-project that authenticates replaces it, then records `identity_stub: false` in
-`.copier-answers.yml` so `copier update` stops bringing it.
+`principal_for` in `app/identity/__init__.py` as the template ships it: every request resolves
+to the sentinel principal. A project that authenticates replaces it, then records
+`identity_stub: false` in `.copier-answers.yml` so `copier update` stops bringing it. What every
+resolver shares, `app/identity/shared.py`, is not the stub, and an update brings it either way.
 _Avoid_: fake auth, no-auth mode.
 
 ## Logs

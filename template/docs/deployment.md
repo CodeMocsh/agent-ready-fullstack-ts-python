@@ -123,8 +123,9 @@ line is declared.
 | `trace_id`, `span_id` | while a traced request is served; the ids its spans carry |
 | `exception` | the whole traceback, when there is one |
 | `tenant_id` | on `request completed`; null on a public route, or when the identity seam refused |
+| `actor.issuer`, `actor.subject` | on `request completed`; who the request acted as, null when `tenant_id` is |
 
-A field declared in `app/request_line.py`, such as `user.id`, is on `request completed` too, and
+A field declared in `app/request_line.py`, such as `order.id`, is on `request completed` too, and
 null when the request did not name it.
 
 **Set `OTEL_RESOURCE_ATTRIBUTES=service.version=<your build>` on every deployment**, with or
@@ -233,11 +234,12 @@ and nothing complains: the app comes up, serves, and loses the data. It logs whi
 came up on — find the line whose `message` is `serving` and read its `substrate`, or assert
 `app.state.database.name` from a smoke test.
 
-**Replace `tenant_for()` in `app/identity.py`, or you are serving everybody.** It ships as a
-stub: every request resolves to the tenant `default`, so anyone who reaches the process reads
+**Replace `principal_for()` in `app/identity/__init__.py`, or you are serving everybody.** It ships
+as a stub: every request resolves to the tenant `default`, so anyone who reaches the process reads
 and writes everything it holds. This one does complain — find the line whose `message` starts
-`identity:` and read its `severity`. `WARNING` means nobody has replaced it. Serving everybody
-is a real thing to do for a while, behind an authenticating proxy or on an internal tool; set
+`identity:` and read its `severity`. `WARNING` means nobody has replaced it. Serving everybody is a
+real thing to do for a while, behind an authenticating proxy or on an internal tool; set
 `UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
-level and nothing else. [adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says
-what a replacement owes.
+level and nothing else.
+[adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says what a
+replacement owes.

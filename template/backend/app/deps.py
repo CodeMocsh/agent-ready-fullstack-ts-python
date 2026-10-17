@@ -1,4 +1,4 @@
-"""What a route is handed: the tenant it resolved, and a store scoped to that tenant. Neither
+"""What a route is handed: the principal it resolved, and a store scoped to its tenant. Neither
 resolves anything on its own; both reach the identity seam.
 
 The substrate is chosen once, by `wiring.build()`, and held on the app's lifespan. Reading it
@@ -12,7 +12,8 @@ from typing import Annotated
 from fastapi import Depends, Request
 
 from app import log
-from app.identity import tenant_for
+from app.identity import principal_for
+from app.identity.shared import Principal
 from app.store import Database, TaskStore
 
 
@@ -29,18 +30,21 @@ def database_of(request: Request) -> Database:
     return database
 
 
-async def resolved_tenant(request: Request, tenant: Annotated[str, Depends(tenant_for)]) -> str:
-    """The tenant `tenant_for` resolved, named on this request's `request completed` line.
+async def resolved_principal(
+    request: Request, principal: Annotated[Principal, Depends(principal_for)]
+) -> Principal:
+    """The principal `principal_for` resolved, its tenant and actor named on this request's
+    `request completed` line.
 
-    The tenant requirement's router carries this, so every route under it names its tenant, and
-    an override of `tenant_for` reaches every route under it. `docs/adr/template/0011`.
+    The tenant requirement's router carries this, so every route under it names who it served,
+    and an override of `principal_for` reaches every route under it. `docs/adr/template/0011`.
     """
-    log.name_on_request_line(request, log.TENANT_ID, tenant)
-    return tenant
+    log.name_principal(request, principal)
+    return principal
 
 
-TenantDep = Annotated[str, Depends(resolved_tenant)]
-"""The tenant this request resolved to, reached through `Depends` rather than called.
+PrincipalDep = Annotated[Principal, Depends(resolved_principal)]
+"""The principal this request resolved to, reached through `Depends` rather than called.
 
 Two things follow from that and neither is cosmetic. FastAPI caches a dependency's result for
 the life of a request and does not cache a plain call, so a resolver that verifies a signature
@@ -50,13 +54,13 @@ remembered to route through.
 """
 
 
-def get_store(request: Request, tenant: TenantDep) -> TaskStore:
+def get_store(request: Request, principal: PrincipalDep) -> TaskStore:
     """The store this request may use, already scoped to its tenant.
 
     Resolving the tenant here rather than in each route is what makes it impossible for a
     route to forget: there is no unscoped store to obtain.
     """
-    return database_of(request).store(tenant)
+    return database_of(request).store(principal.tenant_id)
 
 
 StoreDep = Annotated[TaskStore, Depends(get_store)]
