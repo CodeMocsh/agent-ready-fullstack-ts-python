@@ -99,6 +99,12 @@ def _driver() -> Any:
     return asyncpg
 
 
+def _ended_but_still_lent(conn: Any) -> bool:
+    """Whether Postgres ended this pooled connection while the pool still lends it. One the pool
+    took back is detached, with `_con` set to `None`, and is not."""
+    return conn._con is not None and conn.is_closed()
+
+
 def _task(row: Any) -> Task:
     return Task(id=str(row["id"]), title=row["title"], done=row["done"])
 
@@ -221,7 +227,10 @@ class PostgresDatabase:
         try:
             yield conn
         finally:
-            await pool.release(conn)
+            if _ended_but_still_lent(conn):
+                conn.terminate()
+            else:
+                await pool.release(conn)
 
     def connections(self) -> Connections:
         """The pool's connections now. Before the pool opens and after it closes, none. Safe to

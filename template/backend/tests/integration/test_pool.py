@@ -2,6 +2,7 @@
 counted."""
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -28,7 +29,7 @@ async def one_connection(provisioned: Provisioned) -> AsyncIterator[PostgresData
     try:
         yield database
     finally:
-        await database.close()
+        await asyncio.wait_for(database.close(), timeout=5)
 
 
 def driver() -> Any:
@@ -54,6 +55,28 @@ async def test_a_transaction_left_idle_is_ended_by_postgres_and_its_connection_r
         with pytest.raises(driver().InterfaceError):
             await conn.execute("SELECT 1")
 
+    assert await one_connection.check() == known_version()
+
+
+async def test_a_transaction_ended_by_postgres_while_the_loop_was_busy_gives_its_slot_back(
+    one_connection: PostgresDatabase,
+) -> None:
+    begun = asyncio.Event()
+
+    async def held() -> None:
+        async with one_connection.connection() as conn, conn.transaction():
+            await conn.execute("SELECT 1")
+            begun.set()
+            await asyncio.sleep(0.05)
+            await conn.execute("SELECT 1")
+
+    async def busy() -> None:
+        await begun.wait()
+        time.sleep(1)
+
+    ended, _ = await asyncio.gather(held(), busy(), return_exceptions=True)
+
+    assert isinstance(ended, driver().InterfaceError)
     assert await one_connection.check() == known_version()
 
 
