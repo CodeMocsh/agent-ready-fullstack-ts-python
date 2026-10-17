@@ -1,7 +1,7 @@
 """What asyncio's debug mode reports about the event loops a test runs on.
 
-`tests/conftest.py` turns debug mode on for every event loop the suite starts, and fails a test on
-each line `Reported.failures` returns.
+`tests/conftest.py` turns debug mode on for every event loop the suite starts, and calls
+`Reported.check` after each test.
 """
 
 import logging
@@ -29,16 +29,27 @@ class Reported(logging.Handler):
         return [one.getMessage() for one in self.records if not _held_briefly(one)]
 
     def held_on_purpose(self) -> list[str]:
-        """What asyncio logged so far, then removed, for a test that holds an event loop on
-        purpose."""
-        said = [one.getMessage() for one in self.records]
-        self.records.clear()
-        return said
+        """Each step that held an event loop so far, then removed, for a test that holds one on
+        purpose. Every other record stays."""
+        held = [one for one in self.records if one.msg == _HELD_STEP]
+        self.records = [one for one in self.records if one.msg != _HELD_STEP]
+        return [one.getMessage() for one in held]
+
+    def check(self) -> None:
+        """Raises on each failure since the last check. Removes every record either way."""
+        failures = self.failures()
+        self.records = []
+        if failures:
+            raise AssertionError(
+                "asyncio logged a warning. A step that held the event loop did blocking work on "
+                "it: CPU work, or a call that waits without `await`. Move that work into a `def` "
+                "route or into `asyncio.to_thread`.\n" + "\n".join(failures)
+            )
 
 
 @contextmanager
 def reported() -> Generator[Reported]:
-    """Every record on the `asyncio` logger inside the block, kept out of the log the app writes
+    """Every warning on the `asyncio` logger inside the block, kept out of the log the app writes
     to stdout. Restores the logger after."""
     logger = logging.getLogger("asyncio")
     handler = Reported()

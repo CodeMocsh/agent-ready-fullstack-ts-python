@@ -300,7 +300,7 @@ asyncio_mode = "auto"
 # asyncpg raises much later and somewhere else, so every async fixture here opens and closes
 # one inside a single test.
 asyncio_default_fixture_loop_scope = "function"
-# Debug mode on the event loop pytest-asyncio runs a test on. `PYTHONASYNCIODEBUG` does not
-# reach it: pytest-asyncio states the setting, and states it off unless this says otherwise.
-# `tests/conftest.py` says what a test does with what debug mode reports.
+# Debug mode on the event loop pytest-asyncio runs a test on. pytest-asyncio sets debug mode
+# itself, and sets it off unless this line turns it on, so `PYTHONASYNCIODEBUG` alone does not
+# reach that event loop. `tests/conftest.py` says what a test does with what debug mode reports.
 asyncio_debug = true

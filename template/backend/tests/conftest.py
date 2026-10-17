@@ -3,10 +3,11 @@
 **The development loop is set before anything imports the app**, so a module that reads
 `APP_ENV` at import reads `development`.
 
-**A step that holds an event loop for longer than `HELD_SECONDS` in `tests/event_loop.py`
-fails its test.** asyncio runs in debug mode on every event loop here: the one `TestClient`
-serves the app on, and the one pytest-asyncio runs a test on. `asyncio_reports` fails a test on
-anything else asyncio logs, too.
+**A step that holds an event loop longer than `HELD_SECONDS` in `tests/event_loop.py` is an
+error at teardown of its test.** asyncio runs in debug mode on every event loop here: the one
+`TestClient` serves the app on, and the one pytest-asyncio runs a test on. Any other warning
+asyncio logs is an error too. A warning logged between two tests, by a fixture wider than one
+test, is an error at teardown of the next test, or of the last one.
 
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
@@ -17,7 +18,7 @@ looked at. `pytest_terminal_summary` prints the tiers that were not in the run, 
 
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,8 @@ os.environ["PYTHONASYNCIODEBUG"] = "1"
 
 from tests.event_loop import Reported, reported
 from tests.tiers import python_tiers
+
+pytest_plugins = ["pytester"]
 
 
 def paths_asked_for(config: pytest.Config) -> list[Path]:
@@ -53,18 +56,19 @@ def pytest_terminal_summary(
         )
 
 
-@pytest.fixture(autouse=True)
-def asyncio_reports() -> Iterator[Reported]:
-    """What asyncio logged while the test ran. Fails the test on each line `Reported.failures`
-    returns."""
+@pytest.fixture(scope="session", autouse=True)
+def asyncio_logged() -> Generator[Reported]:
+    """Every warning asyncio logs in this session. Checked once more after the last test."""
     with reported() as said:
         yield said
-    failures = said.failures()
-    assert failures == [], (
-        "asyncio logged while this test ran. A step that held the event loop does CPU work on "
-        "it: make the route a `def` route, or move the work into `asyncio.to_thread`.\n"
-        + "\n".join(failures)
-    )
+        said.check()
+
+
+@pytest.fixture(autouse=True)
+def asyncio_reports(asyncio_logged: Reported) -> Generator[Reported]:
+    """What asyncio logged since the test before this one. Checked at teardown."""
+    yield asyncio_logged
+    asyncio_logged.check()
 
 
 @pytest.fixture(autouse=True)

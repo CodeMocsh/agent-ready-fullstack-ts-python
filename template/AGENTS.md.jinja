@@ -104,9 +104,10 @@ fans out to both. Each half works without the other's toolchain.
 **Backend**
 
 - A route goes in the `app/routes/` module for what its caller presents.
-- CPU work in a request runs off the event loop: in a `def` route, or in `asyncio.to_thread`.
-  The process has one event loop, and every other request waits while an `async def` route
-  computes. `make dev` logs each step over 0.1 s, and a test fails on one over 1 s.
+- Blocking work in a request runs off the event loop: CPU work, or a call that waits without
+  `await`, goes in a `def` route or in `asyncio.to_thread`. The process has one event loop, and
+  every other request waits while one step holds it. [docs/backend.md](docs/backend.md) says how
+  a held step is reported.
 - Two writers at once both succeed. Shape a write that another can race, cheapest first: append or
   merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
   in the route and write in the store afterwards. A race only shows on Postgres, so its test goes
