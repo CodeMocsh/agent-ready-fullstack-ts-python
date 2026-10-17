@@ -7,6 +7,9 @@ none of what follows is checked by anything.
 
 `make build` produces `frontend/dist/`, a static bundle. Serve it from any static host with an
 SPA fallback. If it is served from a subpath, pass `--base=/that/path/` to `vite build`.
+Give every file under `assets/` the header `cache-control: public, max-age=31536000, immutable`.
+Give every other file, `index.html` included, the header `cache-control: no-cache`. Then no
+browser uses an `index.html` that names assets a deploy removed. `app.serve` sets both.
 
 The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
 

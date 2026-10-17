@@ -13,6 +13,7 @@ frontend/
   src/index.css       the @theme block
   src/router.tsx      routes
   src/client-events.ts reports a failure the browser saw to the backend's log
+  src/missing-chunk.ts reloads the tab once when a deploy removed a chunk it asks for
   tests/              mirrors src/
   e2e/                Playwright; *.live.spec.ts needs a running backend
   e2e/signed-in.ts    how a live spec signs in -- yours

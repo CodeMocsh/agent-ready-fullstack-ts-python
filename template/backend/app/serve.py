@@ -43,6 +43,12 @@ INDEX: Final = "index.html"
 ASSETS: Final = "assets"
 PREFIX: Final = "/api"
 
+IMMUTABLE: Final = "public, max-age=31536000, immutable"
+"""A browser keeps a file under `assets/` for a year without asking for it again."""
+
+REVALIDATED: Final = "no-cache"
+"""A browser asks again on each load for every other file, the shell included."""
+
 MAX_BODY_BYTES: Final = 1_048_576
 """What a request body may weigh before this process refuses to read it.
 
@@ -157,13 +163,17 @@ def create_server(bundle: Path) -> ASGIApp:
         as a syntax error somewhere unrelated to the deploy that caused it.
         """
         found = _within(bundle, held)
-        if found is not None:
-            return FileResponse(found)
-        if held.startswith(f"{ASSETS}/"):
+        if found is None and held.startswith(f"{ASSETS}/"):
             raise NoSuchAsset(f"no such asset: {held}")
-        return FileResponse(index)
+        served = index if found is None else found
+        return FileResponse(served, headers={"cache-control": _caching(bundle, served)})
 
     return _confined(server)
+
+
+def _caching(bundle: Path, served: Path) -> str:
+    """`IMMUTABLE` for a file under `assets/`, and `REVALIDATED` for any other file."""
+    return IMMUTABLE if served.is_relative_to((bundle / ASSETS).resolve()) else REVALIDATED
 
 
 def _confined(app: ASGIApp) -> ASGIApp:

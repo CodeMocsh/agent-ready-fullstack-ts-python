@@ -2103,6 +2103,17 @@ deep="$(curl -fsS --max-time 10 "$ONE_ORIGIN/some/client/route")" \
     || fail "app.serve refused a client route instead of falling back to the shell"
 [ "$deep" = "$shell" ] || fail "a deep link did not fall back to the built index.html"
 
+cache_control_of() {
+    headers="$(curl -fsS --max-time 10 -o /dev/null -D - "$1")" || return 1
+    printf '%s\n' "$headers" | tr -d '\r' | sed -n 's/^[Cc]ache-[Cc]ontrol: //p'
+}
+for page in / /some/client/route; do
+    page_cache="$(cache_control_of "$ONE_ORIGIN$page")" \
+        || fail "app.serve did not answer $page for its cache-control"
+    [ "$page_cache" = "no-cache" ] \
+        || fail "app.serve answered $page with cache-control '${page_cache}', not no-cache"
+done
+
 # Every file the shell asks for, at the exact URL it asks for it -- leading slash and `base`
 # and all -- read out of the document so this follows the build rather than needing an edit
 # each time a hash moves. Scripts and stylesheets both: they are hashed the same way and a
@@ -2131,6 +2142,10 @@ for ref in $refs; do
         *"$want"*) ;;
         *) fail "the shell asks for $ref and app.serve answered it as ${ref_type:-nothing}" ;;
     esac
+    ref_cache="$(cache_control_of "$ONE_ORIGIN$ref")" \
+        || fail "app.serve did not answer $ref for its cache-control"
+    [ "$ref_cache" = "public, max-age=31536000, immutable" ] \
+        || fail "app.serve answered $ref with cache-control '${ref_cache}', not immutable"
 done
 
 # An asset name carries the build's hash, so one the bundle does not hold is a stale
