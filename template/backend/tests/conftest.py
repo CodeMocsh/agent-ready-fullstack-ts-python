@@ -5,9 +5,9 @@
 
 **A step that holds an event loop longer than `HELD_SECONDS` in `tests/event_loop.py` is an
 error at teardown of its test.** asyncio runs in debug mode on every event loop here: the one
-`TestClient` serves the app on, and the one pytest-asyncio runs a test on. Any other warning
-asyncio logs is an error too. A warning logged between two tests, by a fixture wider than one
-test, is an error at teardown of the next test, or of the last one.
+`TestClient` serves the app on, and the one pytest-asyncio runs a test on. Any other record
+asyncio logs from WARNING up is an error too. A record logged between two tests, by a fixture
+wider than one test, is an error at teardown of the next test, or of the last one.
 
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
@@ -58,7 +58,7 @@ def pytest_terminal_summary(
 
 @pytest.fixture(scope="session", autouse=True)
 def asyncio_logged() -> Generator[Reported]:
-    """Every warning asyncio logs in this session. Checked once more after the last test."""
+    """Every record asyncio logs in this session. Checked once more after the last test."""
     with reported() as said:
         yield said
         said.check()

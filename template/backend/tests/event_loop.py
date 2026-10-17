@@ -14,7 +14,7 @@ _HELD_STEP = "Executing %s took %.3f seconds"
 
 
 class Reported(logging.Handler):
-    """Every record on the `asyncio` logger while it is installed."""
+    """Every record the `asyncio` logger passes to it while it is installed."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -41,16 +41,17 @@ class Reported(logging.Handler):
         self.records = []
         if failures:
             raise AssertionError(
-                "asyncio logged a warning. A step that held the event loop did blocking work on "
-                "it: CPU work, or a call that waits without `await`. Move that work into a `def` "
-                "route or into `asyncio.to_thread`.\n" + "\n".join(failures)
+                "asyncio logged while this test ran. A line that says a step took too long names "
+                "a step that did blocking work on the event loop: CPU work, or a call that waits "
+                "without `await`. Move that work into a `def` route or into `asyncio.to_thread`.\n"
+                + "\n".join(failures)
             )
 
 
 @contextmanager
 def reported() -> Generator[Reported]:
-    """Every warning on the `asyncio` logger inside the block, kept out of the log the app writes
-    to stdout. Restores the logger after."""
+    """Every record from WARNING up on the `asyncio` logger inside the block, kept out of the log
+    the app writes to stdout. Restores the logger after."""
     logger = logging.getLogger("asyncio")
     handler = Reported()
     level, propagate = logger.level, logger.propagate

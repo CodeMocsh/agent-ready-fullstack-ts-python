@@ -34,7 +34,7 @@ def test_a_route_that_holds_the_event_loop_past_the_limit_is_an_error(
     pytester.makeconftest("from tests.conftest import asyncio_logged, asyncio_reports\n")
     pytester.makepyfile(HOLDING_ROUTE)
 
-    ran = pytester.runpytest()
+    ran = pytester.runpytest("-p", "no:asyncio")
 
     ran.assert_outcomes(passed=1, errors=1)
     assert asyncio_reports.held_on_purpose() != []
@@ -55,7 +55,7 @@ def test_a_route_that_holds_the_event_loop_briefly_is_reported_and_passes(
     assert asyncio_reports.failures() == []
 
 
-async def test_a_test_that_holds_its_event_loop_past_the_limit_is_reported_as_a_failure(
+async def test_a_test_that_holds_its_event_loop_past_the_limit_is_reported(
     asyncio_reports: Reported,
 ) -> None:
     time.sleep(HELD_SECONDS + 0.05)
