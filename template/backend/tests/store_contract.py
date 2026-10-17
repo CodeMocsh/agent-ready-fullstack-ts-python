@@ -225,13 +225,21 @@ class TaskStoreContract:
     async def test_an_actor_that_cannot_be_recorded_changes_nothing(
         self, database: Database
     ) -> None:
+        events = database.audit_events(SENTINEL_TENANT)
         store = database.store(SENTINEL_TENANT)
-        before = len(await store.list(ACTOR))
+        kept = await store.create(ACTOR, CreateTaskBody(title="left as it was"))
+        rows = [task.model_dump() for task in await store.list(ACTOR)]
+        before = len(await events.list())
 
         with pytest.raises(UnrecordableActor):
             await store.create(NESTED, CreateTaskBody(title="never stored"))
+        with pytest.raises(UnrecordableActor):
+            await store.update(NESTED, kept.id, UpdateTaskBody(done=True))
+        with pytest.raises(UnrecordableActor):
+            await store.remove(NESTED, kept.id)
 
-        assert len(await store.list(ACTOR)) == before
+        assert len(await events.list()) == before
+        assert [task.model_dump() for task in await store.list(ACTOR)] == rows
 
     async def test_an_actor_that_cannot_be_recorded_is_refused_whatever_the_rows(
         self, database: Database
