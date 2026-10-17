@@ -27,6 +27,14 @@ GRANT USAGE ON SCHEMA "app" TO app_app;
 -- Existing objects, for a schema that was migrated before these roles existed.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "app" TO app_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "app" TO app_app;
+-- Except change on the audit events, which are append-only.
+DO $app$
+BEGIN
+  IF to_regclass('"app".audit_events') IS NOT NULL THEN
+    REVOKE UPDATE, DELETE ON "app".audit_events FROM app_app;
+  END IF;
+END
+$app$;
 
 -- Everything app_owner creates from here on. Without this, the table added by the
 -- next migration is invisible to the application until somebody re-runs the GRANT.

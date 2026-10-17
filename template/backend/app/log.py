@@ -221,8 +221,19 @@ class _Stdout(logging.StreamHandler[TextIO]):
         super().emit(record)
 
 
+def current_request_id() -> str | None:
+    """The id of the request being served, and `None` outside one."""
+    return correlation_id.get()
+
+
+def current_trace_id() -> str | None:
+    """The id of the sampled trace this code runs in, and `None` outside one."""
+    span = trace.get_current_span().get_span_context()
+    return format(span.trace_id, "032x") if span.is_valid and span.trace_flags.sampled else None
+
+
 def _with_request_id(_logger: WrappedLogger, _method: str, line: EventDict) -> EventDict:
-    request_id = correlation_id.get()
+    request_id = current_request_id()
     if request_id is not None:
         line["request_id"] = request_id
     return line

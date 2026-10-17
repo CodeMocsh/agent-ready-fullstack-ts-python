@@ -85,5 +85,6 @@ middleware that writes the line after the response.
   the conflicting value.
 - Anybody can post a client event. A client event is a report, and never evidence of what the
   server did.
-- Logs leave the process only on stdout. There is no security-event stream, no audit log, no
-  keyed hashing of identifiers, and no OTLP export of logs.
+- Logs leave the process only on stdout. There is no security-event stream, no keyed hashing of
+  identifiers, and no OTLP export of logs. An audit event is a row, never a log line
+  ([0017](0017-every-store-operation-on-tenant-rows-records-an-audit-event.md)).
