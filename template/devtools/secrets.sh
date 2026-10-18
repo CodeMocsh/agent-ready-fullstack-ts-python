@@ -1,22 +1,10 @@
 #!/bin/sh
-# The tree the gate certifies, read by gitleaks for a secret about to be committed. It is the tree
-# devtools/worktree-tree.sh names -- the working tree as `git add -A` would stage it -- so an
-# unstaged file is read and an ignored one is not, and a pass the gate records covers what it says.
-#
-# gitleaks is fetched once, by version, and refused unless its archive matches the checksum
-# devtools/gitleaks.sums copies from the release's own list. A finding is either removed and the
-# secret rotated, or, where it is no secret at all, its fingerprint goes in .gitleaksignore.
-#
-#   sh devtools/secrets.sh          fetch if needed, then scan
-#   sh devtools/secrets.sh fetch    fetch only, which is what `make install` does
-#   sh devtools/secrets.sh tool     fetch if needed, then print where gitleaks is, for
-#                                   another script to run the same pinned build
 set -eu
 
 case "${1:-}" in
     "" | fetch | tool) ;;
     *)
-        echo "secrets: no such mode '$1'. Give nothing, fetch, or tool." >&2
+        echo "secrets: no such mode '$1'. Give no mode to fetch gitleaks when needed and scan, 'fetch' to fetch only, or 'tool' to print the path of the pinned gitleaks." >&2
         exit 1
         ;;
 esac

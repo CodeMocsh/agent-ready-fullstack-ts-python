@@ -44,7 +44,7 @@ with vendored UI excluded, 4.8% to 8.9% over every file. This template earns the
 | **Span and metric attributes** | only the attributes `app/telemetry.py` declares leave the process | ruff `TID251` refuses `opentelemetry` outside `app/telemetry.py` and `app/log.py` |
 | **Types** | strict, no untyped seam | basedpyright |
 | **Prose** | spelling in names, docstrings and messages | codespell |
-| **Comments** | none | `comments.py` |
+| **Comments** | none, in every Python file, shell script, Perl script, `Makefile` and hook git sees | `comments.py` |
 
 There is no design-system analogue on this half. Those rules gate a Tailwind theme, a React hook
 and a query cache; a Python counterpart would be a check nobody measured.

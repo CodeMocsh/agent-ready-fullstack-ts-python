@@ -1,19 +1,6 @@
 #!/bin/sh
-# Exercise a rendered template. One script, two callers: the pre-commit hook, and
-# your laptop. When these steps lived only in the workflow file they could only run
-# on GitHub, and a check that cannot run locally is a check people learn to discover
-# late.
-#
-# Rendering itself is devtools/render.sh, which prints a project and is worth running
-# on its own while working on any one check here.
-#
-# Usage: check_template.sh [default|proprietary|no-license]
-#        FAST=1 check_template.sh   -- render and assert only, skipping the installs
 set -eu
 
-# Git exports GIT_DIR and friends into the environment of the hooks it runs. This
-# script renders into temp directories and runs git inside them, so an inherited git
-# context silently points that work at the calling repository.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_COMMON_DIR \
     GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
 
@@ -26,17 +13,12 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RENDER="$REPO/devtools/render.sh"
 COPIER_SPEC="$(sh "$RENDER" --spec)"
 
-# `set -e` makes a bare `test -f` exit silently, which turns a one-line problem into
-# a bisect. These say what they were looking for.
 fail() { echo "check: $*" >&2; exit 1; }
-need() { [ -f "$1" ] || fail "expected file: $1"; }
-need_exec() { [ -x "$1" ] || fail "expected executable file: $1"; }
-need_absent() { [ ! -e "$1" ] || fail "expected no such file: $1"; }
-need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2"; }
-need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2"; }
-# A list that asserts only what it names fails open: an entry added beside it passes unseen.
-# This holds a directory's entries of one find -type to the names given, in both directions.
-# A cache an earlier step wrote is not an entry.
+need() { [ -f "$1" ] || fail "expected file: $1${2:+. $2}"; }
+need_exec() { [ -x "$1" ] || fail "expected executable file: $1${2:+. $2}"; }
+need_absent() { [ ! -e "$1" ] || fail "expected no such file: $1${2:+. $2}"; }
+need_grep() { grep -q "$1" "$2" || fail "expected /$1/ in $2${3:+. $3}"; }
+need_no_grep() { ! grep -q "$1" "$2" || fail "unexpected /$1/ in $2${3:+. $3}"; }
 need_only() {
     kind="$1" dir="$2"
     shift 2
@@ -47,18 +29,10 @@ need_only() {
         sed "s|^$dir/||" | LC_ALL=C sort | diff "$listed" -)" || compared=$?
     rm -f "$listed"
     [ "$compared" -le 1 ] || fail "diff could not compare $dir with the list in check_template.sh"
-    [ -z "$drift" ] || fail "$dir does not hold exactly what check_template.sh names (< named, > found):
+    [ -z "$drift" ] || fail "$dir does not hold exactly what check_template.sh names (< named, > found). Without this, an entry nobody named passes unseen:
 $drift"
 }
 
-
-# AGENTS.md tells an agent to keep the principle sections word-for-word in step with
-# template/AGENTS.md.jinja, and the same file argues that a rule nothing enforces does not
-# hold. This is that enforcement. The range covers all four principle sections and ends at the
-# first heading each file owns, so everything below the shared block is free to differ. Both
-# alternatives are load-bearing: an end pattern only one file carries would run the range to
-# the end of the other file and report every local section as drift. `sed -E` is load-bearing
-# too, because BSD sed has no \| alternation in a basic regex.
 shared_prose() {
     sed -E -n "/^## Approach/,/^## (Layout|The template is inert)/p" "$1" |
         sed '$d'
@@ -73,25 +47,15 @@ if ! diff -q "$PROSE_ROOT" "$PROSE_TEMPLATE" >/dev/null; then
     rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
     fail "keep Approach, Fail loudly, Zero comments and Simplified technical English identical."
 fi
-# A range that stops early compares less than the failure message above claims, and passes
-# green over the drift it stopped short of. Every section the message names has to be in it.
 for heading in Approach 'Fail loudly' 'Zero comments' 'Simplified technical English'; do
     grep -q "^## $heading\$" "$PROSE_ROOT" && grep -q "^## $heading\$" "$PROSE_TEMPLATE" ||
-        fail "the shared prose range in check_template.sh does not reach '## $heading'"
+        fail "the shared prose range in check_template.sh does not reach '## $heading'. A range that stops early passes over the drift it does not reach."
 done
 rm -f "$PROSE_ROOT" "$PROSE_TEMPLATE"
 
-# `make hooks` runs the root copy, and a generated project runs the template's. The hook
-# activation section below exercises only the template's, so the two stay byte-identical.
 cmp -s "$REPO/devtools/install-hooks.sh" "$REPO/template/devtools/install-hooks.sh" ||
-    fail "devtools/install-hooks.sh and template/devtools/install-hooks.sh differ. Keep them identical."
+    fail "devtools/install-hooks.sh and template/devtools/install-hooks.sh differ. Keep them identical: make hooks runs the root copy, and this script exercises only the template's."
 
-# One pin, many copies. devtools/render.sh owns it -- it is the script that runs copier
-# -- and the value read back through `--spec` above is also written wherever a doc shows
-# the command rather than refers to it. The grep below is the inventory, because a doc
-# rewrite moves them around. Nothing kept them in step, and the stale copy is the one a user
-# pastes: they would generate with a release this script never exercised, and after this
-# bump, with one missing two published security fixes. A grep is cheap, so grep.
 STALE="$(grep -rEoh 'copier@[0-9]+\.[0-9]+\.[0-9]+' "$REPO" \
     --include='*.md' --include='*.jinja' --include='*.sh' --include='*.yml' \
     2>/dev/null | sort -u | grep -v "^$COPIER_SPEC\$" || true)"
@@ -99,12 +63,10 @@ if [ -n "$STALE" ]; then
     echo "check: this repo pins $COPIER_SPEC, but also names:" >&2
     echo "$STALE" | sed 's/^/check:   /' >&2
     echo "check: every copier@ in the repo is a command someone runs. Bump them together." >&2
+    echo "check: devtools/render.sh owns the pin. A stale copy generates with a release this gate never ran." >&2
     exit 1
 fi
 
-# What this script needs. uvx and tar are render.sh's and are probed there, so they are
-# not repeated here; git is in both lists because both use it -- render.sh to commit the
-# staged template, this script to init the smoke project and diff the contract artifacts.
 for tool in uv git python3 node pnpm curl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "check: $tool is required and not on PATH." >&2
@@ -113,29 +75,6 @@ for tool in uv git python3 node pnpm curl; do
     fi
 done
 
-# This script starts servers twice -- the contract suite's pair, and the dev loop's --
-# and both take their ports from the environment exactly as a generated project does.
-# Set them here, once, for the whole run: setting them any later leaves every step above
-# that line on :8000 and :5173, which is the pair a `make dev` in some other checkout is
-# most likely to be holding, and a run that dies there fails on somebody else's process
-# rather than on anything it is testing.
-#
-# The defaults are used when they are free, so the ordinary run exercises the ports a
-# user actually gets; when they are not, a free pair is allocated rather than the run
-# refusing to start. Either way it is printed, because a check that quietly moves is a
-# check whose logs cannot be read six months later.
-#
-# A named port is obeyed rather than treated as a preference: someone who sets one has
-# something pointed at it, and answering "I used a different one" three hundred lines
-# later is worse than refusing here with the reason. The two are decided independently,
-# so naming one does not stop the other from moving out of the way.
-#
-# This stays here rather than moving into render.sh with the rest of the setup, and the
-# reason is the `held` list below: each allocation keeps its socket bound until the
-# process that made it exits, which is what stops two of them coming back as the same
-# number. Allocating in render.sh would release every one of them the moment it
-# returned, handing this script a pair that was free a second ago and telling it they
-# still are. Rendering does not need a port anyway.
 PORTS="$(python3 - "${BACKEND_PORT:+named}" "${BACKEND_PORT:-8000}" \
                    "${FRONTEND_PORT:+named}" "${FRONTEND_PORT:-5173}" <<'PY'
 import socket
@@ -145,10 +84,6 @@ LOOPBACKS = ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1"))
 
 
 def free(port):
-    # Both families, because uvicorn and vite are told to serve "localhost" and that is
-    # two addresses. A probe on one of them alone calls a port free that the other half
-    # cannot have -- which is exactly how the vite of another checkout, holding [::1]
-    # only, goes unnoticed until --strictPort refuses in the middle of the run.
     for family, host in LOOPBACKS:
         try:
             probe = socket.socket(family)
@@ -168,8 +103,6 @@ requested = [(bool(sys.argv[1]), int(sys.argv[2])), (bool(sys.argv[3]), int(sys.
 if requested[0][1] == requested[1][1]:
     raise SystemExit(f"check: {NAMES[0]} and {NAMES[1]} are both :{requested[0][1]}.")
 
-# Each allocation stays bound until this process exits, so no two of them can come back
-# as the same number.
 held = []
 chosen = []
 for name, (named, port) in zip(NAMES, requested):
@@ -195,19 +128,6 @@ export BACKEND_PORT FRONTEND_PORT
 
 WORK="$(mktemp -d)"
 
-# One handler for the whole run, because `set -e` is live inside a trap: a `kill` of a
-# process that has already gone returns non-zero, and an inline handler would skip the
-# `rm -rf` after it and leak a temp tree holding a node_modules and a venv. Steps that
-# start something long-lived set `serve_pid` and leave the stopping to this.
-#
-# Removing a directory is housekeeping and is not the verdict, so the status is read
-# first and handed back last. As the handler's final command the `rm` decided the exit
-# status of the whole script, and a run that printed "==> OK" reported a failure that
-# named a temp path. A signal carries its own status for the same reason: `$?` on the
-# way into an interrupt is whatever last succeeded, which reports Ctrl-C as a pass.
-#
-# What is worth failing for is the cause. A server that outlives its step rewrites the
-# tree while this removes it, so name it, stop it, and fail on that instead.
 cleanup() {
     status="${1:-$?}"
     if [ -n "${cleaned:-}" ]; then
@@ -215,9 +135,6 @@ cleanup() {
     fi
     cleaned=yes
 
-    # Waited on, not just signalled. Scanning before the reap reports the server this
-    # handler is itself in the middle of stopping, which names the wrong culprit on
-    # every failure path that leaves one running.
     if [ -n "${serve_pid:-}" ]; then
         kill "$serve_pid" 2>/dev/null || true
         wait "$serve_pid" 2>/dev/null || true
@@ -246,39 +163,22 @@ trap cleanup EXIT
 trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
-# Matched on the argument list rather than with lsof, which is not everywhere and is
-# slow over a node_modules. Every server started here carries $WORK in its argv, because
-# that is where its interpreter and its entry point live.
-#
-# Listed first, matched second. The two halves of `ps | grep` run at the same time, so
-# `ps` lists the `grep` beside it, and that grep carries $WORK on its own command line.
-# Piping one into the other reports a leak on every call, including the calls where
-# nothing leaked.
-#
-# Both inputs are refused rather than defaulted, and that is the whole of it: `grep -F
-# ""` matches every line, so an empty $WORK would answer "everything is a leak" and the
-# caller would `kill -KILL` the machine. A `ps` that fails answers "nothing is a leak",
-# which is a check that cannot fail.
 processes_under_work() {
     if [ -z "${WORK:-}" ]; then
-        echo "check: WORK is unset, so nothing can be matched against it." >&2
+        echo "check: WORK is unset, so nothing can be matched against it. An empty grep -F pattern matches every process, and the handler kills what it matches." >&2
         exit 1
     fi
     if ! running="$(ps -eo pid=,args=)"; then
-        echo "check: ps failed, so no leaked process can be found or ruled out." >&2
+        echo "check: ps failed, so no leaked process can be found or ruled out. A ps that fails reports no leak, and a check that cannot fail proves nothing." >&2
         exit 1
     fi
     printf '%s\n' "$running" | grep -F "$WORK" || true
 }
 
-# The same question the handler asks, asked at the step that can still answer it. A half
-# that outlives its own step is invisible to every assertion here: the ports come free,
-# the suite passes, and the tree is still on disk to be read. It surfaces minutes later
-# as a directory that will not delete, naming a temp path rather than a step.
 need_nothing_outlived() {
     still="$(processes_under_work)"
     if [ -n "$still" ]; then
-        echo "check: $1 left a process running:" >&2
+        echo "check: $1 left a process running, and no other check here sees it:" >&2
         printf '%s\n' "$still" >&2
         exit 1
     fi
@@ -300,44 +200,34 @@ need .claude/hooks/agent_guard.py
 python3 -m py_compile .claude/hooks/agent_guard.py
 need .entire/settings.json
 python3 -c "import json,sys; json.load(open('.entire/settings.json'))"
-# AGENTS.md sends every rationale that is not a commit message here, so the directory
-# has to exist in a fresh project rather than being somewhere an agent is told to
-# write and finds missing.
-need docs/adr/README.md
+need docs/adr/README.md "AGENTS.md tells an agent to write decisions in docs/adr/, so a fresh project has that directory"
 need .copier-answers.yml
 need_grep '_src_path' .copier-answers.yml
 need_grep '_commit' .copier-answers.yml
-# The executable bit is real state and rendering can drop it. A hook that is not
-# executable is a hook that silently never runs.
-need_exec .githooks/pre-commit
-need_exec devtools/install-hooks.sh
-need_exec devtools/dev.sh
-need_exec devtools/contract-test.sh
+need_exec .githooks/pre-commit "Rendering can drop the executable bit, and a hook without it never runs and says nothing"
+need_exec devtools/install-hooks.sh "Rendering can drop the executable bit"
+need_exec devtools/dev.sh "Rendering can drop the executable bit"
+need_exec devtools/contract-test.sh "Rendering can drop the executable bit"
 
 echo "==> assert every document is named, and names only documents that exist"
 python3 "$REPO/devtools/links_test.py" \
     || fail "links.py stopped recognising a citation, so the two sweeps below would prove nothing."
-# The three orphans are found by filename rather than by a link: GitHub reads the pull
-# request template, and an agent reads CLAUDE.md, without either being named anywhere.
 python3 "$REPO/devtools/links.py" "$REPO" --exclude template --exclude devtools/links_test.py \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     --allow-orphan .github/PULL_REQUEST_TEMPLATE.md \
-    || fail "a document names something that does not exist, or nothing names it."
+    || fail "a document names something that does not exist, or nothing names it. Only README.md, CLAUDE.md and the pull request template are read by filename, so only they may be orphans."
 python3 "$REPO/devtools/links.py" "$OUT" \
     --allow-orphan README.md --allow-orphan CLAUDE.md \
     || fail "the generated project names a document that does not exist, or orphans one."
 
 echo "==> assert decision records are numbered from 0001 with no gaps"
-# Numbers are a reading order -- docs/adr/README.md. A gap is a record removed or moved
-# without the renumbering the rule asks for, and a repeat is two branches that both took a
-# number. Both fail here, in the change that made them.
 numbered_without_gaps() {
     expected=1
     for record in "$1"/[0-9][0-9][0-9][0-9]-*.md; do
         [ -e "$record" ] || return 0
         want="$(printf '%04d' "$expected")"
         [ "$(basename "$record" | cut -c1-4)" = "$want" ] \
-            || fail "$1: record $want is next, and $(basename "$record") is there. Renumber, and update every citation in the tree in the same change."
+            || fail "$1: record $want is next, and $(basename "$record") is there. The numbers are a reading order (docs/adr/README.md). Renumber, and update every citation in the tree in the same change."
         expected=$((expected + 1))
     done
 }
@@ -352,14 +242,7 @@ for records in "$REPO/docs/adr" "$OUT/docs/adr/template" "$OUT/docs/adr"; do
 done
 
 echo "==> assert the code the template owns stands without the identity stub"
-# identity_stub=false hands app/identity/__init__.py, its tests and the tenant routes' guarantee
-# to a project that replaces the seam. That project keeps principal_for, the seam's contract, and
-# nothing else of the stub's. Code the template keeps updating that imports anything else from
-# app.identity but its shared module fails there on the first update after it lands. So does a
-# test that reaches principal_for, the tenant requirement or the stub's doubles, because each
-# asserts the stub's behaviour. test_shared.py reads the project's module to check it, and is the
-# one module that may import it whole. copier.yml names the stub's files.
-python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || fail "code the template owns depends on the identity stub"
+python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || fail "code the template owns depends on the identity stub. Under identity_stub=false a project keeps only principal_for and the shared module, so that code fails on its first update."
 import ast
 import re
 import sys
@@ -402,15 +285,6 @@ sys.exit(1 if found else 0)
 PY
 
 echo "==> assert every workflow is valid, here and in what ships"
-# A workflow cannot report its own breakage. A malformed check.yml does not fail the
-# check -- it fails to start, and the pull request shows nothing where the gate should
-# be, which reads as a repository that has no gate rather than one whose gate is broken.
-# The same is true of the workflow every generated project inherits, and that one breaks
-# in somebody else's repository.
-#
-# Pinned to a version and a hash rather than tracking latest: a linter that changes under
-# you turns an unrelated push red, and this download is the one step in the gate that
-# nobody would think to audit.
 ACTIONLINT_VERSION=1.7.12
 case "$(uname -s)/$(uname -m)" in
     Darwin/arm64)
@@ -429,8 +303,6 @@ case "$(uname -s)/$(uname -m)" in
         fail "no actionlint pin for $(uname -s)/$(uname -m). Add one rather than skipping the workflow lint: a platform that cannot check its workflows is a platform that pushes them unchecked." ;;
 esac
 
-# macOS ships shasum and no sha256sum; most Linux images ship the reverse. A verification
-# step that quietly does nothing when neither is present is worse than no verification.
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" | cut -d' ' -f1
@@ -452,10 +324,6 @@ ACTIONLINT_GOT="$(sha256_of "$ACTIONLINT_DIR/actionlint.tar.gz")"
 tar -xzf "$ACTIONLINT_DIR/actionlint.tar.gz" -C "$ACTIONLINT_DIR" actionlint \
     || fail "the actionlint archive carried no actionlint binary."
 
-# Both trees. A glob that matches nothing expands to itself, and actionlint given a path
-# that is not there exits clean -- which is how this check would come to lint neither
-# tree while still printing. So the directory and the file list are asserted first, and
-# `-exec +` hands the files over without a word-splitting expansion.
 USES='^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*'
 : >"$WORK/action-pins"
 for workflows in "$REPO/.github/workflows" "$OUT/.github/workflows"; do
@@ -464,29 +332,17 @@ for workflows in "$REPO/.github/workflows" "$OUT/.github/workflows"; do
     [ -s "$WORK/workflow-list" ] || fail "$workflows holds no workflow, so this check checked nothing."
     xargs "$ACTIONLINT_DIR/actionlint" <"$WORK/workflow-list" \
         || fail "a workflow in $workflows is invalid, and a broken workflow cannot report its own breakage."
-    # Pinned to a commit, never to a tag. A tag moves, so a pull request that trusts one
-    # runs whatever that tag pointed at this morning -- and the token it runs under can
-    # read this repository.
     while IFS= read -r workflow; do
         unpinned="$(grep -nE "$USES" "$workflow" | grep -vE '@[0-9a-f]{40}' || true)"
-        [ -z "$unpinned" ] || fail "$workflow uses an action that is not pinned to a commit: $unpinned"
+        [ -z "$unpinned" ] || fail "$workflow uses an action that is not pinned to a commit. A tag moves, and the token the action runs under can read the repository: $unpinned"
         grep -hE "$USES" "$workflow" | sed -E "s/$USES//; s/@([0-9a-f]{40}).*/ \\1/" >>"$WORK/action-pins"
     done <"$WORK/workflow-list"
 done
 
-# One action, one commit, in both trees. A pin spelled twice goes stale in one place, and
-# the stale one is the workflow that ships: nothing here runs it, so nothing here notices.
 [ -s "$WORK/action-pins" ] || fail "found no action pinned in either tree, so there was nothing to compare."
 split="$(sort -u "$WORK/action-pins" | awk '{ seen[$1]++ } END { for (a in seen) if (seen[a] > 1) print a }' | sort | tr '\n' ' ')"
-[ -z "$split" ] || fail "pinned to more than one commit across both trees: ${split% }. Pin every use of that action to one commit; .github/dependabot.yml bumps both trees in one pull request."
+[ -z "$split" ] || fail "pinned to more than one commit across both trees: ${split% }. Pin every use of that action to one commit; .github/dependabot.yml bumps both trees in one pull request. Nothing here runs the workflow that ships, so its stale pin goes unseen."
 
-# The generated project's backend/tests/test_workflow.py refuses a workflow that re-lists the
-# gate's steps instead of naming the target. This repo asserts the same of its own, because
-# a rule the template asserts and its own generator ignores is a rule nobody believes.
-#
-# Comments are stripped first. Every reason this file gives for naming the target is
-# written in a comment inside the workflow, so a grep that reads them passes on a workflow
-# whose steps say something else entirely.
 uncommented() { sed 's/#.*//' "$1"; }
 uncommented "$REPO/.github/workflows/check.yml" | grep -q 'make check' \
     || fail "check.yml no longer runs 'make check' outside a comment. It names the target the hook runs; it does not re-spell the steps."
@@ -496,13 +352,6 @@ fi
 uncommented "$REPO/.github/workflows/release.yml" | grep -q 'devtools/version.sh' \
     || fail "release.yml no longer reads VERSION through devtools/version.sh, so the validation it depends on is a second copy that can drift from this one."
 
-# A workflow that lints clean can still be wired wrong, and the wiring is what carries
-# the rules. no-mistakes keeps a test per workflow for this reason; these are the
-# invariants of ours that nothing else would notice going.
-#
-# The release trigger first. It ran on `push: main` once, which raced the gate and could
-# publish a tag from a tree that had not passed -- the defect is invisible in a diff that
-# only changes two lines of `on:`, and its blast radius is a version users generate from.
 uncommented "$REPO/.github/workflows/release.yml" | grep -q 'workflow_run:' \
     || fail "release.yml no longer waits on a workflow_run. It must run after the gate, never beside it: a tag cut from an unchecked tree is what this trigger exists to prevent."
 if uncommented "$REPO/.github/workflows/release.yml" | grep -qE '^[[:space:]]*push:'; then
@@ -511,38 +360,23 @@ fi
 uncommented "$REPO/.github/workflows/release.yml" | grep -q "conclusion == 'success'" \
     || fail "release.yml no longer refuses a failed gate, so a red check would still cut a tag."
 
-# Nothing here may merge or approve. That is a decision about who is in charge of this
-# repository rather than a detail, and today it holds only because nobody has added the
-# permission -- which is not the same as it being refused.
 for workflow in "$REPO"/.github/workflows/*.yml; do
     if uncommented "$workflow" | grep -qE 'pull-requests:[[:space:]]*write|gh pr merge|--auto\b'; then
         fail "$workflow can act on a pull request. No workflow here merges or approves: the gate says a change may land, and a person decides that it does."
     fi
 done
 
-# devtools/version.sh is the only reader of VERSION, and release.yml runs the same script
-# after a merge -- where a refusal is a release that silently did not ship. So it is proved
-# here, on every pull request, while the value is still something a person can fix.
 echo "==> assert VERSION names a version a release could be cut from"
 CLAIMED="$(sh "$REPO/devtools/version.sh" "$REPO")" \
     || fail "devtools/version.sh refuses VERSION, so release.yml would refuse it after the merge."
-# Both directions. A validator that accepts everything reads a malformed VERSION as a version
-# and cuts a permanent tag from it, which is the failure the exact pattern exists to prevent.
 for rejected in '0.5.0oops' '0.5.0.1' '1.2' '01.2.3' 'latest' '' 'v0.5.0'; do
     printf '%s' "$rejected" >"$WORK/VERSION"
     if sh "$REPO/devtools/version.sh" "$WORK" >/dev/null 2>&1; then
-        fail "devtools/version.sh accepted '$rejected', which is not a semantic version."
+        fail "devtools/version.sh accepted '$rejected', which is not a semantic version. release.yml would cut a permanent tag from it."
     fi
 done
 rm -f "$WORK/VERSION"
 
-# A version never goes backwards. Naming one already released does not move it -- release.yml
-# finds the release and stops -- so the commit that did it would never ship under any version,
-# and nothing would say so. Equal to the newest tag is the ordinary state between releases and
-# passes; lower than it is always a mistake.
-#
-# The tags have to be here for this to mean anything, so check.yml checks out with a depth that
-# carries them. A run that cannot see them says so rather than passing quietly.
 NEWEST_RELEASED="$(git -C "$REPO" tag -l 'v*' | sed 's/^v//' | sort -V | tail -1)"
 if [ -z "$NEWEST_RELEASED" ]; then
     echo "    tags: NONE VISIBLE -- nothing proves $CLAIMED is not a version already released."
@@ -558,13 +392,6 @@ fi
 
 if [ "$VARIANT" = "default" ]; then
     echo "==> assert hostile answers stay data, not syntax"
-    # The free-form questions are prose, and some of the files their answers land
-    # in are hand-written JSON and TOML. An answer interpolated raw takes its quotes
-    # and backslashes with it, and the result is a manifest no tool can parse -- a
-    # failure that surfaces in someone else's project, on `pnpm install`, with
-    # nothing in the diff to suggest why. This renders what a person could plausibly
-    # type and parses both manifests back. It runs once: nothing here varies with
-    # the license.
     H_DESC='A "quoted" project: Bob'"'"'s tasks & <friends>, C:\notes'
     H_AUTHOR='O'"'"'Brien "Bob" \ Tester'
     H_EMAIL="o'brien@example.com"
@@ -613,8 +440,6 @@ try:
 except tomllib.TOMLDecodeError as error:
     die(f"the rendered backend/pyproject.toml is not valid TOML: {error}")
 
-# Parsing is half the check: a value can survive it and still come out mangled, so
-# every answer is compared against what went in.
 for label, got, want in (
     ("package.json description", pkg["description"], desc),
     ("package.json author", pkg["author"], {"name": author, "email": email}),
@@ -624,33 +449,23 @@ for label, got, want in (
     ("pyproject authors", project["authors"], [{"name": author, "email": email}]),
 ):
     if got != want:
-        die(f"{label} came out as {got!r}, not {want!r}")
+        die(f"{label} came out as {got!r}, not {want!r}. A value can parse and still come out mangled.")
 PY
 
     echo "==> assert a fresh copy ships every file a question can stop an update bringing"
-    # example_resource=false and identity_stub=false stop `copier update` touching their files.
-    # Neither may stop a copy shipping them: the store, the schema, the frontend and the routes
-    # are built on both, so a copy without them is a project that does not import. The paths
-    # are read out of copier.yml, the one place that lists them.
     DECLINED="$(sh "$RENDER" --into "$WORK/declined" -- \
         --data example_resource=false --data identity_stub=false)"
     for question in example_resource identity_stub; do
         OWNED="$(sed -n "s/.*not $question and _copier_operation == 'update' %}\([^{]*\){% endif %}.*/\1/p" "$REPO/copier.yml")"
         [ -n "$OWNED" ] || fail "copier.yml names no file for $question, so this check would pass over nothing"
         for kept in $OWNED; do
-            [ -f "$DECLINED/$kept" ] || fail "a copy with $question=false left out $kept"
+            [ -f "$DECLINED/$kept" ] || fail "a copy with $question=false left out $kept. The store, the schema, the frontend and the routes import it, so a copy without it does not import."
         done
         grep -q "^$question: false$" "$DECLINED/.copier-answers.yml" \
             || fail "$question=false is not recorded, so the next update would bring its files back"
     done
 
     echo "==> assert a project that declines keeps its own files through an update"
-    # An update renders the old version with the project's last answers. Flip a question with
-    # --data on the update itself and the old render still holds the owned files while the new
-    # one does not, so Copier deletes them, edited or not. template/docs/installation.md has
-    # the answer recorded in .copier-answers.yml first. This holds the template to that
-    # procedure: an owned file the project edited survives an update that changes it in the
-    # template, with the project's edit and without the template's.
     G="git -c user.email=check@example.com -c user.name=check -c commit.gpgsign=false"
     BASE="$(sh "$RENDER" --into "$WORK/update")"
     MARK="kept by the project"
@@ -679,37 +494,25 @@ PY
     grep -q "a later template change" "$BASE/docs/schema.md" \
         || fail "the update did not bring the later template, so the check below proves nothing"
     for owned in $OWNED; do
-        [ -f "$BASE/$owned" ] || fail "an update after declining deleted $owned"
+        [ -f "$BASE/$owned" ] || fail "an update after declining deleted $owned. template/docs/installation.md records the answer in .copier-answers.yml first, so the old render does not hold the file either."
         [ "$(tail -1 "$BASE/$owned")" = "$MARK" ] || fail "an update after declining overwrote $owned"
         ! grep -q "a later template change" "$BASE/$owned" \
             || fail "an update after declining still brought the template's change to $owned"
     done
 
     echo "==> assert a copy without the GitHub workflow names no workflow"
-    # github_ci=false acts on a copy, unlike the two questions above. The workflow and its test
-    # go together: the test alone fails on a missing workflow, and the workflow alone is a
-    # file the project asked not to have. A doc that still sends the reader to ci.yml is the
-    # quiet half of the same failure.
     NO_CI="$(sh "$RENDER" --into "$WORK/no-ci" -- --data github_ci=false)"
     [ ! -e "$NO_CI/.github" ] || fail "a copy with github_ci=false still ships .github/"
     [ ! -e "$NO_CI/backend/tests/test_workflow.py" ] \
         || fail "a copy with github_ci=false still ships the test of a workflow it does not have"
     grep -q '^github_ci: false$' "$NO_CI/.copier-answers.yml" \
         || fail "github_ci=false is not recorded, so the next update would bring the workflow back"
-    # Every file, not only Markdown: a comment in a script that says the workflow runs the gate
-    # is the same false promise. A decision record may name the workflow, as the place a
-    # project that ships it runs the gate.
     named="$(cd "$NO_CI" && grep -rIl --exclude-dir=adr 'ci\.yml' .)" \
-        && fail "a copy with github_ci=false still names ci.yml in: $(echo $named)"
+        && fail "a copy with github_ci=false still names ci.yml in: $(echo $named). A doc or script that names it promises a workflow the project does not have."
     [ $? -eq 1 ] || fail "grep could not read the copy with github_ci=false"
 fi
 
 echo "==> assert the agent guard"
-# The guard is a heuristic backstop, and both directions of the heuristic have a
-# cost: a miss lets a catastrophic command through, and a false hit teaches agents
-# that the guard is noise and worth routing around. One case cannot show either, so
-# assert a table. These live here rather than in the generated project's tests
-# because they check the template's own logic, not the user's.
 guard_denies() {
     printf '{"tool_name":"Bash","tool_input":{"command":"%s"}}' "$1" \
         | python3 .claude/hooks/agent_guard.py \
@@ -745,7 +548,7 @@ git push --force-with-lease origin feature"
 echo "$MUST_DENY" | while IFS= read -r cmd; do
     [ -z "$cmd" ] && continue
     if ! guard_denies "$cmd"; then
-        echo "the agent guard allowed a command it must deny: $cmd" >&2
+        echo "the agent guard allowed a command it must deny: $cmd. A miss lets a catastrophic command through." >&2
         exit 1
     fi
 done
@@ -753,7 +556,7 @@ done
 echo "$MUST_ALLOW" | while IFS= read -r cmd; do
     [ -z "$cmd" ] && continue
     if guard_denies "$cmd"; then
-        echo "the agent guard denied a command it must allow: $cmd" >&2
+        echo "the agent guard denied a command it must allow: $cmd. A false hit teaches agents to route around the guard." >&2
         exit 1
     fi
 done
@@ -767,49 +570,25 @@ for target in install hooks pre-commit gate secrets lint lint-check test test-fa
               openapi openapi-check build upgrade clean; do
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
-# The gate is one named list so the hook and a laptop cannot drift apart, and the
-# generated project's own test_gate.py is what keeps them together from then on. Here
-# we only assert it exists and that the browser tier stayed out of it: a gate that
-# downloads a browser is a gate people learn to commit around.
 need_grep '^gate: secrets lint-check openapi-check test$' Makefile
-need_no_grep '^gate:.*test-e2e' Makefile
+need_no_grep '^gate:.*test-e2e' Makefile "A gate that downloads a browser is a gate people learn to commit around."
 need_no_grep '^gate:.*db-test' Makefile
 need_no_grep '^gate:.*observe-test' Makefile
 need_no_grep '^gate:.*test-contract-db' Makefile
-# `pre-commit` runs the list through devtools/gate.sh, which queues one gate per machine and
-# skips a tree that already passed -- docs/adr/template/0014.
 need_exec devtools/gate.sh
 need_exec devtools/worktree-tree.sh
 need_exec devtools/hold-the-gate.pl
-# The contract suite on Postgres serves as the application role, never as the superuser: a
-# superuser bypasses every policy, so the admin connection would pass against a database
-# carrying no isolation at all.
-need_grep 'DATABASE_URL=postgres://app_app' Makefile
+need_grep 'DATABASE_URL=postgres://app_app' Makefile "The contract suite on Postgres serves as the application role. A superuser bypasses every policy, so the suite would pass against a database with no isolation."
 need backend/tests/test_gate.py
-# No test decides for itself whether to run. Everything that needs a server is a *tier* --
-# backend/tests/integration/, held out of the default pytest run by norecursedirs and run
-# whole by `make db-test` -- because a test that skips itself exits 0 and reads exactly like
-# a test that passed, and a run where every one of them skipped looks green. The generated
-# project polices this from then on in test_gate.py; this is what makes it ship that way.
-need_grep '^norecursedirs = \["integration", "observe"\]' backend/pyproject.toml
-# The bans that make app/log.py and app/telemetry.py the only writers of what leaves the
-# process. Deleting one fails nothing else, so the gate names each.
+need_grep '^norecursedirs = \["integration", "observe"\]' backend/pyproject.toml "A test that needs a server lives in a tier. A test that skips itself exits 0 like a test that passed."
 for banned in logging structlog opentelemetry; do
     grep -q "^\"$banned\".msg = " backend/pyproject.toml \
-        || { echo "pyproject.toml no longer bans importing $banned" >&2; exit 1; }
+        || { echo "pyproject.toml no longer bans importing $banned. The ban keeps app/log.py and app/telemetry.py the only writers of what leaves the process." >&2; exit 1; }
 done
 need_grep '^DB_TEST_SUITE = tests/integration$' Makefile
 need backend/tests/tiers.py
-# The tier is out of the default run, so the default run has to say so. Without this line a
-# green `make test` reads as "everything passed" on a project where a whole folder was never
-# looked at -- the same silence a skip produces, one level up.
 need backend/tests/conftest.py
-need_grep 'not in this run' backend/tests/conftest.py
-# The scan itself comes from the generated project's own test_gate.py rather than being
-# written out again here. A second copy in shell syntax is a copy that drifts, and the half
-# that drifts is the half nobody notices: this runs in `make fast`, where no test does.
-# test_gate.py imports no third-party package at the top and defers each one it needs,
-# so the host python3 can read it whatever the project's own interpreter is.
+need_grep 'not in this run' backend/tests/conftest.py "The default run must say which tiers it left out. Without that line, a green make test hides a whole folder that never ran."
 python3 - <<'PY' || fail "the skip scan did not pass; see above"
 import sys
 
@@ -817,7 +596,8 @@ sys.path.insert(0, "backend")
 try:
     from tests.test_gate import ROOT, switched_off
 except ImportError as error:
-    print(f"check: the skip scan could not run, which is not the same as passing: {error}",
+    print(f"check: the skip scan could not run, which is not the same as passing. "
+          f"test_gate.py must import no third-party package at module level, because the host python3 reads it: {error}",
           file=sys.stderr)
     sys.exit(1)
 
@@ -827,45 +607,23 @@ for path, marker in found:
           f"passing one -- move it into a tier instead", file=sys.stderr)
 sys.exit(1 if found else 0)
 PY
-# The suite is sorted tier first, then source. A folder per area is what keeps a growing
-# project from piling every file at the top of tests/, and it is what the tier targets
-# select on. test_gate.py stays at the top because it covers no source: it reads this
-# Makefile, the hook and the workflow.
 TEST_FOLDERS="audit_events deployment devtools environment errors identity integration lifespan
               log main models observe routes serve store telemetry wiring"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
 done
-# The db-test recipe traps on INT so an interrupted suite does not leak its container, and
-# `trap ... EXIT INT TERM` only fires on Ctrl-C under bash -- dash runs the handler after the
-# foreground command returns, which on Ctrl-C it never does.
-need_grep '^SHELL := /bin/bash' Makefile
-# A workflow ships, and it runs `make gate` -- the list the git hook runs, so the two cannot
-# drift. Not `make pre-commit`, whose runner passes a clone with a half missing. The hook checks the machine that commits; the workflow checks a fresh
-# checkout, which is what covers a clone where `make hooks` was never run. Asserted here as
-# well as in test_workflow.py because that test walks the workflows it finds, and a directory
-# that stopped existing is a walk over nothing.
-need .github/workflows/ci.yml
+need_grep '^SHELL := /bin/bash' Makefile "The db-test recipe traps INT to stop its container. dash runs that handler only after the foreground command returns, which on Ctrl-C it never does."
+need .github/workflows/ci.yml "test_workflow.py walks the workflows it finds, so it passes over a directory that is gone"
 need backend/tests/test_workflow.py
-need_grep 'make gate' .github/workflows/ci.yml
-need_no_grep 'make pre-commit' .github/workflows/ci.yml
+need_grep 'make gate' .github/workflows/ci.yml "The workflow runs the list the hook runs, so the two cannot drift."
+need_no_grep 'make pre-commit' .github/workflows/ci.yml "make pre-commit skips a half that is not installed, and the workflow must run both."
 need_no_grep '\.jinja' .github/workflows/ci.yml
-# And a second job runs the Postgres tier, because a laptop with no Docker never does. Read
-# with comments stripped: the header names the target while explaining it.
 sed 's/#.*//' .github/workflows/ci.yml | grep -q 'make db-test' \
     || fail "ci.yml no longer runs 'make db-test' outside a comment, so tenant isolation is checked against a real Postgres nowhere after a push."
 
-# test_gate.py decides what runs by reading files as text, and a text check can be
-# satisfied by a string that means nothing: `"e2e" in playwright.config.ts` was true of a
-# config pointing at a directory holding none of the tier's specs, so the assertion passed
-# while `make test-e2e` ran nothing. That shipped, and the downstream project found it.
-#
-# So each of these is asserted in the failing direction, which is the only direction that
-# distinguishes a working check from a green one. Break what the check exists to catch,
-# require it to fail, put the file back. The passing direction is the line above it.
 echo "==> assert the gate's own checks fail on what they are for"
-python3 - <<'PY' || fail "a check in test_gate.py or test_workflow.py did not refuse what it is written to refuse"
+python3 - <<'PY' || fail "a check in test_gate.py or test_workflow.py did not refuse what it is written to refuse. A text check can pass on a string that means nothing, so each one must fail on the tree it exists to catch."
 import pathlib
 import shutil
 import sys
@@ -933,10 +691,6 @@ mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
          "Makefile", "DB_TEST_SUITE = tests/integration", "DB_TEST_SUITE = tests/db",
          "a Makefile that selects a folder the tier does not live in")
 
-# Both spellings of `declares`, because a tier is emptied by its own runner's idea of what a
-# test looks like: `def test_` for pytest, `test(` for Playwright. A file that still exists
-# and declares nothing is the case a glob cannot see -- the folder is there, the runner
-# collects none of it, and the tier is gone while the target still exits 0.
 emptied_tier("test_every_tier_still_holds_tests", "backend/tests/integration", "test_*.py",
              "def test_", "a Python tier whose files declare no test pytest would collect")
 
@@ -963,12 +717,8 @@ for problem in failures:
 sys.exit(1 if failures else 0)
 PY
 
-# An exclude or a theme file naming a path that is not there is the quiet half of the same
-# failure: the entry matches nothing today and exempts whatever lands there tomorrow. The
-# backend's is worse still -- `rglob` on a missing directory answers an empty list, so a
-# renamed source folder made the comment gate report clean over nothing at all.
 if (cd frontend && node devtools/comments.mjs src --exclude src/nowhere) >/dev/null 2>&1; then
-    fail "comments.mjs accepted an exclude naming a path that is not in the tree"
+    fail "comments.mjs accepted an exclude naming a path that is not in the tree. That exclude matches nothing today and exempts whatever lands there tomorrow."
 fi
 if (cd frontend && node devtools/conformance.mjs src --theme-file src/nowhere.css) >/dev/null 2>&1
 then
@@ -983,58 +733,34 @@ if (cd backend && python3 devtools/comments.py "$WORK/untokenizable") >/dev/null
     fail "comments.py reported a file it cannot tokenize as carrying no comment"
 fi
 rm -rf "$WORK/untokenizable"
+mkdir -p "$WORK/commented"
+printf '#!/bin/sh\necho hi  # a note\n' >"$WORK/commented/hook"
+printf 'all:\n\t@true\n# a note\n' >"$WORK/commented/Makefile"
+for planted in hook Makefile; do
+    if (cd backend && python3 devtools/comments.py "$WORK/commented/$planted") >/dev/null 2>&1; then
+        fail "comments.py passed a comment in a $planted. A script is source, and the ban covers it."
+    fi
+done
+rm -rf "$WORK/commented"
 
-# `make dev` has to stop what it started. Job control puts the backend in a process
-# group of its own, so a Ctrl-C in the terminal reaches only the script -- and the
-# script's cleanup trap is the one thing that then kills the backend. Exec'ing the
-# frontend replaces the shell and discards that trap, stranding uvicorn on :8000
-# after vite is gone. That shipped once. Nothing else here runs dev.sh, so these
-# three lines are the only thing standing between a one-word edit and the bug.
-need_no_grep 'exec pnpm' devtools/dev.sh
+need_no_grep 'exec pnpm' devtools/dev.sh "Exec replaces the shell and drops its cleanup trap, which strands the backend after vite stops."
 need_grep 'trap cleanup' devtools/dev.sh
 need_grep 'set -m' devtools/dev.sh
 
-# Both halves of both scripts stop by process group, and both spellings that make that
-# work are one edit away from silently not working -- argued in docs/constraints.md.
-# `need_nothing_outlived` catches the leak when it happens, and only where it happens:
-# the `--` spelling is refused by dash and accepted by the bash that is /bin/sh on a
-# mac, so a laptop run stays green while every CI run leaks. These three refuse the edit
-# itself, on either platform.
 for stopper in devtools/dev.sh devtools/contract-test.sh; do
     need_grep 'own_group' "$stopper"
     need_no_grep 'kill .*-- -' "$stopper"
     need_no_grep '|| kill' "$stopper"
 done
-# The ports are read from the environment in all three places rather than hard-coded in
-# each, so two checkouts can run at once and the proxy still points at the backend the
-# script started. Hard-coding meant a second worktree's `make dev` took the first one's
-# port, and this script refuses to run at all while anything else holds either.
-need_grep 'BACKEND_PORT' devtools/dev.sh
+need_grep 'BACKEND_PORT' devtools/dev.sh "Each port comes from the environment, so two checkouts can run at once."
 need_grep 'FRONTEND_PORT' devtools/dev.sh
 need_grep 'BACKEND_PORT' devtools/contract-test.sh
 need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
-# The same rule one tier out, for the two Playwright configs. Neither is in the gate --
-# they need a browser binary this script has no business downloading -- so a hard-coded
-# port here fails nowhere and is caught by nothing. The live config is the sharper of
-# the two: it starts no server, so a wrong port does not refuse, it silently points at
-# whatever else is listening, which in a second checkout is the other checkout's app.
-need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts
+need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts "No gate runs the Playwright configs, so a hard-coded port fails nowhere."
 need_grep 'process.env.FRONTEND_PORT' frontend/playwright.live.config.ts
 need frontend/e2e/signed-in.ts
-need_no_grep 'localhost:5173' frontend/playwright.live.config.ts
-# Reuse is the other half of the same bug and it is worse, because it produces a green
-# run rather than a failure: Playwright checks that something answers on the URL, never
-# that the something is this build. A stranger's server on the port absorbs the suite.
-need_grep 'reuseExistingServer: false' frontend/playwright.config.ts
-# The live spec must name no seed row at all. Those exist only because the in-memory
-# substrate put them there -- docs/adr/template/0001 says Postgres starts empty on purpose -- so an
-# assertion on one passes against the default `make dev` and fails against a real database,
-# on a fixture nothing in this half declares. It creates what it asserts instead.
-#
-# Read against the seed itself rather than against one title spelled here. Naming a single
-# row would leave the other two enforceable in name only: the next spec to reach for "Run
-# the app in mock mode" would pass this gate and fail on Postgres, which is the whole of
-# what the rule exists to stop.
+need_no_grep 'localhost:5173' frontend/playwright.live.config.ts "The live config starts no server, so a hard-coded port points at whatever else listens there."
+need_grep 'reuseExistingServer: false' frontend/playwright.config.ts "Playwright checks only that something answers on the URL, so a stranger's server absorbs the suite."
 python3 - <<'PY'
 import ast
 import pathlib
@@ -1067,13 +793,8 @@ if named:
           file=sys.stderr)
     raise SystemExit(1)
 PY
-# The mock spec may name one: in mock mode the rows are the frontend's own, declared in
-# src/mocks/store.ts, so the assertion and the fixture are in the same half.
-need_grep 'Read AGENTS.md' frontend/e2e/tasks.spec.ts
-# The Makefile must not name the contract URL. It never exported the variable, so the
-# default reached nothing, and re-adding one that did would override the port the script
-# actually started the dev server on.
-need_no_grep 'CONTRACT_BASE_URL ?=' Makefile
+need_grep 'Read AGENTS.md' frontend/e2e/tasks.spec.ts "The mock spec asserts a row that src/mocks/store.ts declares, in its own half."
+need_no_grep 'CONTRACT_BASE_URL ?=' Makefile "A default there overrides the port the script started the dev server on."
 
 need frontend/index.html
 need frontend/vite.config.ts
@@ -1088,28 +809,22 @@ need_grep 'VITE_ENABLE_MSW=true' frontend/.env.development
 need_grep 'VITE_ENABLE_MSW=true' frontend/.env.mock
 need_grep 'VITE_ENABLE_MSW=false' frontend/.env.live
 need_grep '"private": true' frontend/package.json
-# The worker is a public/ asset, so no mode keeps it out of a build; the plugin that deletes
-# it again is the only thing standing between a production deploy and a service worker on the
-# user's origin. Named here as well as asserted against a real build, so `make fast` notices.
-need_grep 'strip-mock-worker' frontend/vite.config.ts
-# Subpath safety: none of these may hard-code a leading slash.
-need_grep 'BASE_URL}mockServiceWorker.js' frontend/src/main.tsx
-need_grep 'basepath: import.meta.env.BASE_URL' frontend/src/router.tsx
-need_grep 'import.meta.env.BASE_URL' frontend/src/api/base.ts
+need_grep 'strip-mock-worker' frontend/vite.config.ts "The worker is a public/ asset, and only this plugin keeps it out of a production build."
+need_grep 'BASE_URL}mockServiceWorker.js' frontend/src/main.tsx "A hard-coded leading slash breaks a deploy under a subpath."
+need_grep 'basepath: import.meta.env.BASE_URL' frontend/src/router.tsx "A hard-coded leading slash breaks a deploy under a subpath."
+need_grep 'import.meta.env.BASE_URL' frontend/src/api/base.ts "A hard-coded leading slash breaks a deploy under a subpath."
 
 need backend/pyproject.toml
 need backend/app/main.py
 need backend/app/models/__init__.py
 need backend/app/models/shared.py
 need_absent backend/app/models.py
-# The layering is a written list, and this test is what holds it -- docs/adr/template/0007.
-need backend/tests/models/test_layering.py
+need backend/tests/models/test_layering.py "It holds the layering that docs/adr/template/0007 writes down"
 need backend/app/routes/public.py
 need backend/app/routes/tenant/__init__.py
 need_absent backend/app/routes.py
-# Every refusal is a class, declared from that class -- docs/adr/template/0006. The test is what holds it.
 need backend/app/errors.py
-need backend/tests/errors/test_errors.py
+need backend/tests/errors/test_errors.py "It holds the rule that every refusal is a class (docs/adr/template/0006)"
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
@@ -1120,51 +835,34 @@ need backend/app/refusal.py
 need backend/tests/tier.py
 need backend/tests/models/layers.py
 need backend/app/lifespan.py
-# Unset APP_ENV is production, and production refuses the in-memory substrate -- docs/adr/template/0010.
-need_grep 'refuse_development_settings' backend/app/lifespan.py
+need_grep 'refuse_development_settings' backend/app/lifespan.py "Unset APP_ENV is production, and production refuses the in-memory substrate (docs/adr/template/0010)."
 need_grep 'APP_ENV=development' devtools/dev.sh
 need_grep 'APP_ENV=development' devtools/contract-test.sh
-# asyncio's debug mode is what logs a step that holds the event loop, in both ways to start
-# the backend by hand. Without it the log says nothing while every other request waits.
-need_grep 'PYTHONASYNCIODEBUG=1' devtools/dev.sh
-need_grep 'APP_ENV=development PYTHONASYNCIODEBUG=1 uv run uvicorn' Makefile
+need_grep 'PYTHONASYNCIODEBUG=1' devtools/dev.sh "Without asyncio debug mode, a step that holds the event loop logs nothing."
+need_grep 'APP_ENV=development PYTHONASYNCIODEBUG=1 uv run uvicorn' Makefile "Without asyncio debug mode, a step that holds the event loop logs nothing."
 need backend/tests/routes/test_tasks.py
-# The one-origin entrypoint, for a deployment with no proxy to strip the /api prefix.
-# It mounts app.main and delegates that app's lifespan, because Starlette does not run a
-# mounted application's lifespan and the process would come up with no database on it.
-need backend/app/serve.py
+need backend/app/serve.py "It is the one-origin entrypoint, for a deployment with no proxy to strip the /api prefix"
 need backend/tests/serve/test_serve.py
-# Two substrates behind one contract, and one suite over both. A store package with only
-# one implementation in it is a shape nothing checks -- see docs/adr/template/0001.
 need backend/app/store/__init__.py
-need backend/app/store/memory.py
-need backend/app/store/pg.py
+need backend/app/store/memory.py "Two substrates stand behind one contract (docs/adr/template/0001)"
+need backend/app/store/pg.py "Two substrates stand behind one contract (docs/adr/template/0001)"
 need backend/app/store/ddl.py
 need backend/app/store/migrate.py
 need backend/app/store/conn.py
-# One contract file, and a suite per substrate that runs all of it. Losing either runner
-# leaves a green project in which one implementation is checked and the other is claimed.
 need backend/tests/store_contract.py
-need backend/tests/store/test_store_contract.py
-need backend/tests/integration/test_store_contract.py
+need backend/tests/store/test_store_contract.py "Without this runner, one substrate is checked and the other is only claimed"
+need backend/tests/integration/test_store_contract.py "Without this runner, one substrate is checked and the other is only claimed"
 need backend/tests/store/test_schema.py
 need backend/tests/integration/test_postgres.py
 need backend/tests/integration/test_isolation.py
 need backend/tests/integration/conftest.py
 need_absent backend/app/store.py
-# The generated schema, committed the way openapi.json is. backend/tests/store/test_schema.py
-# fails when it drifts, and that test is in the fast tier, so the gate catches it.
 need deploy/schema.sql
 need deploy/roles.sql
-# The schema baseline. Without it `make schema` re-records an edited body, and the gate that
-# refuses an edited shipped entry stops refusing anything.
-need backend/.schema-baseline.json
+need backend/.schema-baseline.json "Without it, make schema re-records an edited body, and the gate stops refusing an edited shipped entry"
 need deploy/compose.yaml
 need_exec deploy/credentials.sh
 need CONTEXT.md
-# Every decision that ships, named in full. links.py proves each is reachable and that no
-# citation dangles, which a record deleted together with everything naming it still passes.
-# This is the half that notices such a record left, or one added and not named here.
 need_only f docs/adr/template \
     0001-two-substrates-behind-one-contract.md \
     0002-tenant-isolation-is-forced-and-always-on.md \
@@ -1185,32 +883,18 @@ need_only f docs/adr/template \
     0017-every-store-operation-on-tenant-rows-records-an-audit-event.md
 
 echo "==> assert tenant isolation is wired, not just described"
-# FORCE, not ENABLE. A table's owner bypasses its own policies by default, so with ENABLE
-# alone the role that applied the schema reads every row -- silently, with nothing anywhere
-# reporting a problem. backend/tests/integration/test_isolation.py proves it against a real
-# server; this catches the edit before anyone has a database to run that against.
-need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql
+need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
 need_grep 'ENABLE ROW LEVEL SECURITY' deploy/schema.sql
-# WITH CHECK as well as USING, or a tenant may insert a row it cannot then read.
-need_grep 'WITH CHECK' deploy/schema.sql
-# The constraint that makes "an unset tenant matches nothing" a mechanism rather than an
-# observation about the data: without it one row with an empty tenant is readable by every
-# connection that never set one.
-need_grep "CHECK (tenant_id <> '')" deploy/schema.sql
-# Every index on a tenant table leads with tenant_id, or the policy cannot use it.
-need_grep 'ON tasks (tenant_id,' deploy/schema.sql
-# The application refuses to hold a credential that could apply DDL.
+need_grep 'WITH CHECK' deploy/schema.sql "Under USING alone, a tenant can insert a row it cannot then read."
+need_grep "CHECK (tenant_id <> '')" deploy/schema.sql "Without it, a row with an empty tenant is readable by every connection that never set one."
+need_grep 'ON tasks (tenant_id,' deploy/schema.sql "The policy cannot use an index that does not lead with tenant_id."
 need_grep 'DATABASE_OWNER_URL' backend/app/migrate.py
 need_grep 'OwnerCredentialVisible' backend/app/wiring.py
-need_no_grep 'DATABASE_OWNER_URL' backend/app/store/pg.py
-# The migrate service waits for a database that is genuinely up, and the file says how an
-# application would in turn wait for the migration to *finish* rather than to start.
-need_grep 'condition: service_healthy' deploy/compose.yaml
+need_no_grep 'DATABASE_OWNER_URL' backend/app/store/pg.py "The application must not hold a credential that can apply DDL."
+need_grep 'condition: service_healthy' deploy/compose.yaml "The migrate service must wait for a database that is up."
 need_grep 'service_completed_successfully' deploy/compose.yaml
-# Over TCP, not the socket: the entrypoint runs init against a temporary server that answers
-# on the unix socket only, so a socket probe reports healthy while init is still running.
-need_grep 'pg_isready -h 127.0.0.1' deploy/compose.yaml
-need_no_grep 'pg_isready -q' Makefile
+need_grep 'pg_isready -h 127.0.0.1' deploy/compose.yaml "Init runs on a server that answers on the unix socket only, so a socket probe reports healthy before init ends."
+need_no_grep 'pg_isready -q' Makefile "Init runs on a server that answers on the unix socket only, so a socket probe reports healthy before init ends."
 
 need_grep '"127.0.0.1:\${DB_PORT:-5433}:5432"' deploy/compose.yaml
 awk '/^ *#/ { next }
@@ -1235,16 +919,9 @@ need_no_grep 'localhost:\$(' Makefile
 need backend/devtools/schema.py
 need_grep 'CREATE TABLE IF NOT EXISTS tasks' deploy/schema.sql
 need_grep 'applied_once' deploy/schema.sql
-# The search path is a startup parameter, never a statement: asyncpg's RESET ALL on release
-# restores startup parameters and clears session SETs, so a `SET search_path` from a connect
-# hook survives exactly one checkout and every one after it resolves against public --
-# silently, because the first query on each connection works.
-# The behavioural guard is backend/tests/integration/test_postgres.py, which fails with `public` if
-# this changes; this only asserts the mechanism is still the one that test is about.
-need_grep 'server_settings' backend/app/store/pg.py
+need_grep 'server_settings' backend/app/store/pg.py "The search path is a startup parameter. asyncpg clears a session SET on release, so a SET search_path holds for one checkout only."
 need backend/devtools/export_openapi.py
 need_grep '^3.12' backend/.python-version
-# An application, not a library: no build backend, no wheel, nothing published.
 if grep -q '^\[build-system\]' backend/pyproject.toml; then
     echo "backend/pyproject.toml declares a build system; this half is an application" >&2
     exit 1
@@ -1262,42 +939,29 @@ assert spec['openapi'].startswith('3.1'), spec['openapi']
 schemas = spec['components']['schemas']
 for name in ('Task', 'CreateTaskBody', 'UpdateTaskBody', 'ErrorBody'):
     assert name in schemas, f'{name} missing from the spec: {sorted(schemas)}'
-# separate_input_output_schemas=False keeps these names stable; the aliases in
-# src/api/types.ts import them by name and break the moment they split.
 split = [n for n in schemas if n.endswith('-Input') or n.endswith('-Output')]
-assert not split, f'input/output schemas split: {split}'
+assert not split, f'input/output schemas split: {split}. The aliases in src/api/types.ts import each schema by name.'
 paths = spec['paths']
 assert sorted(paths) == ['/client-events', '/tasks', '/tasks/{id}'], sorted(paths)
 assert '201' in paths['/tasks']['post']['responses']
-# The one public route takes untrusted input, so its body refuses what it did not declare.
-assert schemas['ClientEvent']['additionalProperties'] is False
-assert schemas['ClientEvents']['additionalProperties'] is False
+assert schemas['ClientEvent']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvent must refuse an undeclared field'
+assert schemas['ClientEvents']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvents must refuse an undeclared field'
 assert '204' in paths['/tasks/{id}']['delete']['responses']
-# An error response without a model claims it has no body, while HTTPException
-# returns one -- and the typed handlers then cannot mock it.
 for method in ('patch', 'delete'):
-    assert 'content' in paths['/tasks/{id}'][method]['responses']['404'], method
+    assert 'content' in paths['/tasks/{id}'][method]['responses']['404'], f'{method} 404 declares no body. HTTPException returns one, and the typed handlers cannot mock a response with no model.'
 "
-# The proxy strips the prefix, so the spec must not carry it.
-need_grep '"/tasks"' openapi.json
+need_grep '"/tasks"' openapi.json "The proxy strips the /api prefix, so the spec must not carry it."
 need_grep 'rewrite' frontend/vite.config.ts
 need_grep 'redirect_slashes = False' backend/app/main.py
 need_grep 'separate_input_output_schemas=False' backend/app/main.py
-# The generator needs its own TypeScript; the frontend is on a major where the
-# compiler API it uses no longer exists.
-need_grep 'pnpm dlx openapi-typescript@' frontend/package.json
+need_grep 'pnpm dlx openapi-typescript@' frontend/package.json "The generator needs a TypeScript of its own (docs/constraints.md)."
 need frontend/tests/api/contract.test.ts
 need_grep 'CONTRACT_TARGET' frontend/tests/api/target.ts
 need_grep 'againstLiveBackend' frontend/tests/api/contract.test.ts
-# Starting the mock worker during the live run would intercept the very requests
-# that run exists to make, and the suite would pass while proving nothing.
-need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts
-# The contract suite is the only check that can fail on the two halves not
-# interoperating, and it reaches the hook through the gate rather than by name.
+need_grep 'CONTRACT_TARGET' frontend/tests/setup.ts "A mock worker in the live run intercepts the requests that run exists to make."
 need_grep 'make -s pre-commit' .githooks/pre-commit
 need_grep 'make -s gate' devtools/gate.sh
-# The lock is this project's, so two projects on one machine do not queue behind each other.
-need_grep 'lock="/tmp/smoke-test-pre-commit-' devtools/gate.sh
+need_grep 'lock="/tmp/smoke-test-pre-commit-' devtools/gate.sh "The lock is per project, so two projects on one machine do not queue behind each other."
 need_grep 'test-contract' Makefile
 
 echo "==> assert the quality gates"
@@ -1316,9 +980,6 @@ need_grep 'devtools/file-length.mjs' frontend/package.json
 need_grep 'devtools/conformance.mjs' frontend/package.json
 need_grep '"strict": true' frontend/tsconfig.json
 need_grep 'noUncheckedIndexedAccess' frontend/tsconfig.json
-# The generated contract artifact is a normal .ts file that grows with the API, so
-# every automatic skip misses it: measuring or linting it would distort the baseline
-# and fail on code nobody wrote.
 node -e "
 const pkg = require('./frontend/package.json');
 for (const key of ['complexity', 'conformance', 'comments']) {
@@ -1331,38 +992,25 @@ if (!biome.files.includes.includes('!src/api/schema.ts')) {
   throw new Error('biome.json does not exclude src/api/schema.ts');
 }
 "
-# The comment gate. Both scripts are dependency-free, so they run here rather than only
-# inside the installed halves -- which means `make fast` catches a comment too. Running
-# them is also the only way to know the rule holds in what we ship: AGENTS.md has banned
-# comments since the first commit, and the tree had twelve when the gate was written.
 need frontend/devtools/comments.mjs
 need backend/devtools/comments.py
-# The scanner is subtle enough to have shipped a false positive twice before the table
-# existed -- a regex ending in an escaped slash, and a character class holding `/*`,
-# which also opened a block comment that ran to the end of the file and hid every real
-# comment below it. A gate that cries wolf is a gate people route around, and one that
-# goes quiet is worse. The table is what holds both directions.
-need frontend/tests/devtools/comments.test.ts
-# One scanner, not three. The regex handling below used to live in comments.mjs alone,
-# and conformance.mjs carried a copy of everything around it with that part missing --
-# so a file whose regex held `/*` went quiet in the gate that had no table. Both read
-# devtools/scan.mjs now, and each has a table of its own.
+need frontend/tests/devtools/comments.test.ts "The table holds the comment scanner to both directions"
 need frontend/devtools/scan.mjs
 need frontend/devtools/gate.mjs
 need frontend/tests/devtools/conformance.test.ts
 need_grep 'startsARegex' frontend/devtools/scan.mjs
-need_no_grep 'const REGIONS' frontend/devtools/comments.mjs
-need_no_grep 'const REGIONS' frontend/devtools/conformance.mjs
+need_no_grep 'const REGIONS' frontend/devtools/comments.mjs "Both gates read devtools/scan.mjs. A copy drifts from the scanner the tables test."
+need_no_grep 'const REGIONS' frontend/devtools/conformance.mjs "Both gates read devtools/scan.mjs. A copy drifts from the scanner the tables test."
 need_grep 'devtools/comments.mjs' frontend/package.json
 need_grep 'devtools/comments.py' backend/devtools/lint.py
-# Both halves enforce the same rule, so both gates are tested. The Python one has its own
-# trap -- a `#` inside a string -- and a parser that grepped would fail this table and pass
-# every file in the project, which is the failure that has no other witness.
-need backend/tests/devtools/test_comments.py
+need backend/tests/devtools/test_comments.py "The table is the only witness that the Python gate reads a hash inside a string as data"
 (cd frontend && node devtools/comments.mjs src tests e2e devtools) \
     || fail "the rendered frontend carries a comment"
 (cd backend && python3 devtools/comments.py app tests devtools) \
     || fail "the rendered backend carries a comment"
+need_grep '"--tree"' backend/devtools/lint.py "make lint is what holds the project's scripts to the comment ban."
+python3 backend/devtools/comments.py --tree "$REPO" \
+    || fail "a script in this repository or in the template carries a comment. AGENTS.md holds both to the rules the template ships."
 
 need_grep 'max-complexity' backend/pyproject.toml
 need_grep 'max-statements' backend/pyproject.toml
@@ -1371,34 +1019,14 @@ for family in SIM RET PIE C4 PERF ERA C90 PLR0915 TID251; do
     grep -q "\"$family\"" backend/pyproject.toml || { echo "ruff family $family missing" >&2; exit 1; }
 done
 
-# The conformance rules gate what renders correctly on the screen the agent is
-# looking at and is wrong on one it never opens -- a colour outside the theme, a
-# size outside the scale, a stroke weight decided per call site, data fetched in
-# an effect. A rule that quietly stopped matching therefore looks exactly like a
-# clean codebase, so each is asserted in both directions against a fixture: it
-# must fire on code that violates it, and stay silent on code that only looks
-# similar. The script is dependency-free, so this runs before either install and
-# `make fast` catches a rule that stopped matching.
 echo "==> assert the conformance checks"
 CONF="$WORK/conformance"
 CONFORMANCE="$OUT/frontend/devtools/conformance.mjs"
 mkdir -p "$CONF/bad" "$CONF/good"
 
-# The fixtures run from here rather than from the rendered frontend, so no package.json is
-# in reach and the script falls back to its own defaults -- one of which names a theme file
-# that exists only inside a project. The fixture brings its own and says so, which is also
-# what keeps the project's `allow` list out of a run whose whole purpose is to prove the
-# rules fire: an entry added there would otherwise silence a fixture and nothing would say
-# the rule had stopped being tested.
 : >"$CONF/theme.css"
 conformance() { node "$CONFORMANCE" --theme-file "$CONF/theme.css" "$@"; }
 
-# The comments in these fixtures are the point of them, not an oversight: the
-# scanner has to see through a comment in both directions. A stray ")" in one
-# would end an effect body early and hide the fetch below it; the word "fetch("
-# in another would condemn an effect that only subscribes. Source in a generated
-# project carries no comments, but nothing stops a fixture, a vendored file, or
-# a project that drops the rule from carrying one.
 cat >"$CONF/bad/bad.tsx" <<'BAD'
 import { useEffect, useState } from "react";
 
@@ -1427,14 +1055,6 @@ export function Commented({ load }: { load: (rows: string[]) => void }) {
 }
 BAD
 
-# The two checks that read blanked source rather than raw lines are the two a
-# scanner failure silences, and it silences them without a word: a regex holding
-# `/*` opens a block comment that runs to the end of the file, and everything
-# below it is blanked. That shipped -- conformance.mjs carried a copy of the
-# comment gate's scanner with the regex handling left out, so this file reported
-# `conformance ok` while both checks did nothing. Both halves now share
-# devtools/scan.mjs, and frontend/tests/devtools/conformance.test.ts holds the
-# table; this is the same case one tier out, where `make fast` reaches it.
 cat >"$CONF/bad/regex.tsx" <<'BAD'
 import { useEffect, useState } from "react";
 
@@ -1449,19 +1069,6 @@ export function Regex() {
 }
 BAD
 
-# Tailwind's arbitrary-value syntax is the obvious way around a theme, so it is
-# asserted on its own file rather than folded into the table above. The
-# underscore before rgba() is the interesting part: Tailwind spells spaces that
-# way inside brackets, and a word-boundary anchor treats "_rgba(" as an ordinary
-# identifier and walks straight past a hard-coded colour.
-#
-# The last three lines are the shapes a colour utility can take besides the
-# plain one, and each defeated an earlier version of these rules. A side segment
-# sits between the prefix and the value (border-t-red-500, divide-y-gray-300,
-# ring-offset-blue-200); a compound prefix puts the familiar word second, where
-# a word-boundary anchor cannot reach it (inset-shadow-, inset-ring-,
-# drop-shadow-). Both are ordinary Tailwind rather than anything exotic, which is
-# what made missing them expensive.
 cat >"$CONF/bad/arbitrary.tsx" <<'BAD'
 export function Arbitrary() {
   return (
@@ -1481,13 +1088,6 @@ export function Arbitrary() {
 }
 BAD
 
-# A stroke weight can leave the theme by two doors that set the same property,
-# so both are asserted: the JSX presentation prop and the utility class. Closing
-# one alone leaves a check that teaches a habit it only half enforces -- and the
-# two doors fail differently, which is why neither stands in for the other. A
-# utility wins over the .lucide rule, because @layer utilities sorts after
-# @layer base; a prop loses to it, so a prop the check misses does not render
-# wrong, it silently does nothing.
 cat >"$CONF/bad/stroke.tsx" <<'BAD'
 import { Trash2 } from "lucide-react";
 
@@ -1512,33 +1112,6 @@ cat >"$CONF/bad/bad.css" <<'BAD'
 }
 BAD
 
-# Everything here is legitimate and must pass: tokens and scale steps rather
-# than literals, an effect that subscribes rather than fetches, a prop named
-# after a CSS property but carrying no style, and prose a looser pattern would
-# read as a palette utility.
-#
-# The arbitrary values here are the ones that must survive. Sizing has no scale
-# to be outside of -- there is no token for "the sidebar is 240px", and across
-# shadcn-ui and documenso sizing arbitraries outnumber spacing ones roughly
-# thirty to one -- and an arbitrary value that reads a theme variable is the
-# theme, not an escape from it.
-#
-# text-sm/6 is the trap in the alpha rule: a slash after a colour utility is an
-# alpha modifier, but a slash after a step on the type scale is the font-size
-# and line-height shorthand, and reading the second as the first would fire the
-# theme check on idiomatic Tailwind. Only text- carries that shorthand, so only
-# text- is exempt: shadow-lg/50 really is shadow opacity and really is caught.
-#
-# The other two traps are prefixes that mean something else. stroke- carries a
-# colour as readily as a weight, and both stroke-(length:--icon-stroke) and
-# stroke-[length:var(--icon-stroke)] read the token -- stroke-[var(--icon-stroke)]
-# would set the paint instead, so the check must not teach it by example. And a
-# presentation prop in type position is a type, not a style.
-#
-# The last two are the theme-reading forms of the arbitrary syntax, and they are
-# what separates this rule from a ban on brackets. An alpha or a weight spelled
-# through a custom property was declared somewhere and is reviewable there; the
-# offence is the literal, not the punctuation around it.
 cat >"$CONF/good/good.tsx" <<'GOOD'
 import { useEffect } from "react";
 
@@ -1580,24 +1153,18 @@ for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacin
             magic-presentation-prop effect-data exported-function-expression \
             filename-export; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
-        echo "conformance check $rule did not fire" >&2
+        echo "conformance check $rule did not fire. A rule that stops matching looks exactly like a clean codebase." >&2
         printf '%s\n' "$conformance_output" >&2
         exit 1
     fi
 done
 
-# Named separately, because the file above already trips effect-data on an
-# effect with no comment in it: without this, a scanner that stopped seeing
-# through comments would still show a green table.
 if ! printf '%s\n' "$conformance_output" | grep -q 'commented.tsx:.*effect-data'; then
-    echo "conformance lost an effect body to a comment" >&2
+    echo "conformance lost an effect body to a comment. bad.tsx trips effect-data with no comment in it, so only commented.tsx shows this." >&2
     printf '%s\n' "$conformance_output" >&2
     exit 1
 fi
 
-# Named per file for the same reason: an arbitrary value is the shortest route
-# out of the theme, and the table above would stay green while every one of
-# them passed.
 for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
                 'arbitrary.tsx:6.*arbitrary-type' 'arbitrary.tsx:7.*named-colour' \
                 'arbitrary.tsx:8.*arbitrary-spacing' 'arbitrary.tsx:9.*token-alpha' \
@@ -1609,7 +1176,7 @@ for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
                 'bad.css:5.*raw-stroke' \
                 'regex.tsx:7.*effect-data' 'regex.tsx:10.*inline-type-declaration'; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$expected"; then
-        echo "conformance let an arbitrary value through: $expected" >&2
+        echo "conformance let an arbitrary value through: $expected. The table of rules above stays green while one value passes." >&2
         printf '%s\n' "$conformance_output" >&2
         exit 1
     fi
@@ -1621,39 +1188,27 @@ if ! conformance "$CONF/good" >/dev/null 2>&1; then
     exit 1
 fi
 
-# The allowlist is what the failure message tells you to reach for, so a value
-# that genuinely belongs outside the theme has a reviewable home. If it stops
-# working the only remaining way past a false positive is deleting the check.
 printf 'export const brand = "#5865f2";\n' >"$CONF/good/brand.ts"
 if conformance "$CONF/good" >/dev/null 2>&1; then
     echo "conformance missed a raw colour outside the theme" >&2
     exit 1
 fi
 if ! conformance "$CONF/good" --allow '#5865f2' >/dev/null 2>&1; then
-    echo "conformance ignored an allowlisted value" >&2
+    echo "conformance ignored an allowlisted value. Without the allowlist, the only way past a false positive is to delete the check." >&2
     exit 1
 fi
 
-# The stroke rule needs somewhere to point, and the hint names both halves of
-# it. A token with no rule carrying it to the icons themes nothing, and a rule
-# reading a token nobody declared resolves to an empty value.
-need_grep 'icon-stroke: 1.5' frontend/src/index.css
-need_grep '\.lucide' frontend/src/index.css
+need_grep 'icon-stroke: 1.5' frontend/src/index.css "A rule that reads a token nobody declared resolves to an empty value."
+need_grep '\.lucide' frontend/src/index.css "A token with no rule to carry it to the icons themes nothing."
 need_grep 'stroke-width: var(--icon-stroke)' frontend/src/index.css
 
 echo "==> assert the supply-chain policy"
 need_grep 'minimumReleaseAge: 10080' frontend/pnpm-workspace.yaml
-# The dlx cache is held for a month so `make pre-commit` does not reach the registry
-# on the first commit of each day. That is only safe while every dlx call names an
-# exact version, so assert the one we ship still does.
 need_grep 'dlxCacheMaxAge' frontend/pnpm-workspace.yaml
-need_grep 'openapi-typescript@7\.13\.0' frontend/package.json
+need_grep 'openapi-typescript@7\.13\.0' frontend/package.json "The dlx cache is held for a month, which is safe only while every dlx call names an exact version."
 need_grep 'trustPolicy: no-downgrade' frontend/pnpm-workspace.yaml
 need_grep 'semver@6.3.1' frontend/pnpm-workspace.yaml
 need_grep 'exclude-newer = "7 days"' backend/pyproject.toml
-# An exclusion buys back one specific package from one specific policy, and the whole
-# value of that is in how narrow it is. A bare name exempts every future release of
-# it too, which is a permanent hole opened to close a temporary one.
 python3 - <<'PY'
 import re
 
@@ -1664,28 +1219,20 @@ for key in ("trustPolicyExclude", "minimumReleaseAgeExclude"):
         continue
     for line in block.group(1).splitlines():
         entry = line.strip().lstrip("-").strip().strip("\"'")
-        assert "@" in entry.lstrip("@"), f"{key} entry is not pinned to a version: {entry}"
+        assert "@" in entry.lstrip("@"), f"{key} entry is not pinned to a version: {entry}. A bare name exempts every future release of it too."
 PY
-# A floor alone lets a release published next month decide what a project generated
-# next month resolves -- and fastapi and pydantic both write part of openapi.json,
-# which is committed and diffed by the gate. Runtime dependencies are bounded both ways.
 python3 - <<'PY'
 import tomllib
 
 deps = tomllib.load(open("backend/pyproject.toml", "rb"))["project"]["dependencies"]
 unbounded = [dep for dep in deps if "<" not in dep]
-assert not unbounded, f"runtime dependencies with no upper bound: {unbounded}"
+assert not unbounded, f"runtime dependencies with no upper bound: {unbounded}. fastapi and pydantic write part of openapi.json, so a later release changes a committed artifact."
 PY
-# A relative duration needs a uv new enough to parse one. 0.9.7 rejects "7 days"
-# with a date-parsing error that names neither uv nor the version, so the floor has to
-# be at least this wherever the project is installed.
-need_grep 'required-version = ">=0.11.25"' backend/pyproject.toml
+need_grep 'required-version = ">=0.11.25"' backend/pyproject.toml 'An older uv rejects "7 days" with a date-parsing error that names neither uv nor the version.'
 need_grep 'UV_EXCLUDE_NEWER' Makefile
-# No lockfile ships, so a clone resolves its own unless the setup instructions say to
-# commit the ones `make install` writes -- and two clones then build different trees.
 need_absent frontend/pnpm-lock.yaml
 need_absent backend/uv.lock
-need_grep 'pnpm-lock.yaml' docs/installation.md
+need_grep 'pnpm-lock.yaml' docs/installation.md "No lockfile ships, so the setup instructions must say to commit the ones make install writes."
 
 echo "==> assert hook activation is worktree-safe"
 (
@@ -1703,8 +1250,6 @@ echo "==> assert hook activation is worktree-safe"
     git add -A
     git commit -qm initial
 
-    # A hook this repo does not ship must survive, and one it does must chain rather
-    # than clobber -- losing someone else's hook is a silent, expensive failure.
     printf '#!/bin/sh\necho FOREIGN-PRE\n' >.git/hooks/pre-commit
     printf '#!/bin/sh\necho FOREIGN-POST\n' >.git/hooks/post-commit
     chmod +x .git/hooks/pre-commit .git/hooks/post-commit
@@ -1722,26 +1267,21 @@ echo "==> assert hook activation is worktree-safe"
     echo "$out" | grep -q FOREIGN-PRE
     echo "$out" | grep -q 'skipping checks'
 
-    # A second foreign hook extends the chain rather than replacing the first.
     printf '#!/bin/sh\necho SECOND-PRE\n' >.git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
     sh devtools/install-hooks.sh >/dev/null
     need_exec .git/hooks/pre-commit.local
     need_exec .git/hooks/pre-commit.local.2
 
-    # Re-arming with nothing new installed must not grow the chain.
     sh devtools/install-hooks.sh >/dev/null
-    need_absent .git/hooks/pre-commit.local.3
+    need_absent .git/hooks/pre-commit.local.3 "Re-arming with nothing new installed must not grow the chain."
 
-    # A hooksPath that resolves to the directory just written is equivalent, not a
-    # conflict; symlinks and relative paths must compare equal (/var vs /private/var
-    # on macOS is the case that bites).
     hooks_abs="$(cd .git/hooks && pwd -P)"
     ln -s "$hooks_abs" ../hooks-link
     for equivalent in "$hooks_abs" ".git/hooks" "../hooks-link"; do
         git config core.hooksPath "$equivalent"
         if ! sh devtools/install-hooks.sh >/dev/null 2>&1; then
-            echo "install-hooks.sh rejected an equivalent hooksPath: $equivalent" >&2
+            echo "install-hooks.sh rejected an equivalent hooksPath: $equivalent. A symlink or a relative path to the hooks directory is that directory, as /var is /private/var on macOS." >&2
             exit 1
         fi
     done
@@ -1807,8 +1347,6 @@ run "uv sync" sh -c 'cd backend && uv sync --all-groups'
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
 if [ "$VARIANT" = "default" ]; then
-    # The copy without the workflow keeps test_gate.py and loses test_workflow.py. Run what it
-    # keeps, on this install, so a test that still needs the workflow fails here.
     run "test_gate.py without the workflow" sh -c \
         "cd '$NO_CI/backend' && '$OUT/backend/.venv/bin/python' -m pytest -q -p no:cacheprovider tests/test_gate.py"
 fi
@@ -1840,16 +1378,6 @@ echo "==> frontend: install, lint, test, build"
 run "pnpm install" pnpm -C frontend install --prefer-offline
 
 echo "==> assert a fresh install ships no known high-severity vulnerability"
-# The cool-off delays a security patch exactly as long as it delays anything else,
-# so until a fix ages past it the only resolvable version is the vulnerable one.
-# No file in this repository changes when that happens and no other check notices:
-# the audit runs against what a new project actually resolved, today. The fix is an
-# exact minimumReleaseAgeExclude entry naming the patched version, never a wider
-# policy. This runs against production dependencies only -- a vulnerable linter is
-# not something a user of a generated project ships.
-# Only stdout is captured: `audit` exits non-zero on a finding, so the exit status
-# cannot be trusted here, and anything it says about why it could not run belongs on
-# the console rather than in a file nobody reads.
 pnpm -C frontend audit --prod --json >"$WORK/audit.json" || true
 python3 - "$WORK/audit.json" <<'PY'
 import json
@@ -1859,9 +1387,7 @@ try:
     with open(sys.argv[1], encoding="utf-8") as handle:
         report = json.load(handle)
 except (OSError, ValueError):
-    # A registry that cannot be reached is not a vulnerability, and failing here
-    # would teach people that a red run means the network. Say so and move on.
-    print("check: pnpm audit returned no report; skipping (registry unreachable?)")
+    print("check: pnpm audit returned no report; skipping (registry unreachable?). An unreachable registry is not a vulnerability.")
     raise SystemExit(0)
 
 serious = [
@@ -1889,17 +1415,10 @@ PY
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
 echo "==> assert the mock build is still a mock build"
-# One predicate, asserted both ways a few lines apart, so it is spelled once: the two
-# directions drifting apart is exactly how a pair like this stops being a pair.
 bundles_msw() { grep -rl 'setupWorker' frontend/dist/assets/*.js >/dev/null 2>&1; }
-# Asserted before the production build below, and in this direction, because the plugin that
-# keeps the worker out of production is one `if` away from removing it everywhere -- and
-# nothing else here would notice. This script downloads no browser and runs no playwright, so
-# the mock-mode e2e suite, the only other thing that needs a worker to start, is exactly the
-# check that is absent. The production build runs second so `dist` is left as what ships.
 run "vite build --mode mock" pnpm -C frontend build:mock
 need frontend/dist/mockServiceWorker.js
-bundles_msw || fail "the mock build no longer bundles msw; its e2e specs cannot pass"
+bundles_msw || fail "the mock build no longer bundles msw; its e2e specs cannot pass. This script runs no e2e suite, so nothing else sees it."
 
 run "vite build" pnpm -C frontend build
 
@@ -1907,22 +1426,16 @@ echo "==> assert the build output"
 need frontend/dist/index.html
 ls frontend/dist/assets/index-*.js >/dev/null
 ls frontend/dist/assets/index-*.css >/dev/null
-# Mock mode is a development and test concern. Shipping the worker to users would
-# have it answering their requests.
-! bundles_msw || fail "msw leaked into the production bundle"
-# The other thing mock mode leaves behind, and the one no mode turns off by itself: public/
-# is copied into every build, so this file is written and then deleted again by vite.config.ts.
-need_absent frontend/dist/mockServiceWorker.js
+! bundles_msw || fail "msw leaked into the production bundle. In production, the worker would answer the user's requests."
+need_absent frontend/dist/mockServiceWorker.js "public/ is copied into every build, and only vite.config.ts deletes this file again"
 
 echo "==> the secret scan passes the project and refuses a planted token"
-# A scan that never fires passes forever, so a token is planted and has to be refused. It is
-# random, composed at run time, and lives only in this rendered tree.
 run "secret scan" sh devtools/secrets.sh
 PLANTED="planted-$$.txt"
 printf 'token = ghp_%s\n' "$(python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(36)))')" >"$PLANTED"
 if sh devtools/secrets.sh >/dev/null 2>&1; then
     rm -f "$PLANTED"
-    fail "devtools/secrets.sh passed a tree holding a GitHub token"
+    fail "devtools/secrets.sh passed a tree holding a GitHub token. A scan that never fires passes forever."
 fi
 rm -f "$PLANTED"
 
@@ -1932,23 +1445,11 @@ git diff --exit-code -- openapi.json frontend/src/api/schema.ts \
     || { echo "the committed contract artifacts do not match the rendered code" >&2; exit 1; }
 
 echo "==> the contract suite, against both implementations"
-# The whole point of the fullstack template: the halves are checked against each
-# other, not only against themselves. Every check above passes on a project whose
-# frontend cannot reach its backend at all.
 run "contract suite (mocks)" pnpm -C frontend test:contract
-# With the two port variables unset, so the branch that ships to users is the branch this
-# exercises. This script exports a pair of its own at the top, and inheriting them meant
-# contract-test.sh's own allocator -- the thing that keeps the gate green when another
-# checkout is already serving :8000 -- never ran here at all.
 run "contract suite (live backend)" env -u BACKEND_PORT -u FRONTEND_PORT make test-contract
 need_nothing_outlived "the contract suite"
 
 echo "==> the store, against a real Postgres"
-# The opt-in tier, exercised here when a daemon is available. Gated rather than required,
-# because this script is the generator's own gate and must run on a laptop with no Docker --
-# and printed either way, because a silently skipped tier is indistinguishable from a passing
-# one. The generated project's `make db-test` is the same command; this is the generator
-# checking that the command it ships works.
 if docker info >/dev/null 2>&1; then
     run "make db-test" make db-test
     echo "    postgres: yes (container) -- store contract and migration suites ran"
@@ -1960,19 +1461,6 @@ else
 fi
 
 echo "==> the dev loop starts both halves, and Ctrl-C stops both halves"
-# `make dev` is the command every user of a generated project runs first and runs
-# most, and the way it breaks leaves no trace in a diff: anything that replaces the
-# shell -- an `exec`, a `cd &&` chain ending in one -- discards the cleanup trap, so
-# stopping the frontend leaves uvicorn holding :8000. The next `make dev` dies on a
-# port nothing visible is using, in a different session, and the cause is thirty
-# lines up a file nobody is looking at. The greps above catch that one edit coming
-# back; this starts it for real and stops it the way a person does.
-#
-# It runs under a pty because nothing else is faithful. dev.sh keeps the frontend in
-# the foreground so vite owns the terminal, which means a signal sent to the script
-# alone cannot be handled until vite returns -- a plain `kill` would deadlock here
-# and prove nothing. Writing 0x03 to the pty master makes the line discipline raise
-# SIGINT on the foreground process group, which is what the key does.
 python3 - "$OUT" <<'PY'
 import os
 import pty
@@ -1981,10 +1469,6 @@ import subprocess
 import sys
 import time
 
-# The same two variables dev.sh, contract-test.sh and vite.config.ts read, and the
-# script exports them for the whole run, so there is no default to repeat here. Writing
-# :8000 into this block again is what made it abort on another checkout's process no
-# matter which ports the run was told to use.
 BACKEND_PORT = os.environ["BACKEND_PORT"]
 FRONTEND_PORT = os.environ["FRONTEND_PORT"]
 BACKEND = f"http://localhost:{BACKEND_PORT}/tasks"
@@ -1998,15 +1482,12 @@ def serving(url):
     ).returncode == 0
 
 
-# Before starting anything: a port already in use makes every assertion below lie.
-# dev.sh would fail to bind, the readiness probe would be answered by whatever is
-# already there, and the check would report that dev.sh stranded a server -- naming
-# the one bug it is here to catch, on a run where it did nothing wrong.
 PORTS = ((f":{BACKEND_PORT}", BACKEND), (f":{FRONTEND_PORT}", PROXY))
 already = " and ".join(n for n, u in PORTS if serving(u))
 if already:
     print(f"check: {already} already in use before dev.sh started -- something else is\n"
-          f"       serving it (another `make dev`?). Stop it and run this again.",
+          f"       serving it (another `make dev`?). Stop it and run this again.\n"
+          f"       Otherwise the probes read that process, and this check blames dev.sh.",
           file=sys.stderr)
     raise SystemExit(1)
 
@@ -2020,8 +1501,6 @@ output = bytearray()
 
 
 def drain():
-    # The child writes into a pty buffer of fixed size, so a reader that stops
-    # reading wedges the very process it is testing once that buffer fills.
     while True:
         try:
             chunk = os.read(master, 65536)
@@ -2054,8 +1533,6 @@ def die(message):
     raise SystemExit(1)
 
 
-# Through :5173/api, so this waits on both halves and the proxy between them rather
-# than on the backend alone.
 if not until(lambda: serving(PROXY), 120):
     die(f"dev.sh did not serve :{FRONTEND_PORT}/api within 120s")
 
@@ -2068,51 +1545,16 @@ if not until(lambda: not serving(BACKEND) and not serving(PROXY), 15):
     held = " and ".join(n for n, u in PORTS if serving(u))
     die(f"dev.sh exited but {held} still answering")
 PY
-# A port that stopped answering is not a process that stopped, and the difference is
-# the whole failure: a half killed by the wrong signal closes its socket long before
-# anything reaps it, if anything ever does.
 need_nothing_outlived "the dev loop"
 
 echo "==> the built bundle, answered by app.serve on one origin"
-# The one arrangement nothing else in this file reaches. `make test-e2e` builds the bundle
-# and serves it with nothing behind it; the contract suite runs a real backend behind the
-# *dev* server. So the artifact a deployment actually ships -- the built bundle, answered by
-# `app.serve` -- was the combination no step exercised, and the routing it depends on is
-# covered only by unit tests pointed at a fixture directory holding a stub index.html. Those
-# cannot see a hashed asset name, a real `<script>` tag, or a `base` that moved.
-#
-# What it does NOT reach, so that claim is not read wider than it is: the bundle's own choice
-# of API base. `src/api/base.ts` falls back to a relative `${BASE_URL}api` when
-# VITE_API_BASE_URL is unset, and that fallback is the branch every deployment takes -- but
-# the contract run below has to set the variable, because it fetches from node, where a
-# relative URL has no origin to resolve against. Closing that would mean executing the built
-# javascript, which means a browser, and no step here downloads one. What is proved is the
-# server: that these files, at these URLs, are answered correctly on one origin.
-#
-# The contract suite is re-run rather than re-implemented: the same file the step above uses,
-# aimed at a third edge. That is what proves the claim the whole topology rests on --
-# `server.mount` strips /api exactly as the vite proxy does, so a project developed against
-# one deploys onto the other. A prefix the two handled differently would pass every other
-# check in this file and fail on the first deploy.
-#
-# Started from the venv's own interpreter rather than through `uv run`, which execs a
-# launcher and spawns the server as a child: killing the pid we started would leave that
-# child holding the port, and --app-dir is what makes `app` importable without a subshell
-# whose pid is not the server's.
 ONE_ORIGIN="http://localhost:$BACKEND_PORT"
-# One URL for the pre-flight and the readiness loop both. They probed different paths and the
-# guard was weaker for it: a stale `app.main` on this port answers / with a 404, so the
-# pre-flight saw nothing wrong and only the readiness probe noticed.
 PROBE="$ONE_ORIGIN/api/tasks"
 
 if curl -fsS --max-time 2 "$PROBE" >/dev/null 2>&1; then
     fail ":$BACKEND_PORT is answering before app.serve started -- something else has it"
 fi
 
-# DATABASE_URL is dropped so this is the in-memory substrate: the contract suite asserts
-# shapes and status codes rather than rows, and a Postgres that happened to be exported
-# would make this step depend on a daemon the gate does not require. Production refuses
-# that substrate, so this says it is the development loop.
 env -u DATABASE_URL APP_ENV=development FRONTEND_BUNDLE="$OUT/frontend/dist" \
     backend/.venv/bin/python -m uvicorn --app-dir backend \
     --factory app.serve:build_server --port "$BACKEND_PORT" --log-level warning \
@@ -2131,19 +1573,14 @@ until curl -fsS --max-time 2 "$PROBE" >/dev/null 2>&1; do
     sleep 1
 done
 
-# Every curl below is bounded. A server that accepts and then never answers would otherwise
-# hang the whole gate, which has no outer timeout, and `|| fail` on each capture is what
-# keeps a non-2xx from exiting silently under `set -e` and taking serve.log with it.
 shell="$(curl -fsS --max-time 10 "$ONE_ORIGIN/")" \
     || fail "app.serve did not answer / at all"
 printf '%s' "$shell" | grep -q '<div id="root">' \
     || fail "app.serve answered / with something that is not the built shell"
 
-# A reload on a client route has to reach the same document. This failing while the dev
-# server works is exactly the divergence between the two edges that this step exists to deny.
 deep="$(curl -fsS --max-time 10 "$ONE_ORIGIN/some/client/route")" \
     || fail "app.serve refused a client route instead of falling back to the shell"
-[ "$deep" = "$shell" ] || fail "a deep link did not fall back to the built index.html"
+[ "$deep" = "$shell" ] || fail "a deep link did not fall back to the built index.html. A reload on a client route must reach the same document on both edges."
 
 cache_control_of() {
     headers="$(curl -fsS --max-time 10 -o /dev/null -D - "$1")" || return 1
@@ -2156,22 +1593,9 @@ for page in / /some/client/route; do
         || fail "app.serve answered $page with cache-control '${page_cache}', not no-cache"
 done
 
-# Every file the shell asks for, at the exact URL it asks for it -- leading slash and `base`
-# and all -- read out of the document so this follows the build rather than needing an edit
-# each time a hash moves. Scripts and stylesheets both: they are hashed the same way and a
-# `base` moves them together.
-#
-# Matching only the tail was tried and is worthless: with a `base` this server does not serve
-# from, `assets/index-*.js` still resolves because the file is on disk under that name, while
-# the browser asks for `/app/assets/...`, misses, and is handed the shell by the fallback. So
-# the answer is checked by type, not by status -- a script tag given a page of HTML is a 200,
-# and it is the whole failure this step exists to see.
-# Collected before the loop rather than piped into it, because a `for` over nothing runs no
-# body and reports success: a build that stopped naming its assets the expected way would
-# turn this check off rather than fail it.
 refs="$(printf '%s' "$shell" | grep -oE '(src|href)="[^"]*\.(js|css)"' \
             | sed 's/^[a-z]*="//; s/"$//')"
-[ -n "$refs" ] || fail "the built index.html names no script or stylesheet to load"
+[ -n "$refs" ] || fail "the built index.html names no script or stylesheet to load. A loop over nothing reports success."
 
 for ref in $refs; do
     case "$ref" in
@@ -2182,7 +1606,7 @@ for ref in $refs; do
     ref_type="$(curl -s --max-time 10 -o /dev/null -w '%{content_type}' "$ONE_ORIGIN$ref")"
     case "$ref_type" in
         *"$want"*) ;;
-        *) fail "the shell asks for $ref and app.serve answered it as ${ref_type:-nothing}" ;;
+        *) fail "the shell asks for $ref and app.serve answered it as ${ref_type:-nothing}. The fallback answers a missed asset with the shell and a 200, so only the type shows the miss." ;;
     esac
     ref_cache="$(cache_control_of "$ONE_ORIGIN$ref")" \
         || fail "app.serve did not answer $ref for its cache-control"
@@ -2190,16 +1614,11 @@ for ref in $refs; do
         || fail "app.serve answered $ref with cache-control '${ref_cache}', not immutable"
 done
 
-# An asset name carries the build's hash, so one the bundle does not hold is a stale
-# document. Answering it with the shell hands a script tag a page of HTML, which fails as a
-# syntax error a long way from the deploy that caused it.
 stale_status="$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' \
     "$ONE_ORIGIN/assets/index-deadbee.js")"
 [ "$stale_status" = "404" ] \
-    || fail "a hashed asset the bundle lacks answered $stale_status, not 404"
+    || fail "a hashed asset the bundle lacks answered $stale_status, not 404. The shell in its place fails as a syntax error far from the deploy that caused it."
 
-# The package script rather than the spec's path, so renaming that file is a change in one
-# place the generated project owns rather than a break in the generator's gate.
 run "contract suite (app.serve)" env CONTRACT_TARGET=live VITE_API_BASE_URL="$ONE_ORIGIN/api" \
     pnpm -C frontend test:contract
 
@@ -2208,15 +1627,6 @@ wait "$serve_pid" 2>/dev/null || true
 serve_pid=""
 
 echo "==> assert the drift gate is two-sided, on both halves"
-# A ratchet that only ever rises is not a ratchet. Whatever a tree improved since its
-# baseline was recorded is slack, and slack is added to what the next commit may spend,
-# so the second side is what bounds the first. The two directions have opposite
-# handling -- a rise is refused, a fall is recorded for you -- and only one of them may
-# rewrite the file, so no single case can show the rule. Hence a table per half.
-#
-# Both run against scratch trees rather than the generated project: the frontend needs
-# real density and enough of it to clear the size guard, and the backend needs an exact
-# mean rather than whatever the smoke project happens to score.
 (
     cd "$WORK"
     mkdir -p drift/src && cd drift
@@ -2231,21 +1641,12 @@ echo "==> assert the drift gate is two-sided, on both halves"
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline measured.json \
         --update-baseline >/dev/null
 
-    # State the cases as multiples of the measured level rather than as numbers, so the
-    # table keeps meaning what it says if biome's scoring ever moves. Below 1 is a tree
-    # that got worse; above 1, one that improved since.
-    # Two factors, because the gate reads two numbers. A baseline whose sum moved with
-    # its density describes a tree whose branching really changed; one whose sum stood
-    # still describes a tree that only changed size, and the two must be handled apart.
     seed='const fs = require("node:fs");
     const measured = JSON.parse(fs.readFileSync("measured.json", "utf8"));
     const density = Number((measured.density * Number(process.argv[1])).toFixed(3));
     const sum = Math.round(measured.sum * Number(process.argv[2]));
     fs.writeFileSync("baseline.json", JSON.stringify({ ...measured, density, sum, origin: density }, null, 2));'
 
-    # Both recorded numbers, because a re-record that wrote the right density beside a
-    # stale sum would leave the next commit measured against a level no tree ever held --
-    # and checking density alone cannot see it.
     settled='const fs = require("node:fs");
     const measured = JSON.parse(fs.readFileSync("measured.json", "utf8"));
     const tree = process.argv[3] === "tree";
@@ -2260,18 +1661,10 @@ echo "==> assert the drift gate is two-sided, on both halves"
         process.exit(1);
     }'
 
-    # density and sum, each as a multiple of the tree | flags | expected exit | baseline after
-    # The frontend tolerance is 2%: 0.99 and 1.01 sit inside it, 0.90 and 1.05 outside.
-    # The rows where the two factors agree are the ratchet proper -- a rise is refused,
-    # a fall is recorded for you, and the flag must never be a way to accept a rise.
-    # The rows where the sum factor is 1.00 are a tree that only changed size: density
-    # drifted, branching did not, so the number carries no consent either way and is
-    # re-recorded rather than judged. Deleting dead code is the row that forced this.
     while IFS='|' read -r factor sum_factor flags expect after; do
         [ -n "$factor" ] || continue
         node -e "$seed" "$factor" "$sum_factor"
         rc=0
-        # shellcheck disable=SC2086
         node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json $flags \
             >/dev/null 2>&1 || rc=1
         if [ "$rc" != "$expect" ]; then
@@ -2298,31 +1691,22 @@ echo "==> assert the drift gate is two-sided, on both halves"
 1.05|0.90|--tighten-baseline|0|tree
 DRIFT_CASES
 
-    # An exit code cannot tell the two failures apart, and they ask for opposite things:
-    # one for a refactor, the other for a one-line commit of the file.
     node -e "$seed" 1.05 1.05
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json 2>&1 \
         | grep -q 'baseline is .* above the tree'
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
         --tighten-baseline | grep -q 'baseline tightened'
 
-    # A third message, because the arithmetic move means neither of the other two. Calling
-    # it a rise asks for a refactor nobody owes; calling it a tightening records an
-    # improvement that did not happen. Both directions say the same thing about the cause.
     node -e "$seed" 0.90 1.00
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json 2>&1 \
         | grep -q 'complexity sum did not move with the density'
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
         --tighten-baseline | grep -q 'baseline re-recorded'
 
-    # Asserted as what the line says, not as the absence of the other line: a crash
-    # printing nothing satisfies "did not say tightened" just as happily as the fix does.
     node -e "$seed" 1.05 1.00
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
         --tighten-baseline | grep -q 'baseline re-recorded'
 
-    # A baseline recorded before the gate read two numbers cannot be told apart from one
-    # whose tree happens to match, so it is refused rather than guessed at.
     node -e "$seed" 1.05 1.05
     node -e '
     const fs = require("node:fs");
@@ -2340,26 +1724,15 @@ DRIFT_CASES
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
         --tighten-baseline >/dev/null
 
-    # Tightening lowers the drift reference and must leave the ceiling's anchor alone.
-    # Moving origin down too would let a codebase that improves and then regresses walk
-    # past the ceiling one recorded improvement at a time. This half of the rule exists
-    # on the frontend only: the backend's ceiling is an absolute constant, so its
-    # baseline carries nothing to preserve.
     node -e '
     const fs = require("node:fs");
     const measured = JSON.parse(fs.readFileSync("measured.json", "utf8")).density;
     const after = JSON.parse(fs.readFileSync("baseline.json", "utf8"));
     if (after.density !== measured) throw new Error("tightening did not lower the density");
-    if (after.origin === measured) throw new Error("tightening moved the ceiling anchor");
+    if (after.origin === measured) throw new Error("tightening moved the ceiling anchor. A tree that improves and then regresses would walk past the ceiling.");
     '
 )
 
-# Density falling to zero returns before the drift check, so it is the one improvement
-# the two-sided rule could not see -- and the slack it leaves is not a fraction of the
-# baseline but the whole of it. Reintroducing the complexity later would then measure
-# against a number describing a codebase that no longer existed, and pass. The flat
-# fixture is the branching one with the branches taken out, so the only thing that
-# differs between them is the density.
 (
     cd "$WORK"
     mkdir -p drift-zero/src && cd drift-zero
@@ -2382,8 +1755,6 @@ DRIFT_CASES
         --update-baseline >/dev/null
     node -e "$flat"
 
-    # Without the flag this is a notice, not a failure: there is nothing to gate while
-    # the metric is zero, and the checking half must never rewrite a file.
     node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json >/dev/null
     node -e '
     const density = JSON.parse(require("node:fs").readFileSync("baseline.json", "utf8")).density;
@@ -2394,13 +1765,10 @@ DRIFT_CASES
         --tighten-baseline | grep -q 'baseline tightened'
     node -e '
     const after = JSON.parse(require("node:fs").readFileSync("baseline.json", "utf8"));
-    if (after.density !== 0) throw new Error("an improvement to zero was not recorded");
+    if (after.density !== 0) throw new Error("an improvement to zero was not recorded. Zero returns before the drift check, so its slack is the whole baseline.");
     if (!(after.origin > 0)) throw new Error("tightening to zero moved the ceiling anchor");
     '
 
-    # The point of recording it: putting the complexity back is now a rise from zero,
-    # refused and sent to `pnpm complexity:baseline`, rather than a free ride against a
-    # baseline describing code nobody kept.
     node -e "$branching"
     if node "$OUT/frontend/devtools/complexity.mjs" src --baseline baseline.json \
         >/dev/null 2>&1; then
@@ -2409,44 +1777,30 @@ DRIFT_CASES
     fi
 )
 
-# The backend table, in its own unit. Run against the generated project's interpreter:
-# complexity.py needs tomllib, so unlike the agent guard it is not a stdlib-only script
-# that any python3 on PATH can host.
 CX="$WORK/complexity"
 mkdir -p "$CX"
 
-# Stand in for ruff, so the measured mean is an exact known number rather than whatever
-# the smoke-test project happens to score.
 cat >"$CX/fake-ruff" <<'FAKE_RUFF'
 #!/bin/sh
 echo '[{"message":"a is too complex (2 > 0)"},{"message":"b is too complex (2 > 0)"}]'
 FAKE_RUFF
 chmod +x "$CX/fake-ruff"
 
-# Compare a recorded baseline mean against a number: <file> <number> eq|lt.
 compare='import json,operator,sys
 recorded = json.load(open(sys.argv[1]))["mean"]
 sys.exit(not getattr(operator, sys.argv[3])(recorded, float(sys.argv[2])))'
 
-# Both recorded numbers, as on the frontend half: same leaves the seeded pair, tree leaves
-# what fake-ruff measures -- mean 2.000 over a complexity sum of 4.
 backend_settled='import json,sys
 recorded = json.load(open("baseline.json"))
 tree = sys.argv[3] == "tree"
 want = (2.0, 4.0) if tree else (float(sys.argv[1]), float(sys.argv[2]))
 sys.exit(0 if (recorded["mean"], recorded["sum"]) == want else 1)'
 
-# baseline mean | baseline sum | flags | expected exit | baseline afterwards
-# The backend tolerance is 0.050. The mean is a ratio over the callable count, so extracting
-# or deleting a trivial callable moves it with no branching added or removed anywhere. Those
-# are the rows whose sum stands at 4: the drift is arithmetic, and the gate re-records
-# instead of judging it.
 while IFS='|' read -r before before_sum flags expect after; do
     [ -n "$before" ] || continue
     printf '{"callables": 2.0, "sum": %s, "mean": %s, "p90": 2.0}\n' \
         "$before_sum" "$before" >"$CX/baseline.json"
     rc=0
-    # shellcheck disable=SC2086
     (cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
         --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1 $flags) \
         >/dev/null 2>&1 || rc=1
@@ -2475,11 +1829,6 @@ done <<'DRIFT_CASES'
 2.400|4.0||1|same
 DRIFT_CASES
 
-# Every baseline written before v0.6.1 omits the complexity sum. Recovering it as
-# mean x callables rounds to a whole number, which is what a complexity sum is; the mean is
-# stored to four places, so the recovery is off by one only past ten thousand callables.
-# That is why this loads where the frontend's refuses -- the frontend has written a sum for
-# as long as the metric has had its current name, so a file without one was not written by it.
 printf '{"callables": 2.0, "mean": 2.400, "p90": 2.0}\n' >"$CX/baseline.json"
 recovery="$(cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
     --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1 --tighten-baseline)" \
@@ -2489,7 +1838,6 @@ printf '%s\n' "$recovery" | grep -q 'recovered 5 from mean x callables' \
 (cd "$CX" && python3 -c "$backend_settled" 2.400 5.0 tree) \
     || fail "backend complexity recovered a sum that changed what the drift meant"
 
-# The third message, as on the frontend: neither a refactor nor an improvement.
 printf '{"callables": 2.0, "sum": 5.0, "mean": 1.900, "p90": 2.0}\n' >"$CX/baseline.json"
 (cd "$CX" && "$OUT/backend/.venv/bin/python" "$OUT/backend/devtools/complexity.py" . \
     --ruff "$CX/fake-ruff" --baseline baseline.json --min-callables 1) 2>&1 \
@@ -2497,11 +1845,6 @@ printf '{"callables": 2.0, "sum": 5.0, "mean": 1.900, "p90": 2.0}\n' >"$CX/basel
     || fail "backend complexity reported an arithmetic drift as a rise"
 
 echo "==> the tree fingerprint sees a same-size edit made in the instant after a write"
-# Git trusts a file's size and timestamps unless the index was written no earlier than the file,
-# and an index copied without its own timestamp looks newer than every entry. The edit is missed
-# about once in a hundred tries, so one try proves nothing: this makes three hundred, and the
-# copy without its timestamp missed three of them. backend/tests/test_gate.py covers the
-# fingerprint's other cases.
 race="$(mktemp -d)"
 (
     cd "$race"
@@ -2513,39 +1856,22 @@ race="$(mktemp -d)"
         printf 'two\n' >kept.txt
         [ "$(sh "$OUT/devtools/worktree-tree.sh")" != "$before" ] || exit 1
     done
-) || { rm -rf "$race"; fail "devtools/worktree-tree.sh kept the tree of a file edited in the same instant"; }
+) || { rm -rf "$race"; fail "devtools/worktree-tree.sh kept the tree of a file edited in the same instant. Git trusts size and timestamps unless the index was written no earlier than the file."; }
 rm -rf "$race"
 
 echo "==> the gate runner skips a tree that already passed"
-# Recorded here rather than earned by a full `make pre-commit`, which would run every step
-# above a second time. What this proves is the path a commit after a green run takes in a real
-# project: both halves installed, a record for exactly this tree, and an exit before anything
-# runs. backend/tests/test_gate.py proves the fingerprint changes when the tree does.
 sh devtools/worktree-tree.sh >"$(git rev-parse --git-path gate-passed)"
 out="$(sh devtools/gate.sh 2>&1)" || fail "devtools/gate.sh failed on a tree recorded as passed: $out"
 printf '%s\n' "$out" | grep -q 'already passed the gate' \
     || fail "devtools/gate.sh ran again over a tree recorded as passed: $out"
 
 echo "==> assert each half's fixing variant tightens and its checking variant refuses"
-# Tightening only means anything if exactly one of each half's two lint entry points
-# asks for it, and grepping for the flag cannot tell those apart -- a flag wired into
-# both would leave `make lint-check`, and so the pre-commit hook, silently accepting
-# stale baselines, which is the state this whole check exists to end. So drive both.
-#
-# Last, and not a line earlier. The fixing variants run `biome check --write`,
-# `ruff --fix`, `ruff format` and `codespell --write-changes` across the generated project:
-# anywhere above this they would repair whatever an earlier step exists to catch, move
-# backend source out from under `make openapi-check`, and hand back a green run on a
-# template that ships unformatted source. Nothing may follow this section.
 node -e '
 const pkg = JSON.parse(require("node:fs").readFileSync("frontend/package.json", "utf8"));
 if (!pkg.scripts.lint.includes("--tighten-baseline")) throw new Error("pnpm lint cannot tighten");
 if (pkg.scripts["lint:check"].includes("--tighten-baseline")) throw new Error("lint:check tightens");
 '
 
-# The rendered halves are both far below their size guards, so drift stands down on
-# them. Pad the frontend's src/ until it does not, in files under the 500-line gate --
-# biome runs first, and one long file would stop the lint before complexity ever ran.
 node -e '
 let body = "";
 for (let index = 0; index < 60; index++) {
@@ -2556,7 +1882,7 @@ fs.mkdirSync("frontend/src/pad", { recursive: true });
 for (let file = 0; file < 10; file++) fs.writeFileSync(`frontend/src/pad/pad${file}.ts`, body);
 '
 run "frontend baseline" pnpm -C frontend run complexity:baseline
-pnpm -C frontend run complexity | grep -q 'drift ok'   # the padded half really is gating
+pnpm -C frontend run complexity | grep -q 'drift ok'
 
 INFLATED="$(node -e '
 const fs = require("node:fs");
@@ -2568,9 +1894,6 @@ fs.writeFileSync(path, JSON.stringify({ ...baseline, density, sum }, null, 2));
 process.stdout.write(String(density));
 ')"
 
-# Assert on the gate's own message rather than on the exit status alone: each half's
-# lint runs five or six tools, so a bare nonzero would let tsc or basedpyright stand in
-# for a refusal that never happened.
 if out="$(pnpm -C frontend lint:check 2>&1)"; then
     fail "pnpm lint:check accepted a baseline standing above the tree"
 fi
@@ -2594,25 +1917,16 @@ if (!(density < Number(process.argv[1]))) {
 }
 ' "$INFLATED"
 
-# A missing baseline above the floor is a failure, not a notice. This half used to print
-# "no baseline yet" and return 0, so the drift check never turned on in any project where
-# nobody thought to record one -- a check that silently never starts. Asserted here because
-# the shipped baseline means the passing path is the only one anyone would otherwise see.
 mv backend/.complexity-baseline.json "$WORK/baseline.parked"
 if (cd backend && uv run --no-sync python devtools/complexity.py app \
         --baseline .complexity-baseline.json >/dev/null 2>&1); then
-    fail "backend complexity accepted a missing baseline above min-callables"
+    fail "backend complexity accepted a missing baseline above min-callables. A drift check that passes with no baseline never starts."
 fi
 mv "$WORK/baseline.parked" backend/.complexity-baseline.json
 
-# The backend half of the same drive. Its floor moves so this fixture's own tiny baseline
-# is the thing under test rather than the smoke project's real callable count.
 sed 's/^min-callables = 50$/min-callables = 1/' backend/pyproject.toml >"$WORK/pyproject.floored"
 cp "$WORK/pyproject.floored" backend/pyproject.toml
 need_grep '^min-callables = 1$' backend/pyproject.toml
-# Built from the shipped baseline rather than written out, so the stale number stands above
-# a tree this really measured. A sum invented here could sit below the tree's, which would
-# make this an arithmetic drift and send the gate down the other path entirely.
 python3 -c "
 import json
 path = 'backend/.complexity-baseline.json'
@@ -2620,8 +1934,6 @@ recorded = json.load(open(path))
 json.dump({**recorded, 'mean': 2.9, 'sum': recorded['sum'] * 2}, open(path, 'w'), indent=2)
 "
 
-# --no-sync throughout this block: pyproject.toml was just edited, and a re-resolve
-# against the registry is neither wanted here nor relevant to what is being asserted.
 if out="$(cd backend && uv run --no-sync python devtools/lint.py --check 2>&1)"; then
     fail "backend lint --check accepted a baseline recorded far above the tree"
 fi

@@ -1,8 +1,8 @@
 # Development
 
 [AGENTS.md](../AGENTS.md) holds the rules nothing checks. This is the root of the tree, the gate
-and the tiers, the comment ban, and how to work in one half. [frontend.md](frontend.md) and
-[backend.md](backend.md) hold the two halves.
+and the tiers, the comment ban, how to work in one half, and how a script stops what it
+started. [frontend.md](frontend.md) and [backend.md](backend.md) hold the two halves.
 
 ## The two halves
 
@@ -21,6 +21,17 @@ backend/              everything uv touches
 deploy/               schema.sql and roles.sql -- generated from app/store/
 ```
 
+- **The `Makefile` exports what `docker compose` reads.** Compose reads `DB_PORT`,
+  `APP_DB_PASSWORD` and the others from its environment, and a make variable is not in it. Do not
+  put `VAR=value` in front of the recipe line instead: a password that holds a quote or a space
+  breaks the command. The `DATABASE_URL` that `make db` prints does not percent-encode the
+  password.
+- **The `Makefile` sets `UV_EXCLUDE_NEWER` as well as `backend/pyproject.toml`.** `uvx` runs
+  outside the project and does not read the pyproject.
+- **`make install` fetches what a commit needs from the network.** It fetches gitleaks and the
+  pinned openapi-typescript last, after it arms the hooks. Without these fetches, the first
+  commit needs the network, and fails without one on a check that is not about the network.
+
 ## The gate
 
 {% if github_ci -%}
@@ -38,6 +49,19 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 - **`make pre-commit` runs the gate once per tree.** `devtools/gate.sh` queues behind any other
   gate of this project and records the tree a green run read, so a commit of that same tree
   passes at once. Edit one byte and the gate runs again.
+  [adr/template/0014](adr/template/0014-the-gate-runs-once-per-tree-and-one-at-a-time.md) says
+  why.
+- **`devtools/gate.sh` unsets git's local environment first.** git runs the hook with `GIT_DIR`
+  and `GIT_INDEX_FILE` set to this repository. A test that runs `git init` in a temporary
+  directory then reinitialises this repository instead. Keep the `unset`.
+- **`make hooks` writes a shim, and does not set `core.hooksPath`.** It writes one shim per file
+  in `.githooks/` into git's hooks directory, so the hook body stays under version control. Every
+  worktree shares `core.hooksPath`, and the key turns off the hooks that other tools installed.
+  `make hooks` moves a hook that was there first to `<name>.local`, then `<name>.local.2`, and
+  the shim runs each one before this project's hook. It finds every slot already taken before it
+  moves one, so a new hook never replaces a chained one. It refuses a `core.hooksPath` that
+  points anywhere else, and compares the two paths after it resolves them: macOS reaches `/var`
+  as `/private/var`.
 - **`make secrets` is in the gate.** gitleaks reads the tree the gate certifies. Remove a finding
   and rotate the secret. When it is no secret at all, put its fingerprint in `.gitleaksignore`.
 - **No test skips itself.** A test that needs a daemon or a browser goes in a tier declared in
@@ -65,11 +89,23 @@ Nothing runs them, so nothing tells you that you did not run them: `db-test` aft
 `app/telemetry.py`. `db-test` needs only Docker, so it is the tier to add to your CI first.
 {%- endif %}
 
+- **`make test-contract-db` runs the contract suite on Postgres, as `app_app`.** A superuser
+  bypasses row-level security, so a run on the superuser's connection passes against a database
+  with no policy in force. Keep the application role.
+- **`make db-test` uses `TEST_DATABASE_URL` when it is set**, and starts no container.
+- **Each tier's container takes an ephemeral port and a name that holds the shell's PID.** With a
+  fixed port or name, two checkouts that run a tier at once fail, or one deletes the other's
+  database.
+- **The `Makefile` runs its recipes in bash.** dash runs an `EXIT INT TERM` trap only after the
+  foreground command returns. On Ctrl-C it never returns, and the container leaks.
+
 ## The comment ban
 
-`make lint` fails on any comment token under `frontend/{src,tests,e2e,devtools}` and
-`backend/{app,tests,devtools}`. `frontend/devtools/comments.mjs` and
-`backend/devtools/comments.py` are the two gates.
+`make lint` fails on any comment token under `frontend/{src,tests,e2e,devtools}`, and on any
+comment in a Python file, shell script, Perl script, `Makefile` or `.githooks/` hook that git
+sees anywhere in the project. `frontend/devtools/comments.mjs` and `backend/devtools/comments.py`
+are the two gates. A script's heredoc body is data, and the gate does not read it. A script that
+ends inside a quote or a heredoc is refused, because the gate cannot tell where its comments are.
 
 - **Suppressions are refused too:** `biome-ignore`, `@ts-expect-error`, `@ts-ignore`, `# noqa`,
   `# type: ignore`. A suppression is a threshold decision taken silently, where the check fails.
@@ -88,12 +124,35 @@ Nothing runs them, so nothing tells you that you did not run them: `db-test` aft
 
 The commands in `AGENTS.md` cover the common cases, and the `Makefile` is the full list: the
 tiers, the migration targets and the per-half variants. `make observe` starts Grafana, Tempo and
-Prometheus and prints the `OTEL_*` variables to export. Each script under `devtools/` says what
-it does and why, at the top.
+Prometheus and prints the `OTEL_*` variables to export.
 
 `BACKEND_PORT`, `FRONTEND_PORT` and `PREVIEW_PORT` move every server, so a second checkout can run
-at the same time.
+at the same time. `make test-contract` takes two free ports unless you set them, so the gate does
+not fail while another checkout serves on 8000 or 5173.
 
 Each half also works with its own tools: `pnpm -C frontend test:watch`,
 `pnpm -C frontend add some-package`, `cd backend && uv run pytest -q tests/routes/`,
 `cd backend && uv add some-package`.
+
+## Stopping what a script started
+
+`devtools/dev.sh` and `devtools/contract-test.sh` start servers and must stop them. Each rule
+below fails only later, as a server that holds its port.
+
+- **Stop a process group, not a pid.** `uv run` and `pnpm` exec a launcher that starts the server
+  as a child. A kill of the launcher's pid leaves the server running. `own_group` makes the group
+  with `os.setsid()`, because dash turns `set -m` off when no terminal is attached. `setsid`
+  refuses with `EPERM` in a process that already leads its group. The assertion after the
+  `except` is what keeps that refusal from hiding an ungrouped process.
+- **Write `kill -TERM "-$pid"`, never `kill -TERM -- "-$pid"`.** dash's `kill` refuses `--` and
+  sends nothing. bash, which is `/bin/sh` on macOS, accepts it, so the leak shows only on Linux.
+  Never add a single-pid kill after the group kill: it hides both failures.
+- **Send `TERM`, wait a second, then send `KILL`.** uvicorn's `--reload` supervisor does not
+  always exit after its worker, and `uv run` waits for it.
+- **Give every health probe `--max-time`.** A server that listens and never replies holds an
+  unbounded `curl` past the deadline. An app that fails to import does this under `--reload`.
+- **`dev.sh` runs vite in the foreground, without `exec`.** `exec` discards the cleanup trap, and
+  the backend keeps its port after vite exits. `set -m` gives vite the terminal, so its keyboard
+  shortcuts work.
+- **`contract-test.sh` takes both ports in one process.** Two separate requests can return the
+  same port, and the gate then fails at random.
