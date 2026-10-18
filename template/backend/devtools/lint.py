@@ -6,6 +6,7 @@ from funlog import log_calls
 from rich import get_console, print as rprint, reconfigure
 
 SRC_PATHS = ["app", "tests", "devtools"]
+PROJECT_ROOT = ".."
 DOC_PATHS = ["../README.md", "../docs"]
 COMPLEXITY_PATHS = ["app"]
 COMPLEXITY_BASELINE = ".complexity-baseline.json"
@@ -31,7 +32,7 @@ def main() -> int:
         errcount += run(["ruff", "check", "--fix", *SRC_PATHS])
         errcount += run(["ruff", "format", *SRC_PATHS])
     errcount += run(["basedpyright", "--stats", *SRC_PATHS])
-    errcount += run([sys.executable, "devtools/comments.py", *SRC_PATHS])
+    errcount += run([sys.executable, "devtools/comments.py", "--tree", PROJECT_ROOT])
     errcount += run(
         [
             sys.executable,

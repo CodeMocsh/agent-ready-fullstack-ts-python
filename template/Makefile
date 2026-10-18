@@ -1,22 +1,7 @@
-# Root orchestration. Each half keeps its own native interface -- pnpm scripts in
-# frontend/, uv commands in backend/ -- and this file only fans out to them, so
-# there is one place to look from the top and no wrapper to keep in sync.
-
-# bash, not sh: the db-test recipe relies on `trap ... EXIT INT TERM` firing when the
-# suite is interrupted, and dash runs the handler only after the foreground command
-# returns -- which on Ctrl-C it never does, leaking the container.
 SHELL := /bin/bash
 
-# Repeated here because uvx and tool invocations run outside project discovery and
-# would otherwise miss the setting in backend/pyproject.toml.
 UV_EXCLUDE_NEWER ?= 7 days
 export UV_EXCLUDE_NEWER
-
-# CONTRACT_BASE_URL is deliberately not set here. devtools/contract-test.sh derives it
-# from FRONTEND_PORT, and make passes the ambient environment through to a recipe, so
-# `CONTRACT_BASE_URL=... make test-contract` already reaches the script. A default in
-# this file was never exported and so never reached it at all -- it only claimed a port
-# the script would not have used.
 
 .DEFAULT_GOAL := default
 
@@ -32,23 +17,12 @@ install:
 	pnpm -C frontend install
 	cd backend && uv sync --all-groups
 	@$(MAKE) --no-print-directory hooks
-# Fetches gitleaks, and the pinned openapi-typescript into pnpm's dlx store: what
-# `make pre-commit` needs and neither half's install brings. Doing it here makes
-# `make install` the only target that has to reach the network -- without it the first
-# commit on a fresh clone goes to the registry, and a commit with no network fails on a
-# check that has nothing to do with connectivity. Last, and after the hooks, so that
-# losing the network costs you these lines rather than an unarmed clone.
 	sh devtools/secrets.sh fetch
 	pnpm -C frontend openapi:types
 
 hooks:
 	@sh devtools/install-hooks.sh
 
-# The gate. `gate` is the list and the place a new check goes; `pre-commit` is how it is
-# run, by the hook and by hand alike: queued behind any other gate of this project, held
-# to a budget, and skipped for a tree that already passed -- devtools/gate.sh, and
-# docs/adr/template/0014 for why. A CI runs `gate` itself, so nothing there is skipped.
-# backend/tests/test_gate.py fails if the list, the runner and the hook stop agreeing.
 pre-commit:
 	@sh devtools/gate.sh
 
@@ -65,8 +39,6 @@ lint-check:
 	pnpm -C frontend lint:check
 	cd backend && uv run python devtools/lint.py --check
 
-# At this altitude "test" means the system, so it includes the run that needs both
-# halves. `test-fast` is the two halves on their own.
 test: test-fast test-contract
 
 test-fast:
@@ -76,10 +48,6 @@ test-fast:
 test-contract:
 	@sh devtools/contract-test.sh
 
-# The opt-in tier, and the only checks in this file that are not in the gate. Both
-# need a browser binary the gate has no business downloading, and the live one needs
-# `make dev` running in another terminal. Opt-in means opt-in, not deleted: if you
-# changed UI, this is the run that looks at it, and nothing else will.
 test-e2e:
 	pnpm -C frontend exec playwright install chromium
 	pnpm -C frontend test:e2e
@@ -88,24 +56,6 @@ test-e2e-live:
 	pnpm -C frontend exec playwright install chromium
 	pnpm -C frontend exec playwright test --config playwright.live.config.ts
 
-# The other opt-in member: everything that needs a real PostgreSQL. Also out of the gate,
-# and for the same reason -- `make pre-commit` runs on every commit and must not need a
-# daemon. Everything about the schema that a fake connection can answer is already in
-# `make test` (backend/tests/store/test_schema.py), including that deploy/schema.sql matches
-# app/store/ddl.py, so there is no separate schema-check target to forget to run.
-#
-# This is the whole of backend/tests/integration/, and that directory is the whole of what
-# needs a server. It is the only tier outside the default `pytest` run, which is why no test
-# in this project skips itself: a test that needs Postgres is a test in here, and a skipped
-# test exits 0 and reads exactly like a passing one. The target selects the folder rather
-# than a list of filenames, so a test added there runs without anyone updating this line.
-#
-# Brings its own database. Set TEST_DATABASE_URL to point at your own instead and this
-# target uses it rather than starting a container.
-#
-# The container takes an ephemeral host port and a name carrying this shell's PID, because
-# a fixed pair breaks both ways when two checkouts run this at once: a taken port fails the
-# run outright, and a shared name means one teardown destroys the other's database mid-suite.
 DB_TEST_IMAGE ?= postgres:17-alpine
 DB_TEST_SUITE = tests/integration
 
@@ -124,9 +74,6 @@ else
 		uv run --no-sync pytest $(DB_TEST_SUITE)
 endif
 
-# The whole path telemetry takes in a deployment: this app, the viewer's Collector, and the stores
-# behind it, asserted by reading back what they kept. Out of the gate, because it fetches the
-# viewer's image. Ephemeral ports and a PID-named container, for the reason db-test gives.
 OBSERVE_IMAGE = $(shell sed -n 's/^ *image: \(grafana\/otel-lgtm:.*\)$$/\1/p' $(COMPOSE))
 OBSERVE_TEST_SUITE = tests/observe
 
@@ -142,25 +89,6 @@ observe-test:
 	cd backend && OBSERVE_GRAFANA_URL=$$grafana OBSERVE_OTLP_URL=$$otlp \
 		uv run --no-sync pytest $(OBSERVE_TEST_SUITE)
 
-# The contract suite against a backend that is actually on Postgres. `make test-contract`
-# runs the same file against the in-memory substrate, which is right for the gate and is
-# *not* the deployment: it proves the two halves agree, and proves nothing about the SQL
-# underneath. This is the one command that exercises the whole chain a user meets --
-# browser client, dev proxy, FastAPI, pool, real SQL, and the row-level security policy
-# deciding what comes back.
-#
-# **It serves as app_app, not as the superuser**, and that is the whole reason the target
-# is worth having. A superuser bypasses row-level security whatever FORCE says, so a run
-# wired to the admin connection would pass against a database with no policy in force and
-# tell you nothing. Roles first, schema second, and the application gets the least-privilege
-# login a deployment gives it -- which is also what makes this exercise `check` rather than
-# an apply it has no rights to.
-#
-# psql comes from inside the container, so this needs no client on the host.
-#
-# Opt-in, like every other member of this tier, and for the same reason: `make pre-commit`
-# runs on every commit and must not need a daemon. Its own container, ephemeral port,
-# PID-named, torn down on the way out however the run ends.
 test-contract-db:
 	@name=contract-db-$$$$; \
 	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
@@ -177,15 +105,9 @@ test-contract-db:
 	DATABASE_URL=postgres://app_app:test@127.0.0.1:$$port/postgres \
 		sh devtools/contract-test.sh
 
-# The release step, and the only thing that reads DATABASE_OWNER_URL. The application
-# refuses to start if it can see that variable, so this is the one path that can apply
-# DDL. Wire it into whatever your platform calls a release command -- see the migrate
-# service in deploy/compose.yaml for the shape, and docs/deployment.md for the mapping.
 migrate:
 	cd backend && uv run --no-sync python -m app.migrate
 
-# A persistent database to develop against, with the roles applied at init and the schema
-# applied the way a release would apply it. Distinct from the throwaway db-test starts.
 COMPOSE = deploy/compose.yaml
 DB_PORT ?= 5433
 DB_SUPERUSER_PASSWORD ?= postgres
@@ -193,11 +115,6 @@ APP_DB_PASSWORD ?= app
 OBSERVE_PORT ?= 3000
 OTLP_PORT ?= 4318
 
-# compose reads these from its *environment*, and a make variable is not one: a
-# `make db DB_PORT=5544` that reached only the migration would start the database on 5433 and
-# then migrate whatever was already listening on 5544. `export` rather than a VAR=value prefix
-# on the recipe line, because a prefix goes through the shell and a password containing a
-# quote or a space would end the command rather than be passed to it.
 export DB_PORT
 export OBSERVE_PORT
 export OTLP_PORT
@@ -209,15 +126,10 @@ db:
 	@cd backend && DATABASE_OWNER_URL=postgres://postgres:$(DB_SUPERUSER_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres \
 		uv run --no-sync python -m app.migrate
 	@echo ""
-# The printed URL assumes APP_DB_PASSWORD needs no percent-encoding, which the default does
-# not. It is a convenience for a local development database; a real deployment sets
-# DATABASE_URL itself and never comes through here.
 	@echo "export DATABASE_URL=postgres://app_app:$(APP_DB_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres"
 	@echo "# then: make dev-backend. That role holds DML and no CREATE, so the app verifies"
 	@echo "# the schema and cannot apply it -- run 'make migrate' when you add an entry."
 
-# Traces and metrics, made visible. Starts the viewer and says what to export; the app sends
-# nothing until OTEL_EXPORTER_OTLP_ENDPOINT is set, and refuses to start with only half of it.
 observe:
 	docker compose -f $(COMPOSE) --profile observe up -d --wait observe
 	@echo ""
@@ -225,15 +137,10 @@ observe:
 	@echo "# then: make dev. Grafana is on http://127.0.0.1:$(OBSERVE_PORT) -- Explore, then Tempo"
 	@echo "# for traces and Prometheus for http_server_request_duration_seconds."
 
-# Isolation, made visible. Everything else about it is proved by tests nobody watches.
 db-demo:
 	@cd backend && DATABASE_URL=$${DATABASE_URL:-postgres://app_app:$(APP_DB_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres} \
 		uv run --no-sync python devtools/isolation_demo.py
 
-# deploy/schema.sql, deploy/roles.sql and backend/.schema-baseline.json are generated from
-# app/store/, the way openapi.json is generated from the models. backend/tests/store/test_schema.py
-# fails when a committed file drifts, so this is how you make that test pass after a change.
-# It never re-records an entry body that changed after it shipped -- that one you edit by hand.
 schema:
 	cd backend && uv run python devtools/schema.py ../deploy/schema.sql
 
@@ -262,9 +169,6 @@ openapi-check: openapi
 build:
 	pnpm -C frontend build
 
-# app.openapi() is stable for pinned versions but not across FastAPI or pydantic
-# minor bumps, and openapi-typescript changes its own output, so an upgrade that
-# skipped this would leave the committed artifacts stale.
 upgrade:
 	pnpm -C frontend update --latest
 	cd backend && uv sync --upgrade --all-groups

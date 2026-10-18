@@ -1,12 +1,14 @@
 # Constraints
 
 Things a reasonable edit undoes, that fail somewhere far from the edit. Each is here because it
-has nowhere better to be: its natural home is a `.json` file, which cannot carry a comment, or
-it is a rejected option, or it is a rule about editing the template rather than running it.
+has nowhere better to be: its natural home is a `.json` file or a script, which cannot carry a
+comment, or it is a rejected option, or it is a rule about editing the template rather than
+running it.
 
-Anything with a home keeps it. `render.sh` explains the unrendered-token assertion,
-`pnpm-workspace.yaml` explains every supply-chain setting it carries, `check_template.sh`
-explains each assertion where it makes it, and `backend/tests/tier.py` explains why the gate
+Anything with a home keeps it. `render.sh` explains the unrendered-token assertion in its
+failure message. `pnpm-workspace.yaml` explains every supply-chain setting it carries.
+`check_template.sh` puts the reason for an assertion in the message the assertion fails with,
+where the assertion does not make the reason plain. `backend/tests/tier.py` explains why the gate
 fetches no browser.
 
 ## Where Jinja may be used
@@ -79,6 +81,89 @@ takes both spellings. A laptop run would stay green while every CI run leaked, s
 greps both scripts for `own_group` and against both broken spellings. **Do not add a single-pid
 fallback behind either kill** — that fallback is what hid both of these for as long as they
 existed, and the grep refuses it.
+
+The gate drives the dev loop under a pty and writes Ctrl-C (byte `0x03`) to it. `dev.sh` keeps
+vite in the foreground, so a signal to the script alone waits for vite to return, and a plain
+`kill` deadlocks. The reader drains the pty all the time: a full pty buffer stops `dev.sh`.
+The gate starts `app.serve` from the venv's interpreter rather than through `uv run`, so the pid
+it holds is the server's.
+
+## `render.sh` copies the tree through a file, not a pipe
+
+`render.sh` writes the working tree to a tar file, then extracts it. Do not change that to
+`tar -c | tar -x`. In a pipeline, `set -e` sees only the status of the last command. A failed
+archive step then extracts a partial tree, and the gate passes on a template that is not the one
+on disk. `set -o pipefail` is not POSIX: dash, which is `/bin/sh` on CI, refuses that line.
+
+## A script that git runs as a hook inherits `GIT_DIR`
+
+Git exports `GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE` and related variables to each hook it
+runs. `render.sh` and `check_template.sh` run git in temp directories, so they unset these first.
+Remove the `unset` and every git command in the render points at the calling repository. This
+fails only when the script runs from the pre-commit hook, never when you run `make check` by hand.
+
+## The shared-prose check needs `sed -E` and an end heading from each file
+
+`check_template.sh` compares the principle sections of the two `AGENTS.md` files over a `sed`
+range. BSD sed has no `\|` alternation in a basic regex, so the range needs `sed -E`. The end
+pattern names the first heading that each file owns. An end pattern that only one file carries
+runs the range to the end of the other file, and every local section then reports as drift.
+
+## The gate picks both ports first, in one process
+
+`check_template.sh` sets `BACKEND_PORT` and `FRONTEND_PORT` before its first step. Set later,
+the steps above them run on `:8000` and `:5173`, which a `make dev` in another checkout often
+holds. One process allocates both and keeps each socket bound until it has both, so the two
+cannot come back as the same number. The probe tries both loopback families: `localhost` is two
+addresses, and a vite that holds `[::1]` only passes an IPv4 probe until `--strictPort` refuses
+in the middle of the run.
+
+The live contract suite runs under `env -u BACKEND_PORT -u FRONTEND_PORT`. That makes
+`contract-test.sh` run its own allocator, which is what a user gets. Without the `env -u`, the
+suite inherits the gate's pair and the allocator runs nowhere.
+
+The one-origin step starts `app.serve` under `env -u DATABASE_URL`. Without it, the step runs on
+the database the shell exports, and the suite's cleanup removes every task in that database.
+
+## The gate's exit handler reads its status first and hands it back last
+
+`set -e` is live inside a trap. A `kill` of a process that has gone returns non-zero and skips
+the `rm -rf` after it, so every command in `cleanup` that can fail carries `|| true`. The handler
+reads `$?` on entry and ends in `exit "$status"`. Without that, its last command decides the exit
+status of the whole script: a run that printed `==> OK` once failed on an `rm`. `INT` and `TERM`
+pass `130` and `143`, because `$?` on the way into an interrupt is the last command that
+succeeded, which reports Ctrl-C as a pass.
+
+The handler waits on `serve_pid` before it scans for leaks. A scan before the reap names the
+server that the handler itself is stopping. `processes_under_work` captures `ps` before it runs
+`grep`. In a pipe, `ps` lists the `grep` beside it, whose arguments hold `$WORK`, so every call
+reports a leak.
+
+## Two steps in the gate look wrong on purpose
+
+`pnpm audit` exits non-zero on a finding, so the gate ignores its status (`|| true`) and reads
+the JSON report on stdout. The Python that follows fails on each high or critical advisory. When
+no report arrives, the step says so and passes: an unreachable registry is not a vulnerability,
+and a red run that means "no network" teaches people to ignore red.
+
+The conformance fixtures run outside the rendered frontend, where no `package.json` is in reach.
+That is deliberate. `gate.mjs` `section()` returns `{}` when there is no `package.json`, so
+`conformance.mjs` uses its own defaults and the project's `allow` list stays out of a run that
+proves each rule fires. One default names a theme file that exists only in a project, so the
+fixtures pass `--theme-file` an empty file.
+
+The comments inside those fixtures are data, not a breach of *Zero comments*. The scanner must
+see through a comment in both directions: `commented.tsx` puts an unbalanced `)` before a
+`fetch`, and `good.tsx` puts the word `fetch(` in an effect that only subscribes. Strip them,
+and the gate stays green while it tests neither case.
+
+## The lint fixing variants run last in the gate
+
+The final section of `check_template.sh` drives `pnpm lint` and `backend/devtools/lint.py` without
+`--check`. Those run `biome check --write`, `ruff --fix`, `ruff format` and
+`codespell --write-changes` over the rendered project. Earlier in the script they would repair
+what an earlier step exists to catch, move backend source under `make openapi-check`, and pass a
+template that ships unformatted source. Nothing may follow that section.
 
 ## `openapi-typescript` runs through `pnpm dlx` at an exact pin
 

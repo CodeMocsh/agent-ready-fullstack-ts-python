@@ -75,6 +75,12 @@ already running keeps answering, but its `GET /ready` fails, so a platform that 
 out of rotation. If that window matters, make the migration and the rollout one step — scale
 down, migrate, scale up — and plan a rollback as a schema rollback.
 
+`deploy/roles.sql` is committed, so it holds no password. `deploy/credentials.sh` gives
+`app_app` its password from `APP_DB_PASSWORD`, as the superuser. It passes the password as a
+psql variable and expands it with `:'app_password'`, which quotes it as a SQL literal. **Never
+put the password into the SQL text**: a password that holds a quote then ends the statement and
+starts another. psql does not expand a variable in a `-c` string, so the SQL goes in on stdin.
+
 ## Timeouts
 
 Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets each one:

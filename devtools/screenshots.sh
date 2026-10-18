@@ -1,15 +1,4 @@
 #!/bin/sh
-# Regenerate the README's screenshot from a project this script renders, so the picture is
-# of the current template rather than of whatever it looked like the day somebody dragged a
-# PNG in. Mock mode only: live mode is the same screen with one line of text different, and
-# the half that proves the two halves talk is the contract suite, not a picture.
-#
-# Not in the gate, deliberately. check_template.sh downloads no browser and runs no
-# playwright -- backend/tests/tiers.py argues why -- and a screenshot is a picture
-# rather than an assertion, so nothing here can fail in a way a check would catch.
-# Run it when the screen changes.
-#
-# Usage: devtools/screenshots.sh
 set -eu
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,9 +11,6 @@ for tool in git python3 node pnpm; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool is required and not on PATH."
 done
 
-# The same allocator check_template.sh uses, for the same reason: a second checkout is a
-# normal way to work, and a shot taken against somebody else's preview server is a picture
-# of the wrong program that looks exactly right.
 free_port() {
     python3 -c 'import socket
 s = socket.socket()

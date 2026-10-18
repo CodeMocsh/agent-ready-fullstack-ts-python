@@ -106,11 +106,8 @@ own."""
 
 
 def without_comments(text: str) -> str:
-    """The text a check may believe, with anything a reader would recognise as prose removed.
-
-    A file that only *mentions* what a check looks for satisfies a substring match without
-    doing it: the Makefile describes `tests/integration` in a comment above the recipe that
-    selects it, so the check for the recipe passed with the recipe pointed anywhere."""
+    """The text a check may believe, with every comment line removed, so a file that only
+    mentions what a check looks for in a comment does not satisfy it."""
     return "\n".join(
         line for line in text.splitlines() if not line.strip().startswith(COMMENT_OPENERS)
     )
