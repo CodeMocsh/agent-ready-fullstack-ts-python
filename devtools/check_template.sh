@@ -571,7 +571,7 @@ for target in install hooks pre-commit gate secrets lint lint-check test test-fa
     grep -q "^$target:" Makefile || { echo "Makefile is missing the $target target" >&2; exit 1; }
 done
 need_grep '^gate: secrets lint-check openapi-check test$' Makefile
-need_no_grep '^gate:.*test-e2e' Makefile "A gate that downloads a browser is a gate people learn to commit around."
+need_no_grep '^gate:.*test-e2e' Makefile "A gate that needs a browser is a gate people learn to commit around."
 need_no_grep '^gate:.*db-test' Makefile
 need_no_grep '^gate:.*observe-test' Makefile
 need_no_grep '^gate:.*test-contract-db' Makefile
@@ -679,6 +679,7 @@ def emptied_tier(name, root, holds, declares, describes):
 
 for module, name in ((test_gate, "test_every_tier_is_selected_by_a_file_that_still_names_it"),
                      (test_gate, "test_every_tier_still_holds_tests"),
+                     (test_gate, "test_only_install_fetches_the_browser"),
                      (test_workflow, "test_a_workflow_runs_the_gate_rather_than_a_copy_of_it")):
     if refused(name, module):
         failures.append(f"{name} fails on the tree as rendered, before any mutation")
@@ -690,6 +691,23 @@ mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
 mutation("test_every_tier_is_selected_by_a_file_that_still_names_it",
          "Makefile", "DB_TEST_SUITE = tests/integration", "DB_TEST_SUITE = tests/db",
          "a Makefile that selects a folder the tier does not live in")
+
+mutation("test_only_install_fetches_the_browser",
+         "Makefile", "test-e2e:\n\tpnpm -C frontend test:e2e",
+         "test-e2e:\n\tpnpm -C frontend exec playwright install chromium\n\tpnpm -C frontend test:e2e",
+         "a browser tier that fetches the browser itself")
+
+mutation("test_only_install_fetches_the_browser",
+         "Makefile", "\tpnpm -C frontend exec playwright install chromium\n", "",
+         "an install that no longer fetches the browser")
+
+mutation("test_only_install_fetches_the_browser",
+         "Makefile", "test-e2e:\n", "test-e2e: install\n",
+         "a browser tier that has install as a prerequisite")
+
+mutation("test_only_install_fetches_the_browser",
+         "Makefile", "test-e2e:\n", "test-e2e:\n\t@$(MAKE) --no-print-directory install\n",
+         "a browser tier that runs make install in its recipe")
 
 emptied_tier("test_every_tier_still_holds_tests", "backend/tests/integration", "test_*.py",
              "def test_", "a Python tier whose files declare no test pytest would collect")

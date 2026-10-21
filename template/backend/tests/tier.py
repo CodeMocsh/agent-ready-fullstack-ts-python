@@ -1,7 +1,7 @@
 """What a tier is: a set of tests the gate does not run, and what runs it instead.
 
 A tier is a set of tests that needs something a laptop may not have -- a daemon, a browser, a
-login, a model. It is not in `make pre-commit`, because a gate that fetches a browser is a
+login, a model. It is not in `make pre-commit`, because a gate that needs a browser is a
 gate people learn to commit around, and it is never a reason to write a skip: a skipped test
 exits 0 and reads exactly like a test that passed, while a tier that was not selected is
 reported as not run. `docs/adr/template/0013` holds that reasoning and the options it rejected.

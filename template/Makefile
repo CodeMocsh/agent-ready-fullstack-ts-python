@@ -19,6 +19,7 @@ install:
 	@$(MAKE) --no-print-directory hooks
 	sh devtools/secrets.sh fetch
 	pnpm -C frontend openapi:types
+	pnpm -C frontend exec playwright install chromium
 
 hooks:
 	@sh devtools/install-hooks.sh
@@ -49,11 +50,9 @@ test-contract:
 	@sh devtools/contract-test.sh
 
 test-e2e:
-	pnpm -C frontend exec playwright install chromium
 	pnpm -C frontend test:e2e
 
 test-e2e-live:
-	pnpm -C frontend exec playwright install chromium
 	pnpm -C frontend exec playwright test --config playwright.live.config.ts
 
 DB_TEST_IMAGE ?= postgres:17-alpine

@@ -120,10 +120,39 @@ def test_the_opt_in_tier_stays_out_of_the_gate():
     for target in OPT_IN_TIER:
         assert target not in reached, (
             f"`{target}` belongs to the opt-in tier -- it needs a browser binary or a database "
-            f"daemon -- and a gate that fetches either is a gate people commit around"
+            f"daemon -- and a gate that needs either is a gate people commit around"
         )
     for target in OPT_IN_TIER:
         assert recipe_of(target), f"`{target}` is documented as the opt-in tier and does nothing"
+
+
+def reached_from(target: str) -> set[str]:
+    reached = {target}
+    for prerequisite in prerequisites_of(target):
+        reached |= reached_from(prerequisite)
+    return reached
+
+
+def test_only_install_fetches_the_browser():
+    makefile = MAKEFILE.read_text(encoding="utf-8")
+    targets = re.findall(r"^([\w-]+):(?!=)", makefile, re.MULTILINE)
+    fetching = [t for t in targets if any("playwright install" in line for line in recipe_of(t))]
+    assert "install" in fetching, "`make install` no longer fetches the browser"
+    assert fetching == ["install"], (
+        f"{fetching} run `playwright install`. Only `install` may. A target that fetches the "
+        f"browser needs the network every time it runs."
+    )
+    for target in OPT_IN_TIER:
+        assert "install" not in reached_from(target), (
+            f"`{target}` reaches `install`, so it fetches the browser and needs the network"
+        )
+        calls_install = [
+            line for line in recipe_of(target) if "$(MAKE)" in line and "install" in line.split()
+        ]
+        assert calls_install == [], (
+            f"`{target}` runs `make install` in its recipe, so it fetches the browser and needs "
+            f"the network"
+        )
 
 
 def test_every_tier_still_holds_tests():

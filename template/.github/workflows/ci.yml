@@ -18,7 +18,7 @@ name: CI
 # it is the one place tenant isolation is checked against a real Postgres. The job adds a
 # status of its own rather than time to the gate, and a laptop with no Docker never runs the
 # tier -- so without this job nothing does. The browser tiers stay out: `make test-e2e`
-# fetches a browser, and the live one needs `make dev` running beside it. So does
+# needs a browser, and the live one needs `make dev` running beside it. So does
 # `make observe-test`: it checks the viewer `make observe` starts on a laptop, which no
 # deployment runs.
 
