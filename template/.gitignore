@@ -31,7 +31,7 @@ pnpm-debug.log*
 .npm
 .node_repl_history
 
-# Environments. .env.development, .env.mock and .env.live hold no secrets -- they
+# Env files. .env.development, .env.mock and .env.live hold no secrets -- they
 # only choose whether the mock handlers answer -- and the app does not run without
 # them, so they are committed.
 .env

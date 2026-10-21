@@ -54,8 +54,8 @@ backend/
   it**, and a metric attribute only if `METRIC_ATTRIBUTES` does. Never a path, a query string, a
   header, an address, query text, a tenant or a user. `tests/telemetry/` holds a canary to that.
 - **`app/wiring.py` reads the environment and builds from it; `app/deployment.py` names the
-  variables and refuses, in production, what `app/environment.py` says only development may
-  carry; `app/lifespan.py` reads nothing.** A `build_` function that reads no variable belongs
+  variables and refuses, in production, what `app/environment.py` says only the development
+  loop may carry; `app/lifespan.py` reads nothing.** A `build_` function that reads no variable belongs
   in `lifespan.py`. Everything below them takes its DSN, schema and migrate mode as arguments.
 - **A step that holds the event loop is reported.** `make dev` runs asyncio's debug mode, which
   logs a WARNING on the `asyncio` logger for each step longer than 0.1 s. The line names the
