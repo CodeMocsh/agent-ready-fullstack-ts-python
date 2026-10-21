@@ -1,7 +1,8 @@
 """What this project's production refuses to carry, and that the development loop may carry it.
 
-The project owns this file, as it owns `app/environment.py`. An unset `APP_ENV` is production, so every test here says which environment it means rather
-than inheriting the `development` that `tests/conftest.py` gives the rest of the suite.
+The project owns this file, as it owns `app/environment.py`. An unset `APP_ENV` is production,
+so every test here says whether it means the development loop or production rather than
+inheriting the `development` that `tests/conftest.py` gives the rest of the suite.
 """
 
 import pytest

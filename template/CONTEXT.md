@@ -1,8 +1,8 @@
 # Context
 
 The glossary: what a word means here, and which words to avoid because they mean something
-else. The tenancy terms come from the template and the rest is yours — add a term the moment
-two people use two words for one thing, which is earlier than it feels.
+else. The template writes the terms below. Add yours the moment two people use two words for
+one thing, which is earlier than it feels.
 
 ## Tenancy
 
@@ -69,7 +69,7 @@ that is not the application. `make migrate` is it.
 _Avoid_: auto-migrate, startup migration, boot migration — the application does none of these,
 by design.
 
-## Environments
+## Development and production
 
 **Development loop**:
 A process started with `APP_ENV=development`: `make dev`, the contract suite, the tests. The

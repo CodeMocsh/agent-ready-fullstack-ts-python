@@ -1,5 +1,5 @@
-"""Which environment this process is, the names of the variables the template's code reads, and
-how production refuses what only development may carry.
+"""Whether this process is the development loop or production, the names of the variables the
+template's code reads, and how production refuses what only the development loop may carry.
 
 The template owns this module and updates it. What production refuses is the project's, in
 `app/environment.py`, which the template writes once. `docs/adr/template/0010` and
@@ -108,5 +108,5 @@ def refuse_in_production(found: list[str]) -> None:
         return
     raise DevelopmentSettingInProduction(
         f"{ENVIRONMENT_ENV} is not {DEVELOPMENT!r}, so this is production, and it carries "
-        "what only development may:\n- " + "\n- ".join(found)
+        "what only the development loop may carry:\n- " + "\n- ".join(found)
     )

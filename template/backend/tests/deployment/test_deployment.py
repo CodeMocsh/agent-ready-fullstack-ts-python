@@ -1,4 +1,6 @@
-"""Which environment a process is, and that production refuses every finding at once."""
+"""Whether a process is the development loop or production, and that production refuses every
+finding at once.
+"""
 
 import pytest
 
@@ -32,7 +34,7 @@ def test_production_named_is_production(unnamed: pytest.MonkeyPatch, named: str)
 
 
 @pytest.mark.parametrize("named", ["prod", "dev", "Development", "staging"])
-def test_an_environment_that_is_neither_is_refused(unnamed: pytest.MonkeyPatch, named: str) -> None:
+def test_an_app_env_that_is_neither_is_refused(unnamed: pytest.MonkeyPatch, named: str) -> None:
     unnamed.setenv(ENVIRONMENT_ENV, named)
 
     with pytest.raises(UnknownEnvironment, match=repr(named)):
