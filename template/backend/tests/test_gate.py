@@ -53,7 +53,7 @@ def prerequisites_of(target: str) -> list[str]:
 CONDITIONALS = ("ifdef", "ifndef", "ifeq", "ifneq", "else", "endif")
 """Make directives that may sit *inside* a recipe, so reaching one is not the end of it.
 `db-test` has an `ifdef` in the middle: with a TEST_DATABASE_URL it uses your database and
-with none it starts a container."""
+with none it starts a server."""
 
 
 def recipe_of(target: str) -> list[str]:
@@ -310,7 +310,11 @@ def test_the_python_tier_is_selected_whole_and_not_by_a_list():
     Postgres test in a new file ran in neither the tier nor the gate."""
     for tier in python_tiers():
         assert (BACKEND_TESTS / tier.folder).is_dir(), f"`{tier.runs}` selects a missing folder"
-        selects = [expanded(line) for line in recipe_of(tier.target) if "pytest" in line]
+        selects = [
+            expanded(line)
+            for line in recipe_of(tier.target)
+            if "pytest" in line or "devtools/db-test.sh" in line
+        ]
         assert selects, f"`{tier.runs}` runs no pytest"
         for line in selects:
             assert line.endswith(f"tests/{tier.folder}"), (

@@ -3,7 +3,7 @@
 `make db-test` runs this folder. `norecursedirs` keeps it out of the default run, so
 `make test` needs no daemon, and nothing below has to decide for itself whether to run.
 
-`TEST_DATABASE_URL` says where the server is. `make db-test` starts a throwaway container and
+`TEST_DATABASE_URL` says where the server is. `make db-test` starts a throwaway server and
 sets it; set it yourself to use your own server instead. Unset, the fixtures here raise: by
 the time one runs, the run has already asked for the database.
 
@@ -36,7 +36,7 @@ from app.store.roles import app_role, emit_roles_sql, owner_role
 TEST_DATABASE_URL = "TEST_DATABASE_URL"
 
 TEST_PASSWORD = "isolation-suite"
-"""For a throwaway role on a throwaway container. Nothing outside a test ever sees it."""
+"""For a throwaway role on a throwaway server. Nothing outside a test ever sees it."""
 
 
 def postgres_dsn() -> str:
@@ -84,10 +84,10 @@ async def apply_schema(dsn: str, schema: str) -> str:
 
 
 def as_role(dsn: str, role: str, password: str) -> str:
-    """The same server, as a different role."""
+    """The same server, as a different role. The host stays as written: an empty one keeps a
+    Unix socket named by `?host=` in the query."""
     parts = urlsplit(dsn)
-    port = f":{parts.port}" if parts.port else ""
-    netloc = f"{role}:{password}@{parts.hostname or 'localhost'}{port}"
+    netloc = f"{role}:{password}@{parts.netloc.rpartition('@')[2]}"
     return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 

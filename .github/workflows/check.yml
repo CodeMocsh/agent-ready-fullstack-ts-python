@@ -82,8 +82,9 @@ jobs:
       # A pull request runs the default variant. Anything landing on main, and the weekly
       # run, take every license variant -- the only place they all run.
       #
-      # The runner has a Docker daemon, so the Postgres tier runs here. On a laptop without
-      # one the gate prints that it skipped; this is where that tier is not optional.
+      # The runner has a Docker daemon and the Postgres server binaries, so the Postgres tier
+      # runs here both ways. On a laptop without one of them the gate prints that it skipped
+      # that way; this is where neither is optional.
       - name: Run the gate
         env:
           EVENT: ${{ github.event_name }}
