@@ -2,8 +2,9 @@
 
 One statement per entry, so the schema is assertable without a Postgres to apply it to and
 `make schema` is a `join`. Keys are four-digit and banded by table — `0010_tasks` and its
-indexes, repairs at `0200_` — so a new entry sorts where it belongs. `apply` runs every entry
-in key order on every release step, so the key decides *when* an entry runs and never *whether*.
+indexes, policies from `POLICY_BAND`, each `FORCE` from `FORCE_BAND`, repairs from
+`REPAIR_BAND` — so a new entry sorts where it belongs. `apply` runs every entry in key order on
+every release step, so the key decides *when* an entry runs and never *whether*.
 
 Each rule below exists because breaking it fails somewhere far from the edit:
 
@@ -14,7 +15,7 @@ Each rule below exists because breaking it fails somewhere far from the edit:
   table exists, so a column added to a `CREATE` after that table was ever applied reaches no
   database that already had it. A column therefore lands **twice**: in its table's `CREATE`,
   which stays the whole truth about that table, and as an `ALTER TABLE … ADD COLUMN IF NOT
-  EXISTS` repair entry in the `0200_` band, never beside its table. Both statements are
+  EXISTS` repair entry keyed from `REPAIR_BAND`, never beside its table. Both statements are
   idempotent, so each is a no-op for the case the other covers.
   `test_every_repair_is_in_step_with_its_create` holds the pair together.
   `test_no_shipped_entry_body_has_changed` refuses the edited `CREATE` until its hash is
@@ -38,7 +39,13 @@ table, on which the default privileges grant both. `writes_withheld_sql` in `app
 now withholds the same and more; this entry stays because a shipped key is never removed.
 `docs/adr/template/0017`."""
 
-REPAIR_BAND = "0200_"
+POLICY_BAND = 100
+"""The key of the policy on the table at index `i` of `TENANT_TABLES` is `POLICY_BAND + i`."""
+
+FORCE_BAND = 120
+"""The key of the `FORCE` on the table at index `i` of `TENANT_TABLES` is `FORCE_BAND + i`."""
+
+REPAIR_BAND = 200
 """Where an `ALTER TABLE … ADD COLUMN` goes. Above the table it repairs, so the table exists
 by the time it runs, and grouped so a reader sees every repair in one place."""
 
@@ -197,10 +204,13 @@ def _force_sql(table: str) -> str:
     return f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY"
 
 
-SCHEMA.extend((f"{100 + i:04d}_{t}_policy", _policy_sql(t)) for i, t in enumerate(TENANT_TABLES))
-SCHEMA.extend((f"{120 + i:04d}_{t}_force", _force_sql(t)) for i, t in enumerate(TENANT_TABLES))
-"""Every policy is created before any table is forced. The other order would enforce a table
-during the window before its own policy exists, and every statement in it would fail."""
+SCHEMA.extend(
+    (f"{POLICY_BAND + i:04d}_{t}_policy", _policy_sql(t)) for i, t in enumerate(TENANT_TABLES)
+)
+SCHEMA.extend(
+    (f"{FORCE_BAND + i:04d}_{t}_force", _force_sql(t)) for i, t in enumerate(TENANT_TABLES)
+)
+"""Each table is created, then given its policy, then forced, in key order."""
 
 SCHEMA.extend(
     [

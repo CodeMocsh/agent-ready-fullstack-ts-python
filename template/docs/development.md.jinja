@@ -35,7 +35,9 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   `make test-e2e` runs in a sandbox with no network. The cost is a browser download on the first
   `make install` and after each change to the Playwright version, even for a developer who never
   runs a browser tier. Run `make install` again after `make upgrade`, or the browser tiers find
-  no browser.
+  no browser. `E2E_BROWSERS` in the `Makefile` names the browsers it fetches. A project that runs
+  the browser tiers on more than Chromium widens it there, and names each in the `projects` of
+  `frontend/playwright.config.ts`.
 
 ## The gate
 

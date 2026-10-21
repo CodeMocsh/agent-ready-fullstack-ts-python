@@ -32,7 +32,7 @@ from tests.integration.conftest import (
 )
 
 NOTE_REPAIR = (
-    f"{ddl.REPAIR_BAND}tasks_note",
+    f"{ddl.REPAIR_BAND:04d}_tasks_note",
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS note text",
 )
 """A repair entry injected by one test. The band has no real occupant yet, and the failure it

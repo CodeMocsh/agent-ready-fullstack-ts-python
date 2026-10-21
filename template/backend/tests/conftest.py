@@ -3,11 +3,12 @@
 **The development loop is set before anything imports the app**, so a module that reads
 `APP_ENV` at import reads `development`.
 
-**A step that holds an event loop longer than `HELD_SECONDS` in `tests/event_loop.py` is an
-error at teardown of its test.** asyncio runs in debug mode on every event loop here: the one
-`TestClient` serves the app on, and the one pytest-asyncio runs a test on. Any other record
-asyncio logs from WARNING up is an error too. A record logged between two tests, by a fixture
-wider than one test, is an error at teardown of the next test, or of the last one.
+**A step that uses more than `HELD_SECONDS` of CPU on an event loop, in `tests/event_loop.py`,
+is an error at teardown of its test.** asyncio runs in debug mode on every event loop here: the
+one `TestClient` serves the app on, and the one pytest-asyncio runs a test on. Any other record
+asyncio logs from WARNING up is an error too, except its line that a step took long in wall
+time. A record logged between two tests, by a fixture wider than one test, is an error at
+teardown of the next test, or of the last one.
 
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
@@ -37,8 +38,10 @@ os.environ["PYTHONASYNCIODEBUG"] = "1"
 
 from app.migrate import OWNER_URL_ENV
 from app.store.conn import SCHEMA_ENV
-from tests.event_loop import Reported, reported
+from tests.event_loop import Reported, measure_every_step, reported
 from tests.tiers import python_tiers
+
+measure_every_step()
 
 pytest_plugins = ["pytester"]
 

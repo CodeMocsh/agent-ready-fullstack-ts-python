@@ -60,10 +60,17 @@ backend/
 - **A step that holds the event loop is reported.** `make dev` runs asyncio's debug mode, which
   logs a WARNING on the `asyncio` logger for each step longer than 0.1 s. The line names the
   task, not the route; the request line beside it names the route. One such line at each start
-  is uvicorn importing the app. In the tests, a step longer than `HELD_SECONDS` in
-  `tests/event_loop.py` is an error at teardown of the test that held it. A fixture wider than
-  one test puts the error on the next test. A test that holds the event loop on purpose says so
-  with `asyncio_reports.held_on_purpose()`.
+  is uvicorn importing the app. In the tests, a step that uses more than `HELD_SECONDS` of CPU,
+  in `tests/event_loop.py`, is an error at teardown of the test that held it. A fixture wider
+  than one test puts the error on the next test. A test that holds the event loop on purpose
+  says so with `asyncio_reports.held_on_purpose()`.
+- **A call that waits without `await` uses no CPU, so the tests do not report it.** ruff's
+  `ASYNC2` rules refuse a sleep, a file, a process or an HTTP request called directly in an
+  `async def`. Nothing refuses a wait inside a synchronous helper, a database driver or a socket
+  call. Keep each of those in a `def` route or in `asyncio.to_thread`.
+- **A lifespan step holds the event loop like a route step**, and the tests report it the same
+  way. Startup work that is CPU work, such as compiling or validating a large document, runs in
+  `await asyncio.to_thread(compile_spec)`.
 - Nothing degrades from Postgres to memory. A bad `DATABASE_URL` fails at boot, and an unset one
   is refused unless `APP_ENV=development`. The application refuses to start if it can see
   `DATABASE_OWNER_URL`.
@@ -83,7 +90,7 @@ backend/
   regenerate the committed artifacts in `deploy/`.
 - **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key, and
   `make migrate` runs all of them every time. A shipped entry never changes: a column added later
-  lands twice, once in its table's `CREATE` and once in the `0200_` repair band.
+  lands twice, once in its table's `CREATE` and once keyed from `REPAIR_BAND` in `app/store/ddl.py`.
   `.schema-baseline.json` records each body, and `make test` refuses an edit to one. Run
   `make schema` and commit both files. [schema.md](schema.md) says what the migration system will
   not do.

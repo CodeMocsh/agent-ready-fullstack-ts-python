@@ -12,10 +12,11 @@ nothing, green, on every boot.
 from typing import Any
 
 import pytest
-from fastapi import Request
+from fastapi import APIRouter, Request
 from fastapi.testclient import TestClient
 
 from app.deployment import ACKNOWLEDGED_ENV
+from app.deps import PrincipalDep
 from app.identity import principal_for
 from app.identity.shared import (
     SENTINEL_PRINCIPAL,
@@ -227,3 +228,52 @@ def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(logged:
 
     [line] = [line for line in logged() if line["message"] == "request completed"]
     assert (line["http.response.status_code"], line["tenant_id"]) == (401, None)
+
+
+class AMember(Principal):
+    """What a project resolves beside the tenant and the actor."""
+
+    role: str
+
+
+A_MEMBER = AMember(
+    tenant_id="tenant-a",
+    actor=Actor(issuer="a-test", subject="a-member", name="A member"),
+    role="admin",
+)
+
+
+def resolving_a_member(_request: Request) -> Principal:
+    return A_MEMBER
+
+
+async def test_the_probe_hands_back_a_principal_a_project_extends() -> None:
+    assert await resolved_without_a_credential(resolving_a_member) is A_MEMBER
+
+
+def test_a_principal_a_project_extends_reaches_its_route_whole(logged: Logged) -> None:
+    """The seam hands a route the principal the resolver built, with every field the project
+    added, and the request line names its tenant and actor."""
+    seen: list[Principal] = []
+    router = APIRouter()
+
+    @router.get("/member")
+    async def member(principal: PrincipalDep) -> None:
+        seen.append(principal)
+
+    app = create_app()
+    app.include_router(router)
+    app.dependency_overrides[principal_for] = resolving_a_member
+    with TestClient(app) as client:
+        logged()
+        client.get("/member")
+
+    [line] = [one for one in logged() if one["message"] == "request completed"]
+    [principal] = seen
+
+    assert principal is A_MEMBER
+    assert (line["tenant_id"], line["actor.issuer"], line["actor.subject"]) == (
+        "tenant-a",
+        "a-test",
+        "a-member",
+    )

@@ -128,6 +128,14 @@ What to expect, because it is not all free:
   entries under it. `backend/tests/test_supply_chain.py` then refuses each entry that is not a
   timestamp inside the cool-off with a floor, and its message says what to do. Your own
   `docs/development.md` keeps the cool-off it states, so correct it by hand.
+- **A rule the template adds can refuse code you already have.** From 0.39.0 `make lint` refuses a
+  comment in a script as well as in source. From 0.41.0 it refuses a blocking call in an
+  `async def`, by ruff's `ASYNC2` rules. `cd backend && python3 devtools/comments.py --strip --tree ..`
+  removes the comments the check refuses, and no other text. It stops at the first comment it
+  cannot remove without changing what the code does, names it, and leaves that file as it was.
+  Remove that one by hand and run it again. Read the diff before you commit it:
+  a reason that a comment held belongs in the commit message. `uv run ruff check --select ASYNC2`
+  names each blocking call. Move it into a `def` or into `asyncio.to_thread`.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

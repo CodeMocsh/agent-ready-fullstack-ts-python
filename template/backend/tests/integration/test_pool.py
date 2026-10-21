@@ -14,7 +14,7 @@ from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
 from app.store.pg import TIMEOUTS, AcquireTimedOut, PostgresDatabase, Timeouts
 from app.wiring import build
-from tests.event_loop import Reported
+from tests.event_loop import Reported, hold_the_event_loop
 from tests.integration.conftest import Provisioned
 
 SHORT = 0.2
@@ -96,7 +96,7 @@ async def test_a_transaction_ended_by_postgres_while_the_loop_was_busy_gives_its
 
     async def busy() -> None:
         await asyncio.wait_for(begun.wait(), timeout=5)
-        time.sleep(1)
+        hold_the_event_loop(1)
 
     ended, _ = await asyncio.gather(held(), busy(), return_exceptions=True)
 

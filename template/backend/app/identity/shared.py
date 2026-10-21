@@ -41,7 +41,11 @@ class Actor(BaseModel):
 
 class Principal(BaseModel):
     """Who a request is: the tenant it may see, and the actor it acts as. Only a resolver builds
-    one."""
+    one.
+
+    A project subclasses it to add what its resolver knows, such as a role. Template code reads
+    only `tenant_id` and `actor`, and hands every route the instance the resolver returned.
+    """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
