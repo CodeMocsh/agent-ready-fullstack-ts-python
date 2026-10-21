@@ -28,9 +28,14 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   password.
 - **The `Makefile` sets `UV_EXCLUDE_NEWER` as well as `backend/pyproject.toml`.** `uvx` runs
   outside the project and does not read the pyproject.
-- **`make install` fetches what a commit needs from the network.** It fetches gitleaks and the
-  pinned openapi-typescript last, after it arms the hooks. Without these fetches, the first
-  commit needs the network, and fails without one on a check that is not about the network.
+- **`make install` fetches what the gate and the browser tiers need.** It fetches gitleaks, the
+  pinned openapi-typescript and Chromium last, after it arms the hooks. The gate needs the first
+  two. Without them, the first commit needs the network, and fails without one on a check that
+  is not about the network. Both browser tiers need Chromium. Neither tier fetches it, so
+  `make test-e2e` runs in a sandbox with no network. The cost is a browser download on the first
+  `make install` and after each change to the Playwright version, even for a developer who never
+  runs a browser tier. Run `make install` again after `make upgrade`, or the browser tiers find
+  no browser.
 
 ## The gate
 
@@ -76,7 +81,7 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 
 `make test-e2e`, `make test-e2e-live`, `make db-test` and `make observe-test` are deliberately
 outside the gate. Each needs something fetched or started first, and people skip a gate that
-fetches a browser or a daemon.
+needs a browser or a daemon.
 
 {% if github_ci -%}
 `ci.yml` runs `db-test` in a job of its own after a push. Nothing runs the others, so nothing

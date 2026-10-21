@@ -34,7 +34,8 @@ make install
 ```
 
 That runs `pnpm install` in `frontend/`, `uv sync --all-groups` in `backend/` (which installs
-the Python version pinned in `backend/.python-version`), and activates the versioned git hooks.
+the Python version pinned in `backend/.python-version`), activates the versioned git hooks, and
+fetches what the gate and the browser tiers need.
 
 It also writes `frontend/pnpm-lock.yaml` and `backend/uv.lock`, which do not ship with the
 template: a project generated today should resolve against today's registry rather than against
