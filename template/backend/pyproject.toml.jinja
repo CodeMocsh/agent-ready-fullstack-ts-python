@@ -177,6 +177,10 @@ select = [
     # analysis. The ones off below are off because each fires on every instance of an idiom
     # this project uses safely rather than on the unsafe spelling of it.
     "S", # https://docs.astral.sh/ruff/rules/#flake8-bandit-s
+    # A sleep, a file, a process or an HTTP request called without `await` in an `async def`.
+    # It holds the event loop and uses no CPU, so the tests' guard, which counts CPU time,
+    # cannot see it. A wait inside a synchronous helper or a driver is not on this list.
+    "ASYNC2", # https://docs.astral.sh/ruff/rules/#flake8-async-async
 ]
 ignore = [
     "E501", # https://docs.astral.sh/ruff/rules/line-too-long/

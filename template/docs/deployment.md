@@ -81,6 +81,28 @@ psql variable and expands it with `:'app_password'`, which quotes it as a SQL li
 put the password into the SQL text**: a password that holds a quote then ends the statement and
 starts another. psql does not expand a variable in a `-c` string, so the SQL goes in on stdin.
 
+## Removing a tenant's audit events
+
+An audit event outlives the row and the tenant it records, and the application role cannot
+remove one ([adr/template/0017](adr/template/0017-every-store-operation-on-tenant-rows-records-an-audit-event.md)).
+Where a law requires a tenant's events removed, an operator removes them as a member of
+`<schema>_owner`, the role `DATABASE_OWNER_URL` names. `FORCE` binds the owner to the policy too,
+so set the tenant first. For the default schema, `app`:
+
+```sql
+SET ROLE app_owner;
+SET search_path TO app;
+BEGIN;
+SELECT set_config('app.tenant_id', 'the-tenant', true);
+DELETE FROM audit_events WHERE tenant_id = 'the-tenant';
+COMMIT;
+```
+
+With `DB_SCHEMA` set, put its value where `app` is in the first two lines.
+
+The `DELETE` reports how many events it removed. It removes nothing from another tenant, because
+the policy hides every other tenant's events from it.
+
 ## Timeouts
 
 Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets each one:

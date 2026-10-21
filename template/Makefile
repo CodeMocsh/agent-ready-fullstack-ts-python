@@ -3,6 +3,8 @@ SHELL := /bin/bash
 UV_EXCLUDE_NEWER ?= 7 days
 export UV_EXCLUDE_NEWER
 
+E2E_BROWSERS ?= chromium
+
 .DEFAULT_GOAL := default
 
 .PHONY: default install hooks pre-commit gate secrets lint lint-check test test-fast test-contract \
@@ -19,7 +21,7 @@ install:
 	@$(MAKE) --no-print-directory hooks
 	sh devtools/secrets.sh fetch
 	pnpm -C frontend openapi:types
-	pnpm -C frontend exec playwright install chromium
+	pnpm -C frontend exec playwright install $(E2E_BROWSERS)
 
 hooks:
 	@sh devtools/install-hooks.sh

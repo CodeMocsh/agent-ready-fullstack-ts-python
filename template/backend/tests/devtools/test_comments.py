@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from devtools.comments import main, offenders
+from devtools.comments import main, offenders, strip
 
 BANNED = [
     "trailing = 1  # a note",
@@ -62,6 +62,14 @@ SCRIPT_ALLOWED = [
     "cat <<EOF",
     "\tEOF",
     "# only a dash heredoc ends at an indented terminator",
+    "EOF",
+    "cat <<EOF",
+    "a body line that ends in a backslash \\",
+    "EOF",
+    "# a heredoc body line joined to the one above is data",
+    "EOF",
+    "cat <<'EOF'",
+    "a quoted heredoc joins no line \\",
     "EOF",
     "out=`echo '#'`",
     'message="`date` # inside double quotes"',
@@ -273,3 +281,92 @@ def test_the_tree_scan_reads_every_file_git_tracks_or_would_track_and_nothing_it
         f"{tmp_path / 'anywhere' / 'hook.py'}:1  # untracked",
         f"{tmp_path / 'committed.sh'}:1  # committed",
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "lines", "kept"),
+    [
+        ("sample.py", [*BANNED, *ALLOWED], ["trailing = 1", "value = 2", "other = 3", *ALLOWED]),
+        (
+            "sample.sh",
+            [*SCRIPT_BANNED, *SCRIPT_ALLOWED],
+            [
+                "echo hi",
+                "run;",
+                "cat <<< word",
+                "shifted=$((a << b))",
+                "quoted=$'it\\'s'",
+                *SCRIPT_ALLOWED,
+            ],
+        ),
+        (
+            "Makefile",
+            [*MAKEFILE_BANNED, *MAKEFILE_ALLOWED],
+            ["VALUE = 1", "target:", *MAKEFILE_ALLOWED],
+        ),
+    ],
+    ids=["python", "shell", "make"],
+)
+def test_strip_removes_what_the_scan_refuses_and_nothing_else(
+    tmp_path: Path, name: str, lines: list[str], kept: list[str]
+) -> None:
+    path = tmp_path / name
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    refused = len(list(offenders(path)))
+
+    assert strip(path) == refused
+    assert path.read_text(encoding="utf-8").splitlines() == kept
+    assert list(offenders(path)) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "lines", "kept"),
+    [
+        ("sample.sh", ["echo a \\", "# a note", "echo b"], ["echo a \\", "", "echo b"]),
+        ("Makefile", ["X = a \\", "# a note", "Y = 2"], ["X = a \\", "", "Y = 2"]),
+    ],
+    ids=["shell", "make"],
+)
+def test_strip_keeps_an_empty_line_where_a_continued_line_ran_into_a_comment(
+    tmp_path: Path, name: str, lines: list[str], kept: list[str]
+) -> None:
+    path = tmp_path / name
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    strip(path)
+
+    assert path.read_text(encoding="utf-8").splitlines() == kept
+
+
+@pytest.mark.parametrize(
+    ("name", "source"),
+    [
+        ("sample.pl", "#!/usr/bin/perl\nmy $x = 1;  # a note\n=pod\na note\n=cut\n"),
+        ("Makefile", "X = 1 # a note that runs on \\\nY = 2\n"),
+        ("Makefile", "X = a \\ # a note\nY = 2\n"),
+        ("sample.py", "\ufeffx = 1  # a note\n"),
+        ("sample.sh", "echo a\x0c\necho b  # a note\n"),
+    ],
+    ids=["pod", "continued-comment", "kept-backslash", "byte-order-mark", "form-feed"],
+)
+def test_strip_refuses_a_comment_it_cannot_remove_and_leaves_the_file_as_it_was(
+    tmp_path: Path, name: str, source: str
+) -> None:
+    path = tmp_path / name
+    path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(SystemExit) as refusal:
+        strip(path)
+
+    assert refusal.value.code == 2
+    assert path.read_text(encoding="utf-8") == source
+
+
+def test_strip_keeps_the_line_endings_it_found(tmp_path: Path) -> None:
+    path = tmp_path / "sample.sh"
+    path.write_bytes(b"set -eu\r\n# a note\r\necho hi  # a note\r\n")
+
+    strip(path)
+
+    assert path.read_bytes() == b"set -eu\r\necho hi\r\n"

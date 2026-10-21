@@ -6,7 +6,7 @@ import sys
 import tokenize
 from collections.abc import Iterator
 from pathlib import Path
-from typing import NoReturn, final
+from typing import NamedTuple, NoReturn, final
 
 FIX = """
 AGENTS.md bans them, and the rule is not about tidiness: an explanation beside the
@@ -37,7 +37,7 @@ def tokens_of(path: Path) -> list[tokenize.TokenInfo]:
         )
 
 
-HEREDOC = re.compile(r"<<(-?)\s*\\?(['\"]?)([A-Za-z_]\w*)\2")
+HEREDOC = re.compile(r"<<(-?)\s*(\\?)(['\"]?)([A-Za-z_]\w*)\3")
 POD = re.compile(r"=[A-Za-z]")
 DEFINE = re.compile(r"\s*(override\s+)?define\b")
 WORD_BREAKS = " \t;|&()`"
@@ -95,12 +95,15 @@ class Shell:
         self.path = path
         self.perl = perl
         self.open: list[str] = []
-        self.bodies: list[tuple[str, bool]] = []
+        self.bodies: list[tuple[str, bool, bool]] = []
+        self.joined = False
 
     def comment_in(self, line: str) -> int | None:
         if self.bodies:
-            terminator, tabs = self.bodies[0]
-            if (line.lstrip("\t") if tabs else line) == terminator:
+            terminator, tabs, expands = self.bodies[0]
+            ends = not self.joined and (line.lstrip("\t") if tabs else line) == terminator
+            self.joined = expands and line.endswith("\\")
+            if ends:
                 self.bodies.pop(0)
             return None
         index = 0
@@ -161,7 +164,8 @@ class Shell:
         if line.startswith("<<<", index):
             return index + 3
         if heredoc := HEREDOC.match(line, index):
-            self.bodies.append((heredoc.group(3), heredoc.group(1) == "-"))
+            expands = not heredoc.group(2) and not heredoc.group(3)
+            self.bodies.append((heredoc.group(4), heredoc.group(1) == "-", expands))
             return heredoc.end()
         for token, context in OPENERS:
             if line.startswith(token, index):
@@ -188,18 +192,30 @@ class Shell:
             )
 
 
-def shell_offenders(path: Path) -> Iterator[tuple[int, str]]:
+class Comment(NamedTuple):
+    """A comment the scan found. `column` is `None` for POD, which runs on past the line that
+    opens it."""
+
+    line: int
+    column: int | None
+    text: str
+
+
+AMBIGUOUS_BREAKS = "\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029\ufeff"
+
+
+def shell_comments(path: Path) -> Iterator[Comment]:
     perl = kind(path) == "perl"
     shell = Shell(path, perl=perl)
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         if number == 1 and line.startswith("#!"):
             continue
         if perl and POD.match(line):
-            yield number, line.strip()
+            yield Comment(number, None, line.strip())
             continue
         start = shell.comment_in(line)
         if start is not None:
-            yield number, line[start:].strip()
+            yield Comment(number, start, line[start:].strip())
     shell.close()
 
 
@@ -209,7 +225,7 @@ def make_comment_in(line: str) -> int | None:
     return found.start() if found else None
 
 
-def makefile_offenders(path: Path) -> Iterator[tuple[int, str]]:
+def makefile_comments(path: Path) -> Iterator[Comment]:
     shell = Shell(path)
     continued = defining = False
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
@@ -226,23 +242,79 @@ def makefile_offenders(path: Path) -> Iterator[tuple[int, str]]:
         else:
             start = None if defining else make_comment_in(line)
         if start is not None:
-            yield number, line[start:].strip()
+            yield Comment(number, start, line[start:].strip())
 
 
-def offenders(path: Path) -> Iterator[tuple[int, str]]:
+def comments(path: Path) -> Iterator[Comment]:
     language = kind(path)
     if language == "make":
-        yield from makefile_offenders(path)
+        yield from makefile_comments(path)
         return
     if language != "python":
-        yield from shell_offenders(path)
+        yield from shell_comments(path)
         return
     for token in tokens_of(path):
         if token.type != tokenize.COMMENT:
             continue
         if token.start == (1, 0) and token.string.startswith("#!"):
             continue
-        yield token.start[0], token.string.strip()
+        yield Comment(token.start[0], token.start[1], token.string.strip())
+
+
+def offenders(path: Path) -> Iterator[tuple[int, str]]:
+    for number, _, text in comments(path):
+        yield number, text
+
+
+def without(source: str, found: list[Comment], path: Path) -> str:
+    """`source` with each comment in `found` removed: the whole line when nothing precedes it,
+    and otherwise the comment and the space before it, so a Makefile value before a comment
+    loses its trailing spaces. A whole line after a line that ends in a
+    backslash becomes an empty line. Exits, and changes nothing, on a comment it cannot remove
+    without changing what the code does."""
+    if any(char in source for char in AMBIGUOUS_BREAKS):
+        fail(
+            f"{path} holds a form feed, a byte order mark or a Unicode line break, so the line "
+            f"numbers the scan reports may not be the lines --strip cuts. Remove its comments by hand."
+        )
+    lines = source.splitlines(keepends=True)
+    make = kind(path) == "make"
+    for number, start, text in reversed(found):
+        line = lines[number - 1]
+        ending = line[len(line.rstrip("\r\n")) :]
+        kept = "" if start is None else line[:start].rstrip()
+        if start is None or (make and text.endswith("\\")):
+            fail(
+                f"{path}:{number} holds {text!r}, which runs on past its line, so --strip cannot "
+                f"tell where it ends. Remove it by hand, then run --strip again."
+            )
+        if kept.endswith("\\"):
+            fail(
+                f"{path}:{number} keeps a backslash at the end of the line once {text!r} is gone, "
+                f"which joins the next line to it. Remove the comment by hand."
+            )
+        joined = number > 1 and lines[number - 2].rstrip("\r\n").endswith("\\")
+        lines[number - 1] = kept + ending if kept or joined else ""
+    return "".join(lines)
+
+
+def strip(path: Path) -> int:
+    """Removes every comment the scan finds in `path`, and answers how many. Restores the file
+    and exits when the result no longer reads, or still holds one."""
+    original = path.read_bytes()
+    found = list(comments(path))
+    if not found:
+        return 0
+    path.write_bytes(without(original.decode("utf-8"), found, path).encode("utf-8"))
+    try:
+        left = list(offenders(path))
+    except SystemExit:
+        path.write_bytes(original)
+        raise
+    if left:
+        path.write_bytes(original)
+        fail(f"{path} still holds {len(left)} comment(s) after --strip. Remove them by hand.")
+    return len(found)
 
 
 def tracked(root: Path) -> list[Path]:
@@ -286,13 +358,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Refuse comments in source and scripts.")
     parser.add_argument("paths", nargs="*")
     parser.add_argument("--tree", type=Path, help="read every source file git sees under this root")
+    parser.add_argument("--strip", action="store_true", help="remove each comment it would refuse")
     args = parser.parse_args()
     if not args.paths and args.tree is None:
         parser.error("name a path, or --tree ROOT")
 
     found = 0
     seen = tracked(args.tree) if args.tree else []
-    for path in [*named_paths(args.paths), *seen]:
+    paths = [*named_paths(args.paths), *seen]
+    if args.strip:
+        return stripped_all(paths)
+    for path in paths:
         for line, text in offenders(path):
             print(f"{path}:{line}  {text}")
             found += 1
@@ -300,6 +376,20 @@ def main() -> int:
     if found:
         print(f"\nFAIL: {found} comment{'' if found == 1 else 's'} above.{FIX}")
     return 1 if found else 0
+
+
+def stripped_all(paths: list[Path]) -> int:
+    removed = 0
+    for path in paths:
+        count = strip(path)
+        if count:
+            print(f"{path}: removed {count}", flush=True)
+        removed += count
+    print(
+        f"\nRemoved {removed} comment(s). Read the diff before you commit it: a "
+        f"reason a comment held belongs in the commit message, and a contract in a name."
+    )
+    return 0
 
 
 if __name__ == "__main__":

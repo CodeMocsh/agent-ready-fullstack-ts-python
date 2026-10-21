@@ -106,8 +106,13 @@ its record succeed or fail together.
   records the read where it serves them.
 - An action on a tenant itself is recorded in that tenant, and an action across tenants records
   one event in each. The template has neither; a project that adds one keeps this rule.
+- An audit event outlives the row and the tenant it records. It is the record of who acted on
+  them, and a deleted row is where that record is asked for most. A project that deletes a
+  tenant deletes its rows and keeps its events.
 - Retention, export and review of the audit events are the deployment's. Nothing here deletes
-  one.
+  one. Where a law requires a tenant's events removed, an operator removes them as the owner
+  role, never as the application role:
+  [deployment.md](../../deployment.md#removing-a-tenants-audit-events).
 - `user` names no concept here: an actor may be an app. The request line names the actor the
   same way, as `actor.issuer` and `actor.subject`
   ([0011](0011-every-log-line-is-declared-and-written-as-json-to-stdout.md)).

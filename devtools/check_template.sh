@@ -698,7 +698,7 @@ mutation("test_only_install_fetches_the_browser",
          "a browser tier that fetches the browser itself")
 
 mutation("test_only_install_fetches_the_browser",
-         "Makefile", "\tpnpm -C frontend exec playwright install chromium\n", "",
+         "Makefile", "\tpnpm -C frontend exec playwright install $(E2E_BROWSERS)\n", "",
          "an install that no longer fetches the browser")
 
 mutation("test_only_install_fetches_the_browser",

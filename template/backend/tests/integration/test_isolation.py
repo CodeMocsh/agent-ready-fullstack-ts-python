@@ -299,6 +299,36 @@ async def test_applying_the_roles_again_grants_no_forbidden_write_on_an_event(
     await assert_the_app_role_records_events_and_nothing_more(provisioned)
 
 
+async def test_the_owner_removes_one_tenants_events_and_no_other(
+    provisioned: Provisioned,
+) -> None:
+    """The step `docs/deployment.md` gives an operator who must remove a tenant's events."""
+    application: Any = await connect(provisioned.app_dsn)
+    await application.execute(f'SET search_path TO "{provisioned.schema}"')
+    owner = await as_owner(provisioned)
+    try:
+        for tenant in (ACME, GLOBEX):
+            async with application.transaction():
+                await application.execute("SELECT set_config($1, $2, true)", TENANT_GUC, tenant)
+                await application.execute(
+                    f"INSERT INTO audit_events ({_EVENT_COLUMNS}) VALUES ({_EVENT_VALUES})", tenant
+                )
+        async with owner.transaction():
+            await owner.execute("SELECT set_config($1, $2, true)", TENANT_GUC, ACME)
+            removed = await owner.execute("DELETE FROM audit_events WHERE tenant_id = $1", ACME)
+        remaining: dict[str, int] = {}
+        for tenant in (ACME, GLOBEX):
+            async with owner.transaction():
+                await owner.execute("SELECT set_config($1, $2, true)", TENANT_GUC, tenant)
+                remaining[tenant] = await owner.fetchval("SELECT count(*) FROM audit_events")
+    finally:
+        await application.close()
+        await owner.close()
+
+    assert removed == "DELETE 1"
+    assert remaining == {ACME: 0, GLOBEX: 1}
+
+
 async def test_the_schema_script_withholds_the_same_writes_as_a_migration() -> None:
     """A deployment whose own tool applies `deploy/schema.sql` gets what `make migrate` gives."""
     dsn = postgres_dsn()

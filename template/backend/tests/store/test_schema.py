@@ -210,6 +210,59 @@ def test_a_repair_in_step_with_its_create_is_not_reported() -> None:
     assert repairs_out_of_step([A_TASKS_CREATE, A_TASKS_REPAIR]) == []
 
 
+def tables_out_of_order(entries: list[tuple[str, str]], tables: tuple[str, ...]) -> list[str]:
+    """Every table in `tables` that is not created, then given its policy, then forced, in key
+    order."""
+    steps = {
+        "created": f"{CREATE_TABLE} <t> (",
+        "given its policy": "CREATE POLICY <t>_tenant_isolation ON <t> ",
+        "forced": "ALTER TABLE <t> ENABLE ROW LEVEL SECURITY",
+    }
+    found: list[str] = []
+    for table in tables:
+        keys = {
+            step: [key for key, sql in entries if spelled.replace("<t>", table) in sql]
+            for step, spelled in steps.items()
+        }
+        missing = [step for step, matched in keys.items() if not matched]
+        if missing:
+            found.append(f"{table} is never {' or '.join(missing)}")
+        elif [one[0] for one in keys.values()] != sorted(one[0] for one in keys.values()):
+            found.append(
+                f"{table} is " + ", then ".join(f"{step} at {keys[step][0]}" for step in keys)
+            )
+    return found
+
+
+def test_every_tenant_table_is_created_then_given_its_policy_then_forced() -> None:
+    assert tables_out_of_order(ddl.statements(), ddl.TENANT_TABLES) == []
+
+
+def test_a_table_forced_before_its_policy_is_reported() -> None:
+    entries = [
+        ("0010_tasks", f"{CREATE_TABLE} tasks (\n  id uuid PRIMARY KEY\n)"),
+        (
+            "0100_tasks_force",
+            "ALTER TABLE tasks ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY",
+        ),
+        ("0120_tasks_policy", "CREATE POLICY tasks_tenant_isolation ON tasks FOR ALL"),
+    ]
+
+    assert tables_out_of_order(entries, ("tasks",)) == [
+        "tasks is created at 0010_tasks, then given its policy at 0120_tasks_policy, then forced "
+        "at 0100_tasks_force"
+    ]
+
+
+def test_a_table_never_forced_is_reported() -> None:
+    entries = [
+        ("0010_tasks", f"{CREATE_TABLE} tasks (\n  id uuid PRIMARY KEY\n)"),
+        ("0100_tasks_policy", "CREATE POLICY tasks_tenant_isolation ON tasks FOR ALL"),
+    ]
+
+    assert tables_out_of_order(entries, ("tasks",)) == ["tasks is never forced"]
+
+
 def test_known_version_is_the_last_key() -> None:
     assert known_version() == known_keys()[-1]
 
@@ -395,8 +448,8 @@ def test_no_shipped_entry_body_has_changed() -> None:
         f"{edited} shipped, and the body has changed since. A database that already ran it "
         f"never gets the change: `CREATE TABLE IF NOT EXISTS` skips, every key still matches, "
         f"and every query naming what you added fails. Restore the entry, or keep a new column in "
-        f"the CREATE, add it as a {ddl.REPAIR_BAND} repair, and re-record that one hash in "
-        f".schema-baseline.json by hand."
+        f"the CREATE, add it as a repair keyed from {ddl.REPAIR_BAND:04d}, and re-record that "
+        f"one hash in .schema-baseline.json by hand."
     )
 
 
@@ -441,8 +494,9 @@ def test_every_created_index_leads_with_the_tenant() -> None:
     the table is large enough that fixing it means rebuilding indexes on live data.
 
     Constraint-backed indexes are exempt and named here rather than skipped silently: a
-    primary key on a uuid and the `UNIQUE (id, tenant_id)` a child table's foreign key must
-    reference are both about uniqueness of a surrogate key, not about serving a scan.
+    primary key on a global identifier, a uuid or a sequence, and the `UNIQUE (id, tenant_id)` a
+    child table's foreign key must reference are each about uniqueness of a surrogate key, not
+    about serving a scan.
     """
     for key, sql in statements(DEFAULT_SCHEMA):
         found = re.search(r"CREATE\s+(?:UNIQUE\s+)?INDEX[^(]*\(([^)]*)\)", sql, re.IGNORECASE)
