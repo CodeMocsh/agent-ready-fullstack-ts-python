@@ -73,8 +73,9 @@ release. Rejected.
 ## Consequences
 
 - A change costs a full run on GitHub runners as well as one on the contributor's machine.
-- The runner has a Docker daemon, so the gate there runs the Postgres tier. On a machine with no
-  Docker, `devtools/check_template.sh` prints that it skipped the tier. So the gate on a pull
+- The runner has a Docker daemon and the Postgres server binaries, so the gate there runs the
+  Postgres tier both ways. On a machine without one of them, `devtools/check_template.sh` prints
+  that it skipped that way. So the gate on a pull
   request is stronger than the gate on most machines.
 - A license variant other than the default can break on a pull request and fail only after the
   merge to main.

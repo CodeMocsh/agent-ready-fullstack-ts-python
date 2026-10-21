@@ -613,7 +613,7 @@ need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
 done
-need_grep '^SHELL := /bin/bash' Makefile "The db-test recipe traps INT to stop its container. dash runs that handler only after the foreground command returns, which on Ctrl-C it never does."
+need_grep '^SHELL := /bin/bash' Makefile "The observe-test and test-contract-db recipes trap INT to stop their container. dash runs that handler only after the foreground command returns, which on Ctrl-C it never does."
 need .github/workflows/ci.yml "test_workflow.py walks the workflows it finds, so it passes over a directory that is gone"
 need backend/tests/test_workflow.py
 need_grep 'make gate' .github/workflows/ci.yml "The workflow runs the list the hook runs, so the two cannot drift."
@@ -1468,14 +1468,39 @@ run "contract suite (live backend)" env -u BACKEND_PORT -u FRONTEND_PORT make te
 need_nothing_outlived "the contract suite"
 
 echo "==> the store, against a real Postgres"
+POSTGRES_RAN=""
 if docker info >/dev/null 2>&1; then
-    run "make db-test" make db-test
+    run "make db-test" env -u TEST_DATABASE_URL make db-test
+    POSTGRES_RAN=yes
     echo "    postgres: yes (container) -- store contract and migration suites ran"
 else
-    echo "    postgres: NO DOCKER -- backend/tests/integration/ did not run, so neither did the"
-    echo "    Postgres half of the store contract. Everything about the schema that a fake"
-    echo "    connection can answer did (backend/tests/store/test_schema.py), and nothing here"
-    echo "    proves the DDL parses."
+    echo "    postgres: NO DOCKER -- the container that make db-test starts did not run."
+fi
+NO_DOCKER="$WORK/no-docker"
+mkdir -p "$NO_DOCKER"
+printf '#!/bin/sh\nexit 1\n' >"$NO_DOCKER/docker"
+chmod +x "$NO_DOCKER/docker"
+REFUSAL='^db-test: Docker does not answer, and initdb and pg_ctl are not on PATH or in pg_config --bindir\. Start Docker, install the Postgres server, or set TEST_DATABASE_URL\.$'
+if env -u TEST_DATABASE_URL PATH="$NO_DOCKER:$PATH" make db-test >"$WORK/step.log" 2>&1; then
+    POSTGRES_RAN=yes
+    echo "    postgres: yes (initdb) -- the same suites ran on a local server, with no Docker"
+elif grep -q "$REFUSAL" "$WORK/step.log"; then
+    [ -z "${CI:-}" ] || fail "make db-test found no initdb on CI, so the server it starts without Docker runs nowhere."
+    echo "    postgres: NO INITDB -- the server that make db-test starts without Docker did not run."
+else
+    echo "--- make db-test without Docker failed ---" >&2
+    cat "$WORK/step.log" >&2
+    exit 1
+fi
+if env -i HOME="$HOME" PATH="$NO_DOCKER" "$(command -v make)" db-test >"$WORK/step.log" 2>&1; then
+    fail "make db-test passed with no Docker and no initdb, so it ran no Postgres."
+fi
+grep -q "$REFUSAL" "$WORK/step.log" \
+    || { cat "$WORK/step.log" >&2; fail "make db-test with no Docker and no initdb did not say what to install."; }
+if [ -z "$POSTGRES_RAN" ]; then
+    echo "    backend/tests/integration/ did not run, so neither did the Postgres half of the store"
+    echo "    contract. Everything about the schema that a fake connection can answer did"
+    echo "    (backend/tests/store/test_schema.py), and nothing here proves the DDL parses."
 fi
 
 echo "==> the dev loop starts both halves, and Ctrl-C stops both halves"

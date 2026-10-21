@@ -62,15 +62,7 @@ db-test:
 ifdef TEST_DATABASE_URL
 	cd backend && uv run --no-sync pytest $(DB_TEST_SUITE)
 else
-	@name=db-test-$$$$; \
-	trap 'docker rm -f $$name >/dev/null 2>&1 || true' EXIT INT TERM; \
-	docker run -d --rm -p 127.0.0.1::5432 -e POSTGRES_PASSWORD=test --name $$name $(DB_TEST_IMAGE) >/dev/null; \
-	port=$$(docker port $$name 5432/tcp | head -1 | sed 's/.*://'); \
-	printf 'postgres on %s' "$$port"; \
-	until docker exec $$name pg_isready -h 127.0.0.1 -q >/dev/null 2>&1; do printf '.'; sleep 0.5; done; \
-	echo ' ready'; \
-	cd backend && TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:$$port/postgres \
-		uv run --no-sync pytest $(DB_TEST_SUITE)
+	@devtools/db-test.sh $(DB_TEST_IMAGE) $(DB_TEST_SUITE)
 endif
 
 OBSERVE_IMAGE = $(shell sed -n 's/^ *image: \(grafana\/otel-lgtm:.*\)$$/\1/p' $(COMPOSE))

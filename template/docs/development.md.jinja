@@ -91,13 +91,20 @@ a failure after a push reaches you late.
 {%- else -%}
 Nothing runs them, so nothing tells you that you did not run them: `db-test` after touching
 `app/store/` or `deploy/`, `test-e2e` after a UI change, `observe-test` after touching
-`app/telemetry.py`. `db-test` needs only Docker, so it is the tier to add to your CI first.
+`app/telemetry.py`. `db-test` needs only Docker or the Postgres server binaries, so it is the
+tier to add to your CI first.
 {%- endif %}
 
 - **`make test-contract-db` runs the contract suite on Postgres, as `app_app`.** A superuser
   bypasses row-level security, so a run on the superuser's connection passes against a database
   with no policy in force. Keep the application role.
-- **`make db-test` uses `TEST_DATABASE_URL` when it is set**, and starts no container.
+- **`make db-test` uses `TEST_DATABASE_URL` when it is set**, and starts no server.
+- **Without a running Docker, `make db-test` starts a server from `initdb` and `pg_ctl`.** It
+  finds them on `PATH`, or in the folder that `pg_config --bindir` names, because Debian keeps
+  them off `PATH`. The server runs the Postgres version you installed, not the one in
+  `DB_TEST_IMAGE`, and the first line `make db-test` prints names that version. It listens only
+  on a Unix socket in a folder under `/tmp`, not under `$TMPDIR`, because `$TMPDIR` can be long
+  and a socket path longer than about 100 bytes fails.
 - **Each tier's container takes an ephemeral port and a name that holds the shell's PID.** With a
   fixed port or name, two checkouts that run a tier at once fail, or one deletes the other's
   database.
