@@ -22,7 +22,8 @@ backend/
   app/identity/       who a request is: a tenant and an actor
     __init__.py       the resolver, principal_for -- ships as a stub; yours once you replace it
     shared.py         what every resolver shares: Principal, Actor, Unauthenticated -- the template's
-  app/audit_events.py who read or changed which rows -- every store records one per operation
+  app/audit_events.py who read or changed which rows, and who acts: serve, acting_as
+  app/request_events.py one request event for each request a principal makes
   app/log.py          how the application logs, and the template's own lines
   app/log_lines.py    every other line the application logs -- yours
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app

@@ -136,6 +136,24 @@ What to expect, because it is not all free:
   Remove that one by hand and run it again. Read the diff before you commit it:
   a reason that a comment held belongs in the commit message. `uv run ruff check --select ASYNC2`
   names each blocking call. Move it into a `def` or into `asyncio.to_thread`.
+- **From 0.42.0 a write with no actor fails.** Postgres records every write to a table in
+  `TENANT_TABLES`, and refuses one when nothing names an actor. A request names its principal's
+  actor through `audit_events.serve`: if your identity dependency calls `log.name_principal`,
+  call `audit_events.serve` instead. A resolver that writes before it has a principal runs that
+  write inside `audit_events.acting_as`. Every worker loop, job and script that writes runs
+  inside `audit_events.acting_as(actor)`. An app acting for a person names the person in
+  `on_behalf_of`. Until each one does, its first write raises `a write to <table> names no
+  actor`, and the loop stops. Your own Postgres tests and fixtures that write rows do the same.
+  Store methods no longer take an actor, and record no audit event: delete the recording you
+  added for 0.41.0, or each write records two events. `audit_event`, `absent`, `written`,
+  `AuditEvent` and `app.store.TASKS` are gone. If you merged `app/store/pg.py`,
+  `app/store/migrate.py` or `app/store/ddl.py` by hand, keep `setup=_name_who_acts` on
+  `create_pool`, `MIGRATION_ACTING_SQL` in `apply`, and the audit entries. A tenant table with no
+  primary key cannot be written: give it one. After the first
+  `make migrate` on 0.42.0, an instance of an earlier release cannot write, so replace them all
+  in the same release.
+  [adr/template/0017](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md)
+  says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

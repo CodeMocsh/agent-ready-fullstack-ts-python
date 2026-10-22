@@ -217,7 +217,7 @@ def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resol
 
 
 def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(logged: Logged) -> None:
-    """It has no tenant to record an audit event in, and anybody can send one. Its `request
+    """It has no tenant to record a request event in, and anybody can send one. Its `request
     completed` line, with a `401` and a null tenant, is the record. `docs/adr/template/0017`."""
     app = create_app()
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)

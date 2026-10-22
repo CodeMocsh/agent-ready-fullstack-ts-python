@@ -90,12 +90,16 @@ def test_a_request_records_who_it_served_and_which_request_it_was() -> None:
     an auditor can join the event to the request's log line."""
     app = create_app()
     with TestClient(app) as client:
-        answered = client.get("/tasks")
+        answered = client.patch("/tasks/does-not-exist", json={"done": True})
         assert client.portal is not None
         events = client.portal.call(app.state.database.audit_events(SENTINEL_TENANT).list)
 
     [event] = events
     assert event.actor == SENTINEL_PRINCIPAL.actor
-    assert event.action == "read"
-    assert event.resource_ids == tuple(task["id"] for task in answered.json())
+    assert (event.method, event.route, event.resource_ids, event.status) == (
+        "PATCH",
+        "/tasks/{id}",
+        ("does-not-exist",),
+        404,
+    )
     assert event.request_id == answered.headers["x-request-id"]

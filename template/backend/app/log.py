@@ -273,7 +273,7 @@ _ENRICHED: Final[list[Processor]] = [
 ]
 
 
-def _route_answering(request: Request) -> str | None:
+def route_answering(request: Request) -> str | None:
     """The whole template of the route `request` reaches, every prefix it was included under
     first, or `None` when no route answers it. Matched as the OpenTelemetry instrumentation
     matches it, so the line and the server span name one route."""
@@ -293,7 +293,7 @@ async def _completed(
     """Times the request and logs it. A request that raises is logged as a `500`, which is what
     the server answers once the exception has passed through here."""
     started = time.perf_counter()
-    route = _route_answering(request)
+    route = route_answering(request)
     status = 500
     named: dict[str, str] = {}
     request.state.request_line = named

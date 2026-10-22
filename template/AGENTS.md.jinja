@@ -112,8 +112,10 @@ fans out to both. Each half works without the other's toolchain.
   merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
   in the route and write in the store afterwards. A race only shows on Postgres, so its test goes
   in `tests/integration/`.
-- Never widen the store's surface to take a tenant. `Database.store(tenant_id)` is the only way
-  to get a store, and no store method takes a tenant.
+- Never widen the store's surface to take a tenant or an actor. `Database.store(tenant_id)` is the
+  only way to get a store, and no store method takes a tenant. A write acts as the actor
+  `audit_events` names: a request's principal, or the actor of the `acting_as` block that work
+  outside a request runs in. Postgres refuses a write with neither.
 - A policy compares one column to one setting, never a join or a row-dependent function.
 - A new column on a shipped table goes in its `CREATE` and in a repair entry. Without the repair
   entry, a database that already ran the `CREATE` never gets the column.
