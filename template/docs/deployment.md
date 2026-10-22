@@ -53,6 +53,24 @@ With nothing in front, this process is the edge: read `SECURITY_HEADERS` and `MA
 in `app/serve.py` first, and [adr/template/0009](adr/template/0009-the-one-origin-entrypoint-is-the-edge.md) for
 why `app.main` sets neither.
 
+## Rate limiting
+
+Nothing here limits how often a client may call. Limit at the edge, per address and per
+credential: your platform, a CDN, a WAF or the proxy in front of this process. A limit inside
+the process counts one instance only. Each instance you add raises it. A shared count needs a
+service such as Redis, and this project has none.
+
+A request the identity seam refuses records no audit event, and neither does a public route.
+Each one still writes its `request completed` line, and `POST /client-events` writes a line for
+each client event it takes, so a flood costs log volume. Every request a principal makes records
+one request event
+([adr/template/0017](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md)).
+The edge limit is therefore also the limit on how fast `audit_events` grows.
+
+Nothing here deletes an audit event, and the application role cannot. Retention is yours.
+[Removing a tenant's audit events](#removing-a-tenants-audit-events) says how an operator
+removes one tenant's events.
+
 ## The release step
 
 The application verifies the schema at startup and refuses to serve if it is behind. Applying
@@ -282,6 +300,8 @@ and writes everything it holds. This one does complain — find the line whose `
 `identity:` and read its `severity`. `WARNING` means nobody has replaced it. Serving everybody is a
 real thing to do for a while, behind an authenticating proxy or on an internal tool; set
 `UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
-level and nothing else.
+level and nothing else. Under the stub every request to a tenant route resolves to a principal, so
+anybody who reaches the process writes one audit event for each such request. Put a [rate limit](#rate-limiting) at the edge
+before anybody else can reach it.
 [adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says what a
 replacement owes.
