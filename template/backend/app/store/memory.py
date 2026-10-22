@@ -11,10 +11,9 @@ real enough — the fast tier and the frontend's zero-backend mode both stand on
 
 from datetime import UTC, datetime
 
-from app.audit_events import AuditEvent, RecordedAuditEvent, absent, audit_event, written
-from app.identity.shared import Actor
+from app.audit_events import RecordedAuditEvent, RequestEvent
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import TASKS, AuditEvents, TaskStore, TenantUnset
+from app.store import AuditEvents, TaskStore, TenantUnset
 from app.store.migrate import known_version
 
 SEED: tuple[tuple[str, str, bool], ...] = (
@@ -27,76 +26,66 @@ SEED: tuple[tuple[str, str, bool], ...] = (
 
 
 class MemoryTaskStore:
-    """`TaskStore` over a list, holding one tenant's rows and its audit events.
+    """`TaskStore` over a list, holding one tenant's rows.
 
     Ids are small integers as strings, unlike Postgres' uuids — deliberate, so that a suite
-    passing against both cannot have assumed either. Each method builds its audit event before
-    it changes anything, so an event it cannot build leaves the rows as they were.
+    passing against both cannot have assumed either. It records no row event: those are the
+    Postgres trigger's.
     """
 
-    def __init__(
-        self,
-        tenant_id: str,
-        tasks: list[Task],
-        counter: list[int],
-        events: list[RecordedAuditEvent],
-    ) -> None:
-        self._tenant_id: str = tenant_id
+    def __init__(self, tasks: list[Task], counter: list[int]) -> None:
         self._tasks: list[Task] = tasks
         self._counter: list[int] = counter
-        self._events: list[RecordedAuditEvent] = events
 
-    def _record(self, event: AuditEvent) -> None:
-        self._events.append(
-            RecordedAuditEvent.model_validate(
-                {
-                    **event.model_dump(),
-                    "tenant_id": self._tenant_id,
-                    "recorded_at": datetime.now(UTC),
-                }
-            )
-        )
+    async def list(self) -> list[Task]:
+        return list(self._tasks)
 
-    async def list(self, actor: Actor) -> list[Task]:
-        tasks = list(self._tasks)
-        self._record(audit_event(actor, "read", TASKS, tuple(task.id for task in tasks)))
-        return tasks
-
-    async def create(self, actor: Actor, body: CreateTaskBody) -> Task:
-        id = str(self._counter[0] + 1)
-        event = audit_event(actor, "create", TASKS, (id,), written(body))
+    async def create(self, body: CreateTaskBody) -> Task:
         self._counter[0] += 1
-        task = Task(id=id, title=body.title, done=False)
+        task = Task(id=str(self._counter[0]), title=body.title, done=False)
         self._tasks.append(task)
-        self._record(event)
         return task
 
-    async def update(self, actor: Actor, id: str, body: UpdateTaskBody) -> Task | None:
-        event = audit_event(actor, "update", TASKS, (id,), written(body))
+    async def update(self, id: str, body: UpdateTaskBody) -> Task | None:
         for task in self._tasks:
             if task.id == id:
                 task.done = body.done
-                self._record(event)
                 return task
-        self._record(absent(event))
         return None
 
-    async def remove(self, actor: Actor, id: str) -> bool:
-        event = audit_event(actor, "delete", TASKS, (id,))
+    async def remove(self, id: str) -> bool:
         for index, task in enumerate(self._tasks):
             if task.id == id:
                 del self._tasks[index]
-                self._record(event)
                 return True
-        self._record(absent(event))
         return False
 
 
 class MemoryAuditEvents:
     """`AuditEvents` over one tenant's list."""
 
-    def __init__(self, events: list[RecordedAuditEvent]) -> None:
+    def __init__(self, tenant_id: str, events: list[RecordedAuditEvent]) -> None:
+        self._tenant_id: str = tenant_id
         self._events: list[RecordedAuditEvent] = events
+
+    async def record(self, event: RequestEvent) -> None:
+        self._events.append(
+            RecordedAuditEvent(
+                tenant_id=self._tenant_id,
+                recorded_at=datetime.now(UTC),
+                actor=event.actor,
+                action=None,
+                outcome=None,
+                resource_type=None,
+                method=event.method,
+                route=event.route,
+                status=event.status,
+                resource_ids=event.resource_ids,
+                fields=(),
+                request_id=event.request_id,
+                trace_id=event.trace_id,
+            )
+        )
 
     async def list(self) -> list[RecordedAuditEvent]:
         return list(self._events)
@@ -111,13 +100,12 @@ def _refuse_unset(tenant_id: str) -> None:
 
 
 class MemoryDatabase:
-    """One list of rows and one list of audit events per tenant, held for the life of the
+    """One list of rows and one list of request events per tenant, held for the life of the
     process.
 
     Exactly one tenant is seeded — the one a deployment with no identity resolver serves. Any
     other starts empty, which is what makes `two tenants do not see each other` a real
-    assertion here and not a coincidence of both being handed the same rows. The seed rows
-    carry no audit events: nobody read or changed them.
+    assertion here and not a coincidence of both being handed the same rows.
     """
 
     name: str = "memory"
@@ -131,16 +119,11 @@ class MemoryDatabase:
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)
-        return MemoryTaskStore(
-            tenant_id,
-            self._tenants.setdefault(tenant_id, []),
-            self._counter,
-            self._events.setdefault(tenant_id, []),
-        )
+        return MemoryTaskStore(self._tenants.setdefault(tenant_id, []), self._counter)
 
     def audit_events(self, tenant_id: str) -> AuditEvents:
         _refuse_unset(tenant_id)
-        return MemoryAuditEvents(self._events.setdefault(tenant_id, []))
+        return MemoryAuditEvents(tenant_id, self._events.setdefault(tenant_id, []))
 
     async def check(self) -> str:
         """A no-op that reports the current version: this substrate has no schema to be

@@ -47,10 +47,19 @@ decides nothing.
 _Avoid_: user (an actor may be an app), author, owner.
 
 **Audit event**:
-One store operation on tenant rows, recorded in the same transaction: the actor, the action,
-the ids of the rows, the names of the fields written, and whether it found them. Never a value a
-row holds. It outlives the row and the tenant it records.
+Who changed which rows, and who made which request: a row event or a request event. Never a
+value a row holds. It outlives the row and the tenant it records.
 _Avoid_: audit log entry, history, log line (a log line is lossy; an audit event is not).
+
+**Row event**:
+One statement's writes to one tenant's rows, recorded by a Postgres trigger in the same
+transaction: the actor, the action, the ids of the rows, and the names of the columns changed.
+_Avoid_: change log, history.
+
+**Request event**:
+One request a principal made, recorded before its response leaves: the actor, the method, the
+route, the values of its path parameters, and the status. It names no table and no action.
+_Avoid_: access log (a log line is lossy; a request event is not).
 
 **Owner role**:
 `<schema>_owner`. Owns the schema and every table in it and applies the DDL. `NOLOGIN` —

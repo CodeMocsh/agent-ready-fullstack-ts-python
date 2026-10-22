@@ -3,7 +3,7 @@ from functools import cache
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app import log, telemetry
+from app import log, request_events, telemetry
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(public.router)
     app.include_router(tenant.router)
     app.add_exception_handler(Unauthenticated, _refuse)
+    request_events.instrument(app)
     log.instrument(app)
     settings = build_telemetry()
     app.state.instruments = (

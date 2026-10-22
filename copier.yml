@@ -106,7 +106,6 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks-client-events.live.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tenant_scoping.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/integration/test_tasks_on_postgres.py{% endif %}"
-  - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/integration/test_audit_events_on_postgres.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity/__init__.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"

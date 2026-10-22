@@ -22,6 +22,7 @@ from app.store.roles import app_role, emit_roles_sql, owner_role
 from tests.integration.conftest import (
     Provisioned,
     a_fresh_schema_name,
+    acting_on,
     connect,
     deprovision,
     drop_schema,
@@ -36,8 +37,9 @@ _COUNT = "SELECT count(*) FROM tasks"
 
 
 async def seeded(provisioned: Provisioned) -> Any:
-    """An application-role connection with one row for each of two tenants."""
-    conn: Any = await connect(provisioned.app_dsn)
+    """An application-role connection, acting as the suite, with one row for each of two
+    tenants."""
+    conn: Any = await acting_on(await connect(provisioned.app_dsn))
     await conn.execute(f'SET search_path TO "{provisioned.schema}"')
     for tenant in (ACME, GLOBEX):
         async with conn.transaction():

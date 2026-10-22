@@ -898,7 +898,7 @@ need_only f docs/adr/template \
     0014-the-gate-runs-once-per-tree-and-one-at-a-time.md \
     0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md \
     0016-the-template-s-decisions-are-numbered-apart-from-yours.md \
-    0017-every-store-operation-on-tenant-rows-records-an-audit-event.md
+    0017-the-database-records-every-write-and-the-request-layer-every-request.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -906,6 +906,7 @@ need_grep 'ENABLE ROW LEVEL SECURITY' deploy/schema.sql
 need_grep 'WITH CHECK' deploy/schema.sql "Under USING alone, a tenant can insert a row it cannot then read."
 need_grep "CHECK (tenant_id <> '')" deploy/schema.sql "Without it, a row with an empty tenant is readable by every connection that never set one."
 need_grep 'ON tasks (tenant_id,' deploy/schema.sql "The policy cannot use an index that does not lead with tenant_id."
+need_grep 'EXECUTE FUNCTION audit_row_change()' deploy/schema.sql "Without the audit triggers, a write to a tenant table records no row event."
 need_grep 'DATABASE_OWNER_URL' backend/app/migrate.py
 need_grep 'OwnerCredentialVisible' backend/app/wiring.py
 need_no_grep 'DATABASE_OWNER_URL' backend/app/store/pg.py "The application must not hold a credential that can apply DDL."

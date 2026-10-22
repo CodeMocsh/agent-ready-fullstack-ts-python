@@ -28,7 +28,9 @@ from uuid import uuid4
 
 import pytest
 
+from app.identity.shared import Actor
 from app.store import Database
+from app.store.acting import SET_ACTING, acting
 from app.store.conn import resolve_schema
 from app.store.migrate import apply
 from app.store.roles import app_role, emit_roles_sql, owner_role
@@ -60,6 +62,16 @@ async def connect(dsn: str) -> Any:
     import asyncpg
 
     return await asyncpg.connect(dsn=dsn)
+
+
+THE_SUITE = Actor(issuer="a-test", subject="the-suite", name="The suite")
+"""Who a connection the suite opens itself acts as, so the audit triggers let it write."""
+
+
+async def acting_on(conn: Any, actor: Actor = THE_SUITE) -> Any:
+    """`conn`, acting as `actor` for the rest of its session, as the pool sets every checkout."""
+    await conn.execute(SET_ACTING, *acting(actor, None, None))
+    return conn
 
 
 async def drop_schema(dsn: str, schema: str) -> None:

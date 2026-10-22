@@ -22,6 +22,7 @@ prints and what `Database.schema_version()` reports. No decision reads it.
 
 import hashlib
 
+from app.store.acting import MIGRATION_ACTING_SQL
 from app.store.conn import Conn, migration_lock, quote_ident, resolve_schema, search_path_sql
 from app.store.ddl import APPLIED_ONCE_DDL, SCHEMA_ENTRY_KEY, statements
 from app.store.roles import owner_role, writes_withheld_sql
@@ -187,7 +188,8 @@ async def _withhold_writes(conn: Conn, schema: str | None) -> None:
 
 
 async def _apply_all(conn: Conn, schema: str | None = None) -> str:
-    """Every entry in order under an advisory lock, recording each in the ledger.
+    """Every entry in order under an advisory lock, recording each in the ledger, acting as
+    `MIGRATION_ACTOR`.
 
     Every entry is re-executed rather than filtered against the ledger, because every entry is
     idempotent — that is the rule `ddl.py` enforces, and leaning on it here is what keeps this
@@ -205,6 +207,7 @@ async def _apply_all(conn: Conn, schema: str | None = None) -> str:
         await conn.execute(first_sql)
         await _become_owner(conn, name)
         await conn.execute(search_path_sql(name))
+        await conn.execute(MIGRATION_ACTING_SQL)
         await conn.execute(APPLIED_ONCE_DDL)
         await conn.execute(_RECORD, first_key)
         for key, sql in entries[1:]:
@@ -237,6 +240,7 @@ def emit_sql(schema: str | None = None) -> str:
         f"{first_sql};",
         "",
         f"{search_path_sql(name)};",
+        f"{MIGRATION_ACTING_SQL};",
         "",
         f"{APPLIED_ONCE_DDL};",
         "",

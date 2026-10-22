@@ -84,7 +84,7 @@ starts another. psql does not expand a variable in a `-c` string, so the SQL goe
 ## Removing a tenant's audit events
 
 An audit event outlives the row and the tenant it records, and the application role cannot
-remove one ([adr/template/0017](adr/template/0017-every-store-operation-on-tenant-rows-records-an-audit-event.md)).
+remove one ([adr/template/0017](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md)).
 Where a law requires a tenant's events removed, an operator removes them as a member of
 `<schema>_owner`, the role `DATABASE_OWNER_URL` names. `FORCE` binds the owner to the policy too,
 so set the tenant first. For the default schema, `app`:
@@ -102,6 +102,20 @@ With `DB_SCHEMA` set, put its value where `app` is in the first two lines.
 
 The `DELETE` reports how many events it removed. It removes nothing from another tenant, because
 the policy hides every other tenant's events from it.
+
+## Writing tenant rows by hand
+
+Postgres refuses a write to a tenant table that names no actor, and records every write it
+allows ([adr/template/0017](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md)).
+An operator who corrects a row by hand sets their own actor first, in the same session:
+
+```sql
+SELECT set_config('app.actor_issuer', 'operators', false),
+       set_config('app.actor_subject', 'the-operator', false),
+       set_config('app.actor_name', 'The operator', false);
+```
+
+Removing audit events needs no actor: `audit_events` records nothing of its own.
 
 ## Timeouts
 

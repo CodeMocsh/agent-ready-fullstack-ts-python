@@ -32,10 +32,10 @@ from tests.integration.conftest import (
 )
 
 NOTE_REPAIR = (
-    f"{ddl.REPAIR_BAND:04d}_tasks_note",
+    f"{ddl.REPAIR_BAND + 99:04d}_tasks_note",
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS note text",
 )
-"""A repair entry injected by one test. The band has no real occupant yet, and the failure it
+"""A repair entry injected by one test, keyed after every repair the template ships. The failure it
 guards against -- a column added to a shipped `CREATE TABLE IF NOT EXISTS`, which reaches no
 database that already had the table -- bites on the first schema change rather than later."""
 

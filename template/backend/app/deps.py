@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app import log
+from app import audit_events
 from app.identity import principal_for
 from app.identity.shared import Principal
 from app.store import Database, TaskStore
@@ -33,14 +33,15 @@ def database_of(request: Request) -> Database:
 async def resolved_principal(
     request: Request, principal: Annotated[Principal, Depends(principal_for)]
 ) -> Principal:
-    """The principal `principal_for` resolved, its tenant and actor named on this request's
-    `request completed` line.
+    """The principal `principal_for` resolved, served by `audit_events.serve`: named on this
+    request's `request completed` line, the actor of every row the request writes, and the actor of
+    its request event.
 
     The tenant requirement's router carries this, so every route under it names who it served,
-    and an override of `principal_for` reaches every route under it. `docs/adr/template/0011`.
+    and an override of `principal_for` reaches every route under it. `docs/adr/template/0011` and
+    `0017`.
     """
-    log.name_principal(request, principal)
-    return principal
+    return audit_events.serve(request, principal)
 
 
 PrincipalDep = Annotated[Principal, Depends(resolved_principal)]

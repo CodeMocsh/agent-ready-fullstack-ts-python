@@ -87,4 +87,4 @@ middleware that writes the line after the response.
   server did.
 - Logs leave the process only on stdout. There is no security-event stream, no keyed hashing of
   identifiers, and no OTLP export of logs. An audit event is a row, never a log line
-  ([0017](0017-every-store-operation-on-tenant-rows-records-an-audit-event.md)).
+  ([0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md)).

@@ -32,7 +32,7 @@ from app.store.migrate import (
     known_keys,
     known_version,
 )
-from app.store.roles import app_role, emit_roles_sql, owner_role
+from app.store.roles import APPEND_ONLY_TABLE, app_role, emit_roles_sql, owner_role
 from devtools.schema import SCHEMA_BASELINE
 
 SCHEMA_SQL = Path(__file__).resolve().parents[3] / "deploy" / "schema.sql"
@@ -252,6 +252,63 @@ def test_a_table_forced_before_its_policy_is_reported() -> None:
         "tasks is created at 0010_tasks, then given its policy at 0120_tasks_policy, then forced "
         "at 0100_tasks_force"
     ]
+
+
+def audits_out_of_order(entries: list[tuple[str, str]], tables: tuple[str, ...]) -> list[str]:
+    """Every table in `tables` but `audit_events` that is not audited after it is forced and after
+    `audit_row_change` exists, and `audit_events` when it is audited at all."""
+    found: list[str] = []
+    function = [key for key, sql in entries if "FUNCTION audit_row_change()" in sql]
+    for table in tables:
+        forced = [key for key, sql in entries if f"ALTER TABLE {table} ENABLE ROW" in sql]
+        audited = [
+            key
+            for key, sql in entries
+            if all(
+                f"CREATE TRIGGER {table}_audit_{write} " in sql for write, _ in ddl.AUDITED_WRITES
+            )
+        ]
+        if table == APPEND_ONLY_TABLE:
+            found += [f"{table} is audited at {key}" for key in audited]
+        elif not audited:
+            found.append(f"{table} is never audited")
+        elif not function or not forced or audited[0] < max(function[0], forced[0]):
+            found.append(
+                f"{table} is audited at {audited[0]}, before it is forced or the function exists"
+            )
+    return found
+
+
+def test_every_tenant_table_but_the_audit_events_is_audited_once_it_is_forced() -> None:
+    assert audits_out_of_order(ddl.statements(), ddl.TENANT_TABLES) == []
+
+
+def test_a_table_audited_before_it_is_forced_is_reported() -> None:
+    entries = [
+        (ddl.AUDIT_FUNCTION_ENTRY_KEY, "CREATE OR REPLACE FUNCTION audit_row_change()"),
+        ("0100_tasks_audit", dict(ddl.statements())["0140_tasks_audit"]),
+        ("0120_tasks_force", "ALTER TABLE tasks ENABLE ROW LEVEL SECURITY"),
+    ]
+
+    assert audits_out_of_order(entries, ("tasks",)) == [
+        "tasks is audited at 0100_tasks_audit, before it is forced or the function exists"
+    ]
+
+
+def test_audited_audit_events_are_reported() -> None:
+    audit = dict(ddl.statements())["0140_tasks_audit"].replace("tasks", APPEND_ONLY_TABLE)
+
+    assert audits_out_of_order([("0141_audit_events_audit", audit)], (APPEND_ONLY_TABLE,)) == [
+        "audit_events is audited at 0141_audit_events_audit"
+    ]
+
+
+def test_the_audit_function_reads_every_acting_setting() -> None:
+    body = dict(ddl.statements())[ddl.AUDIT_FUNCTION_ENTRY_KEY]
+
+    assert [
+        name for name in ddl.ACTING_GUCS if f"current_setting('{name}', true)" not in body
+    ] == []
 
 
 def test_a_table_never_forced_is_reported() -> None:

@@ -13,6 +13,11 @@ that made it, and the next request handed that pooled connection inherits it —
 reading another's rows, with nothing in any log to say so. `set_config(..., true)` is the
 local form and every statement below runs inside a transaction that has issued it.
 
+**The actor is set on every connection the pool lends.** The pool's `setup` sets every setting `audit_row_change`
+reads, from `audit_events.current_actor()` and the request's ids, before it lends the
+connection. They are session settings, and the pool sets all of them each time it lends a
+connection. A connection lent again does not carry the actor it had.
+
 **Every wait has a bound.** A statement, an answer, a transaction left idle, and a wait for a
 connection each raise once `Timeouts` says so. `docs/deployment.md` says why a platform's
 request timeout is not one of them. The bounds on the statement and the idle transaction are
@@ -30,10 +35,12 @@ from dataclasses import dataclass
 from typing import Any, Final
 from uuid import UUID, uuid4
 
-from app.audit_events import AuditEvent, RecordedAuditEvent, absent, audit_event, written
+from app import log
+from app.audit_events import RecordedAuditEvent, RequestEvent, current_actor
 from app.identity.shared import Actor
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import TASKS, AuditEvents, Connections, TaskStore, TenantUnset
+from app.store import AuditEvents, Connections, TaskStore, TenantUnset
+from app.store.acting import SET_ACTING, acting
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
 from app.store.migrate import check, schema_version
@@ -45,14 +52,14 @@ _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
 _RECORD = (
     "INSERT INTO audit_events (tenant_id, actor_issuer, actor_subject, actor_name, "
-    "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name, action, resource_type, "
-    "resource_ids, fields, outcome, request_id, trace_id) "
-    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)"
+    "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name, method, route, status, "
+    "resource_ids, fields, request_id, trace_id) "
+    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '{}', $12, $13)"
 )
 _AUDIT_EVENTS = (
     "SELECT tenant_id, recorded_at, actor_issuer, actor_subject, actor_name, on_behalf_of_issuer, "
-    "on_behalf_of_subject, on_behalf_of_name, action, resource_type, resource_ids, fields, "
-    "outcome, request_id, trace_id FROM audit_events ORDER BY seq"
+    "on_behalf_of_subject, on_behalf_of_name, action, outcome, resource_type, method, route, "
+    "status, resource_ids, fields, request_id, trace_id FROM audit_events ORDER BY seq"
 )
 
 
@@ -112,6 +119,13 @@ def _driver() -> Any:
     return asyncpg
 
 
+async def _name_who_acts(conn: Any) -> None:
+    """Set the actor and the request's ids on a connection the pool is about to lend."""
+    await conn.execute(
+        SET_ACTING, *acting(current_actor(), log.current_request_id(), log.current_trace_id())
+    )
+
+
 def _ended_but_still_lent(conn: Any) -> bool:
     """Whether Postgres ended this pooled connection while the pool still lends it. One the pool
     took back is detached, with `_con` set to `None`, and is not."""
@@ -144,19 +158,16 @@ def _recorded(row: Any) -> RecordedAuditEvent:
             on_behalf_of=acted_for,
         ),
         action=row["action"],
+        outcome=row["outcome"],
         resource_type=row["resource_type"],
+        method=row["method"],
+        route=row["route"],
+        status=row["status"],
         resource_ids=tuple(row["resource_ids"]),
         fields=tuple(row["fields"]),
-        outcome=row["outcome"],
         request_id=row["request_id"],
         trace_id=row["trace_id"],
     )
-
-
-def _named(id: str, parsed: UUID | None) -> str:
-    """How an event names the task: the uuid as a row carries it, or the id as given when it is
-    not one."""
-    return id if parsed is None else str(parsed)
 
 
 def _as_id(id: str) -> UUID | None:
@@ -184,55 +195,28 @@ class PostgresTaskStore:
         self._database: PostgresDatabase = database
         self._tenant_id: str = tenant_id
 
-    async def _record(self, conn: Any, event: AuditEvent) -> None:
-        acted_for = event.actor.on_behalf_of
-        await conn.execute(
-            _RECORD,
-            self._tenant_id,
-            event.actor.issuer,
-            event.actor.subject,
-            event.actor.name,
-            None if acted_for is None else acted_for.issuer,
-            None if acted_for is None else acted_for.subject,
-            None if acted_for is None else acted_for.name,
-            event.action,
-            event.resource_type,
-            list(event.resource_ids),
-            list(event.fields),
-            event.outcome,
-            event.request_id,
-            event.trace_id,
-        )
-
-    async def list(self, actor: Actor) -> list[Task]:
+    async def list(self) -> list[Task]:
         async with self._database.scoped(self._tenant_id) as conn:
-            tasks = [_task(row) for row in await conn.fetch(_LIST)]
-            await self._record(conn, audit_event(actor, "read", TASKS, tuple(t.id for t in tasks)))
-            return tasks
+            return [_task(row) for row in await conn.fetch(_LIST)]
 
-    async def create(self, actor: Actor, body: CreateTaskBody) -> Task:
-        id = uuid4()
-        event = audit_event(actor, "create", TASKS, (str(id),), written(body))
+    async def create(self, body: CreateTaskBody) -> Task:
         async with self._database.scoped(self._tenant_id) as conn:
-            task = _task(await conn.fetchrow(_CREATE, id, self._tenant_id, body.title))
-            await self._record(conn, event)
-            return task
+            return _task(await conn.fetchrow(_CREATE, uuid4(), self._tenant_id, body.title))
 
-    async def update(self, actor: Actor, id: str, body: UpdateTaskBody) -> Task | None:
+    async def update(self, id: str, body: UpdateTaskBody) -> Task | None:
         parsed = _as_id(id)
-        event = audit_event(actor, "update", TASKS, (_named(id, parsed),), written(body))
+        if parsed is None:
+            return None
         async with self._database.scoped(self._tenant_id) as conn:
-            row = None if parsed is None else await conn.fetchrow(_UPDATE, parsed, body.done)
-            await self._record(conn, event if row is not None else absent(event))
+            row = await conn.fetchrow(_UPDATE, parsed, body.done)
             return None if row is None else _task(row)
 
-    async def remove(self, actor: Actor, id: str) -> bool:
+    async def remove(self, id: str) -> bool:
         parsed = _as_id(id)
-        event = audit_event(actor, "delete", TASKS, (_named(id, parsed),))
+        if parsed is None:
+            return False
         async with self._database.scoped(self._tenant_id) as conn:
-            removed = parsed is not None and await conn.fetchval(_REMOVE, parsed) is not None
-            await self._record(conn, event if removed else absent(event))
-            return removed
+            return await conn.fetchval(_REMOVE, parsed) is not None
 
 
 class PostgresAuditEvents:
@@ -241,6 +225,26 @@ class PostgresAuditEvents:
     def __init__(self, database: "PostgresDatabase", tenant_id: str) -> None:
         self._database: PostgresDatabase = database
         self._tenant_id: str = tenant_id
+
+    async def record(self, event: RequestEvent) -> None:
+        acted_for = event.actor.on_behalf_of
+        async with self._database.scoped(self._tenant_id) as conn:
+            await conn.execute(
+                _RECORD,
+                self._tenant_id,
+                event.actor.issuer,
+                event.actor.subject,
+                event.actor.name,
+                None if acted_for is None else acted_for.issuer,
+                None if acted_for is None else acted_for.subject,
+                None if acted_for is None else acted_for.name,
+                event.method,
+                event.route,
+                event.status,
+                list(event.resource_ids),
+                event.request_id,
+                event.trace_id,
+            )
 
     async def list(self) -> list[RecordedAuditEvent]:
         async with self._database.scoped(self._tenant_id) as conn:
@@ -293,6 +297,7 @@ class PostgresDatabase:
                         min_size=self._min_size,
                         max_size=self._max_size,
                         command_timeout=self._timeouts.answer,
+                        setup=_name_who_acts,
                         server_settings={
                             "search_path": self._schema,
                             "statement_timeout": _milliseconds(self._timeouts.statement),
