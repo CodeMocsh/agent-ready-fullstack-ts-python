@@ -154,6 +154,16 @@ What to expect, because it is not all free:
   in the same release.
   [adr/template/0017](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md)
   says why.
+- **From 0.43.0 test files in one worker share their modules and one jsdom window.**
+  `frontend/vitest.config.ts` sets `isolate: false`. After each file, `frontend/tests/setup.ts`
+  puts back the shared state that tests commonly change. Other state that a file changes now
+  reaches the next file in its worker, for example a module-level cache or a listener on `window`.
+  The file that changes it puts it back after its last test. If you merged
+  `frontend/tests/setup.ts` by hand, take the template's `beforeAll` and the hook after the last
+  test as they are: a registration at the top of the module accumulates once for each file. A test
+  that fails only after the update can depend on what an earlier file left. Run
+  `pnpm exec vitest run --maxWorkers=1 --sequence.shuffle --sequence.seed=<n>` with a few values of
+  `<n>`: a failure that comes and goes with the seed depends on the order of the files.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

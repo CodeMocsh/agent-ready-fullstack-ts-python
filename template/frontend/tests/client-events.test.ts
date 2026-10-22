@@ -104,5 +104,6 @@ describe("client events", () => {
 
     await expect.poll(() => said.mock.calls.length).toBe(1);
     expect(refusals).toHaveLength(1);
+    said.mockRestore();
   });
 });

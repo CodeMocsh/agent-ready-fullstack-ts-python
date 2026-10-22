@@ -30,10 +30,6 @@ beforeAll(() => {
 });
 
 afterEach(async () => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
-  vi.unstubAllEnvs();
   cleanup();
   if (!againstLiveBackend) {
     releaseEveryHeldRequest();
@@ -55,6 +51,12 @@ afterEach(async () => {
 });
 
 afterAll(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  localStorage.clear();
+  sessionStorage.clear();
+  window.history.replaceState(null, "", "/");
   if (!againstLiveBackend) {
     server.close();
     server.events.removeAllListeners();
