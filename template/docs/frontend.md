@@ -23,6 +23,14 @@ frontend/
 `src/mocks/` is the fixture layer every component test runs against. Keep it when the backend
 feels real enough.
 
+Test files in one worker share their modules and one jsdom window. `vitest.config.ts` sets
+`isolate: false`. Without it, each file loads again the modules that `tests/setup.ts` imports.
+When a worker runs many files, that load is most of the CPU the tests use. `tests/setup.ts`
+itself still runs once for each file. A registration it makes on a shared module therefore goes
+in `beforeAll` and comes off after the file's last test, or it accumulates once for each file.
+After each file, `tests/setup.ts` puts back the shared state that tests commonly change. A file
+that changes other shared state puts it back after its last test.
+
 ## Vendored and generated code — do not tidy
 
 - `src/components/ui/**`, `src/lib/utils.ts` and `public/mockServiceWorker.js` were written by a

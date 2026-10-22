@@ -82,8 +82,8 @@ partial run is wrong there. CI needs neither the record nor the lock.
   loses its parallelism. The runner prints the seconds on the clock beside the CPU-seconds, and
   nothing holds them.
 - The measure grows with parallelism, because each worker a test runner starts uses CPU to start.
-  As the template ships them, the frontend tests use 5.7 CPU-seconds one file at a time, and 7.5
-  with every file at once.
+  As the template ships them, the frontend tests use 3.5 CPU-seconds in one worker, and 10.8
+  with a worker for each file.
 - `devtools/gate.sh` is rendered from `devtools/gate.sh.jinja`, because the lock carries the
   project's name.
 - The runner keeps its jobs in one file: which halves are installed, the record, the lock, the
