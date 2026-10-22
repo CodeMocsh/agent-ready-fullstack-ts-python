@@ -13,25 +13,27 @@ configure({ asyncUtilTimeout: PATIENCE_MS });
 
 const inFlight = new Map<string, string>();
 
-server.events.on("request:start", ({ request, requestId }) => {
-  inFlight.set(requestId, `${request.method} ${request.url}`);
-});
-
 function settled({ requestId }: { requestId: string }): void {
   inFlight.delete(requestId);
 }
 
-server.events.on("request:end", settled);
-server.events.on("request:unhandled", settled);
-server.events.on("unhandledException", settled);
-
 beforeAll(() => {
   if (!againstLiveBackend) {
+    server.events.on("request:start", ({ request, requestId }) => {
+      inFlight.set(requestId, `${request.method} ${request.url}`);
+    });
+    server.events.on("request:end", settled);
+    server.events.on("request:unhandled", settled);
+    server.events.on("unhandledException", settled);
     server.listen({ onUnhandledRequest: "error" });
   }
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   cleanup();
   if (!againstLiveBackend) {
     releaseEveryHeldRequest();
@@ -55,5 +57,6 @@ afterEach(async () => {
 afterAll(() => {
   if (!againstLiveBackend) {
     server.close();
+    server.events.removeAllListeners();
   }
 });
