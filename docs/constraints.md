@@ -49,6 +49,28 @@ than a download, because the thing being verified is a binary. Bump the version 
 platform hashes together -- they are the same release, and a hash that belongs to another one
 fails closed.
 
+## The second install runs behind a dead proxy, not without a network
+
+The gate runs `devtools/install.sh` once to install. Then it runs the script again with every
+proxy variable set to a closed port on loopback, so each download fails at once. The dead proxy
+is not a real network cut. A tool that ignores the proxy variables still reaches the network,
+and the run passes. So the gate first runs a canary for curl, pnpm and uv behind the same proxy,
+and fails when a canary does not fail on the connection.
+
+The gate runs the script a third time behind the same proxy, with the lockfile settings that
+`ci.yml` sets. This run proves that those settings accept the lockfiles that the first run
+wrote.
+
+A real cut was rejected. macOS has no unprivileged way to take the network from one process.
+`unshare -n` on Linux needs root or a user namespace, and Ubuntu 24.04 restricts user namespaces
+by default. A cut that works only on CI leaves the hook without the check, and
+[adr/0003](adr/0003-the-gate-runs-again-where-the-committer-is-a-stranger.md) makes the hook
+the first place that the gate answers.
+
+The gate passes `install.sh` no browser, because nothing here fetches one except
+`make screenshots`. Playwright skips a browser that is already present, and the gate does not
+prove it.
+
 ## Stopping a half means stopping a process group, and `/bin/sh` fights you twice
 
 `uv run` and `pnpm` both exec a launcher that spawns the real server as a child. Killing the

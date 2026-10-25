@@ -33,9 +33,14 @@ for the secret scan in the gate.
 make install
 ```
 
-That runs `pnpm install` in `frontend/`, `uv sync --all-groups` in `backend/` (which installs
-the Python version pinned in `backend/.python-version`), activates the versioned git hooks, and
-fetches what the gate and the browser tiers need.
+That activates the versioned git hooks, then runs `devtools/install.sh`. The script runs
+`pnpm install` in `frontend/` and `uv sync --all-groups` in `backend/` (which installs the Python
+version pinned in `backend/.python-version`), and fetches what the gate and the browser tiers
+need. Each step downloads only what is absent. Run it again with nothing changed, and it
+downloads nothing for the two halves, gitleaks or openapi-typescript. The template's own gate
+checks this before each release. pnpm fetches openapi-typescript again once its copy is older
+than `dlxCacheMaxAge` in `frontend/pnpm-workspace.yaml`. Nothing checks that Playwright skips a
+browser that it already holds.
 
 It also writes `frontend/pnpm-lock.yaml` and `backend/uv.lock`, which do not ship with the
 template: a project generated today should resolve against today's registry rather than against
@@ -164,6 +169,11 @@ What to expect, because it is not all free:
   that fails only after the update can depend on what an earlier file left. Run
   `pnpm exec vitest run --maxWorkers=1 --sequence.shuffle --sequence.seed=<n>` with a few values of
   `<n>`: a failure that comes and goes with the seed depends on the order of the files.
+- **From 0.44.0 `make install` and CI install through `devtools/install.sh`.** If your
+  `Makefile` or a workflow of yours installs a half its own way, merge it into the script.
+- **From 0.44.0 CI refuses a lockfile that does not match its manifest.** Before, `uv sync
+  --frozen` did not compare `backend/uv.lock` with `backend/pyproject.toml`. Run
+  `cd backend && uv lock` and commit the result before you push the update.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

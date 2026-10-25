@@ -30,6 +30,14 @@ on:
 permissions:
   contents: read
 
+# Every install here refuses a lockfile that is missing or does not match its manifest, so CI
+# never resolves something no developer has. `uv sync --frozen` would not compare the lockfile
+# with the manifest at all. A laptop sets neither, so `make install` there still writes a
+# lockfile after a manifest edit.
+env:
+  UV_LOCKED: "1"
+  pnpm_config_frozen_lockfile: "true"
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -61,17 +69,12 @@ jobs:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
 
-      # Installed directly rather than through `make install`, which also arms the git
-      # hooks -- there is no commit to gate here. Both halves install frozen, so a
-      # lockfile that does not match its manifest fails here rather than resolving
-      # something no developer has.
-      - run: pnpm -C frontend install --frozen-lockfile
-
-      - name: Install the backend
+      - name: Install the backend's Python
         working-directory: backend
-        run: |
-          uv python install
-          uv sync --all-groups --frozen
+        run: uv python install
+
+      # The script `make install` runs, without a browser, which the gate does not use.
+      - run: sh devtools/install.sh
 
       - run: make gate
 
@@ -94,6 +97,6 @@ jobs:
         working-directory: backend
         run: |
           uv python install
-          uv sync --all-groups --frozen
+          uv sync --all-groups
 
       - run: make db-test
