@@ -1,56 +1,55 @@
-import { focusManager, QueryObserver } from "@tanstack/react-query";
+import { focusManager, type QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQueryClient } from "@/query-client";
 
 const TASKS = ["tasks"];
-const THIRTY_SECONDS = 30_000;
+const AS_READ = "the tasks as this tab read them";
+const AS_CHANGED = "the tasks as another writer changed them";
 
-function aTabShowingTasks() {
-  const client = createQueryClient(vi.fn());
-  const read = vi.fn(async () => "the tasks");
-  client.mount();
-  client.setQueryData(TASKS, "the tasks");
-  const unsubscribe = new QueryObserver(client, { queryKey: TASKS, queryFn: read }).subscribe(
-    () => undefined,
-  );
-  return {
-    read,
-    close: () => {
-      unsubscribe();
-      client.unmount();
-    },
-  };
+let client: QueryClient;
+let held: string;
+const unsubscribes: Array<() => void> = [];
+
+function aScreenShowingTasks() {
+  const screen = new QueryObserver(client, { queryKey: TASKS, queryFn: async () => held });
+  unsubscribes.push(screen.subscribe(() => undefined));
+  return screen;
 }
 
-async function refocus(): Promise<void> {
-  focusManager.setFocused(false);
-  focusManager.setFocused(true);
+async function settle(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
 describe("the query client", () => {
-  let tab: ReturnType<typeof aTabShowingTasks>;
-
   beforeEach(() => {
     vi.useFakeTimers();
-    tab = aTabShowingTasks();
+    client = createQueryClient(vi.fn());
+    client.mount();
+    held = AS_READ;
   });
 
   afterEach(() => {
-    tab.close();
+    for (const unsubscribe of unsubscribes.splice(0)) unsubscribe();
+    client.unmount();
     focusManager.setFocused(undefined);
     vi.useRealTimers();
   });
 
-  it("reads nothing again when a tab regains focus within 30 s", async () => {
-    await vi.advanceTimersByTimeAsync(THIRTY_SECONDS - 1);
-    await refocus();
-    expect(tab.read).not.toHaveBeenCalled();
+  it("shows another writer's change when a tab regains focus, however recent its read", async () => {
+    const screen = aScreenShowingTasks();
+    await settle();
+    held = AS_CHANGED;
+    focusManager.setFocused(false);
+    focusManager.setFocused(true);
+    await settle();
+    expect(screen.getCurrentResult().data).toBe(AS_CHANGED);
   });
 
-  it("reads again what is older than 30 s when a tab regains focus", async () => {
-    await vi.advanceTimersByTimeAsync(THIRTY_SECONDS + 1);
-    await refocus();
-    expect(tab.read).toHaveBeenCalledOnce();
+  it("shows another writer's change when a screen mounts over data it read just now", async () => {
+    client.setQueryData(TASKS, AS_READ);
+    held = AS_CHANGED;
+    const screen = aScreenShowingTasks();
+    await settle();
+    expect(screen.getCurrentResult().data).toBe(AS_CHANGED);
   });
 });

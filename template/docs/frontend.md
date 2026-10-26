@@ -12,7 +12,7 @@ frontend/
   src/components/     UI; ui/ is vendored shadcn
   src/index.css       the @theme block
   src/router.tsx      routes
-  src/query-client.ts the query client, and how long data stays fresh
+  src/query-client.ts the query client
   src/client-events.ts reports a failure the browser saw to the backend's log
   src/missing-chunk.ts reloads the tab once when a deploy removed a chunk it asks for
   tests/              mirrors src/
@@ -36,10 +36,13 @@ that changes other shared state puts it back after its last test.
 
 The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them today.
 
-- **Data stays fresh for `FRESH_FOR_MS`, 30 s.** `src/query-client.ts` sets it as the default
-  `staleTime`. A tab that regains focus reads again only what is older. With TanStack's default
-  of `0`, every focus reads every mounted query again, at the same moment.
-  `tests/query-client.test.ts` holds both halves of this, and the 30 s.
+- **Data is stale as soon as it arrives.** `src/query-client.ts` keeps TanStack's default
+  `staleTime` of `0`. A screen that mounts reads again what it shows. A tab that regains focus
+  reads again every mounted query. Without a stream, that read is the only way a tab learns of a
+  write it did not make. Another person, another tab and a job outside a request make such
+  writes. With a longer `staleTime`, the screen shows their change late. The screen does not
+  show that it is late.
+  `tests/query-client.test.ts` holds this.
 - **A screen's first draw is one query, and so one request.** Its response holds everything the
   screen draws first. A part the person opens later mounts its own query when it opens.
   `TaskList` in `src/components/task-list.tsx` draws from one query.
@@ -48,8 +51,8 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   [deployment.md](deployment.md#a-burst-of-requests) says what that costs on a host that adds
   instances.
 - **This project has no stream yet.** A write invalidates the keys it made stale, in the tab that
-  wrote it. Another tab sees the change when it regains focus after `FRESH_FOR_MS`. A screen that
-  must show another tab's write sooner needs a stream. A `refetchInterval` under 30 s is not a
+  wrote it. Another tab sees the change when it mounts the screen or regains focus. A screen that
+  must show another writer's change sooner needs a stream. A `refetchInterval` under 30 s is not a
   substitute.
 - **A backstop is a timed read again.** It catches what a stream did not say. It is never the
   way a screen learns of a change.
