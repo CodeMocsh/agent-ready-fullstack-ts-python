@@ -16,12 +16,8 @@ E2E_BROWSERS ?= chromium
 default: install lint test
 
 install:
-	pnpm -C frontend install
-	cd backend && uv sync --all-groups
 	@$(MAKE) --no-print-directory hooks
-	sh devtools/secrets.sh fetch
-	pnpm -C frontend openapi:types
-	pnpm -C frontend exec playwright install $(E2E_BROWSERS)
+	sh devtools/install.sh $(E2E_BROWSERS)
 
 hooks:
 	@sh devtools/install-hooks.sh

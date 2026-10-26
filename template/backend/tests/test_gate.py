@@ -30,6 +30,7 @@ HOOK = ROOT / ".githooks" / "pre-commit"
 RUNNER = ROOT / "devtools" / "gate.sh"
 HOLD = ROOT / "devtools" / "hold-the-gate.pl"
 WORKTREE_TREE = ROOT / "devtools" / "worktree-tree.sh"
+INSTALL = ROOT / "devtools" / "install.sh"
 PYPROJECT = ROOT / "backend" / "pyproject.toml"
 E2E = ROOT / "frontend" / "e2e"
 BACKEND_TESTS = ROOT / "backend" / "tests"
@@ -133,14 +134,24 @@ def reached_from(target: str) -> set[str]:
     return reached
 
 
+FETCHING = ("playwright install", "devtools/install.sh")
+"""What a recipe line runs when it fetches: the browser itself, or the script that fetches it and
+everything else `make install` downloads."""
+
+
 def test_only_install_fetches_the_browser():
     makefile = MAKEFILE.read_text(encoding="utf-8")
     targets = re.findall(r"^([\w-]+):(?!=)", makefile, re.MULTILINE)
-    fetching = [t for t in targets if any("playwright install" in line for line in recipe_of(t))]
-    assert "install" in fetching, "`make install` no longer fetches the browser"
+    fetching = [t for t in targets if any(f in line for line in recipe_of(t) for f in FETCHING)]
+    assert any("devtools/install.sh $(E2E_BROWSERS)" in line for line in recipe_of("install")), (
+        "`make install` no longer names the browsers that devtools/install.sh fetches"
+    )
+    assert 'playwright install "$@"' in INSTALL.read_text(encoding="utf-8"), (
+        "devtools/install.sh no longer fetches the browsers it is given"
+    )
     assert fetching == ["install"], (
-        f"{fetching} run `playwright install`. Only `install` may. A target that fetches the "
-        f"browser needs the network every time it runs."
+        f"{fetching} run `playwright install` or devtools/install.sh. Only `install` may. A "
+        f"target that fetches the browser needs the network every time it runs."
     )
     for target in OPT_IN_TIER:
         assert "install" not in reached_from(target), (

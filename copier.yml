@@ -164,8 +164,8 @@ _message_after_copy: |
   Commit before `make install`: the installer activates this project's git hooks, and
   that needs a repository to install them into. Commit the lockfiles it produces too --
   no lockfile ships with the template, because a fresh project should resolve against
-  today's registry rather than the day the template was written{% if github_ci %}, and CI installs
-  from the lockfiles with --frozen{% endif %}.
+  today's registry rather than the day the template was written{% if github_ci %}, and CI refuses
+  a lockfile that is missing or does not match its manifest{% endif %}.
 
   Then, in one terminal:
 

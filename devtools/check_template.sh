@@ -208,6 +208,7 @@ need_exec .githooks/pre-commit "Rendering can drop the executable bit, and a hoo
 need_exec devtools/install-hooks.sh "Rendering can drop the executable bit"
 need_exec devtools/dev.sh "Rendering can drop the executable bit"
 need_exec devtools/contract-test.sh "Rendering can drop the executable bit"
+need_exec devtools/install.sh "Rendering can drop the executable bit"
 
 echo "==> assert every document is named, and names only documents that exist"
 python3 "$REPO/devtools/links_test.py" \
@@ -619,6 +620,8 @@ need backend/tests/test_workflow.py
 need_grep 'make gate' .github/workflows/ci.yml "The workflow runs the list the hook runs, so the two cannot drift."
 need_no_grep 'make pre-commit' .github/workflows/ci.yml "make pre-commit skips a half that is not installed, and the workflow must run both."
 need_no_grep '\.jinja' .github/workflows/ci.yml
+sed 's/#.*//' .github/workflows/ci.yml | grep -q 'sh devtools/install.sh$' \
+    || fail "ci.yml no longer runs 'sh devtools/install.sh' outside a comment. A workflow that installs its own way drifts from make install."
 sed 's/#.*//' .github/workflows/ci.yml | grep -q 'make db-test' \
     || fail "ci.yml no longer runs 'make db-test' outside a comment, so tenant isolation is checked against a real Postgres nowhere after a push."
 
@@ -698,8 +701,16 @@ mutation("test_only_install_fetches_the_browser",
          "a browser tier that fetches the browser itself")
 
 mutation("test_only_install_fetches_the_browser",
-         "Makefile", "\tpnpm -C frontend exec playwright install $(E2E_BROWSERS)\n", "",
-         "an install that no longer fetches the browser")
+         "Makefile", "devtools/install.sh $(E2E_BROWSERS)\n", "devtools/install.sh\n",
+         "an install that names no browser")
+
+mutation("test_only_install_fetches_the_browser",
+         "devtools/install.sh", '    pnpm -C frontend exec playwright install "$@"\n', "",
+         "an install script that no longer fetches the browser")
+
+mutation("test_only_install_fetches_the_browser",
+         "Makefile", "test-e2e:\n", "test-e2e:\n\tsh devtools/install.sh chromium\n",
+         "a browser tier that runs the install script in its recipe")
 
 mutation("test_only_install_fetches_the_browser",
          "Makefile", "test-e2e:\n", "test-e2e: install\n",
@@ -1361,8 +1372,56 @@ git config user.name "Test"
 git add -A
 git -c core.hooksPath=/dev/null commit -qm "Initial commit"
 
-echo "==> backend: install, lint, test"
-run "uv sync" sh -c 'cd backend && uv sync --all-groups'
+echo "==> install with devtools/install.sh, then again behind a dead proxy, then again with the lockfile settings ci.yml sets"
+run "devtools/install.sh" sh devtools/install.sh
+need frontend/pnpm-lock.yaml "docs/installation.md says to commit the lockfiles that the first install writes."
+need backend/uv.lock "docs/installation.md says to commit the lockfiles that the first install writes."
+GITLEAKS_VERSION="$(sed -n 's/^version=//p' devtools/secrets.sh)"
+need_exec "build/tools/gitleaks-$GITLEAKS_VERSION/gitleaks" "devtools/install.sh fetches gitleaks into build/tools, where the gate looks for it."
+
+DEAD_PROXY=http://127.0.0.1:9
+behind_dead_proxy() {
+    env -u NO_PROXY -u no_proxy \
+        HTTPS_PROXY="$DEAD_PROXY" https_proxy="$DEAD_PROXY" \
+        HTTP_PROXY="$DEAD_PROXY" http_proxy="$DEAD_PROXY" \
+        ALL_PROXY="$DEAD_PROXY" all_proxy="$DEAD_PROXY" \
+        pnpm_config_fetch_retries=0 UV_HTTP_RETRIES=0 "$@"
+}
+cut_holds() {
+    downloader="$1" refusal="$2"
+    shift 2
+    if behind_dead_proxy "$@" >"$WORK/step.log" 2>&1 || ! grep -q "$refusal" "$WORK/step.log"; then
+        cat "$WORK/step.log" >&2
+        fail "$downloader did not fail on the connection behind the dead proxy at $DEAD_PROXY, so a second install that passes behind it does not prove that it downloads nothing."
+    fi
+}
+printf 'idna\n' >"$WORK/canary.in"
+cut_holds curl "Failed to connect" curl -fsS -o /dev/null https://github.com
+cut_holds pnpm ERR_PNPM_META_FETCH_FAIL pnpm -C frontend view openapi-typescript version
+cut_holds uv "Connection refused" sh -c "cd backend && uv pip compile --no-cache '$WORK/canary.in'"
+run "devtools/install.sh, behind a dead proxy" behind_dead_proxy sh devtools/install.sh
+CI_LOCKS="$(sed 's/#.*//' .github/workflows/ci.yml | awk '/^env:/ { held = 1; next } /^[^ ]/ { held = 0 } held' | sed -n 's/^  \([A-Za-z_]*\): "\(.*\)"$/\1=\2/p')"
+for setting in UV_LOCKED=1 pnpm_config_frozen_lockfile=true; do
+    printf '%s\n' "$CI_LOCKS" | grep -qx "$setting" \
+        || fail "the env of ci.yml does not set $setting for the whole workflow, so CI resolves a lockfile that is missing or does not match its manifest."
+done
+run "devtools/install.sh, behind a dead proxy, with the lockfile settings ci.yml sets" behind_dead_proxy env $CI_LOCKS sh devtools/install.sh
+LOCKLESS="$WORK/lockless"
+mkdir -p "$LOCKLESS/frontend" "$LOCKLESS/backend"
+cp frontend/package.json frontend/pnpm-workspace.yaml "$LOCKLESS/frontend/"
+cp backend/pyproject.toml backend/.python-version "$LOCKLESS/backend/"
+if behind_dead_proxy env $CI_LOCKS pnpm -C "$LOCKLESS/frontend" install >"$WORK/step.log" 2>&1 \
+    || ! grep -q 'frozen' "$WORK/step.log"; then
+    cat "$WORK/step.log" >&2
+    fail "pnpm did not refuse a frontend with no lockfile under the settings ci.yml sets. CI would resolve against the registry of the day."
+fi
+if (cd "$LOCKLESS/backend" && behind_dead_proxy env $CI_LOCKS uv sync --all-groups) >"$WORK/step.log" 2>&1 \
+    || ! grep -q 'UV_LOCKED=1' "$WORK/step.log"; then
+    cat "$WORK/step.log" >&2
+    fail "uv did not refuse a backend with no uv.lock under the settings ci.yml sets. CI would resolve against the registry of the day."
+fi
+
+echo "==> backend: lint, test"
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
 if [ "$VARIANT" = "default" ]; then
@@ -1393,8 +1452,7 @@ printf '%s\n' "$out" | grep -q 'reportCallIssue' || {
     exit 1
 }
 
-echo "==> frontend: install, lint, test, build"
-run "pnpm install" pnpm -C frontend install --prefer-offline
+echo "==> frontend: lint, test, build"
 
 echo "==> assert a fresh install ships no known high-severity vulnerability"
 pnpm -C frontend audit --prod --json >"$WORK/audit.json" || true
