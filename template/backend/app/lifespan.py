@@ -1,5 +1,6 @@
-"""What this process runs beside the app: one `Database`, verified before the first request and
-closed after the last, and the instruments that observe it.
+"""What this process runs beside the app: the routes `_routed` names, built before the first
+request; one `Database`, verified before the first request and closed after the last; and the
+instruments that observe it.
 
 `app/wiring.py` answers *what did this deployment configure*; this answers *what is this process
 running*, and reads no variable. A `build_` function that reads none belongs here.
@@ -14,6 +15,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.routing import RouteContext, iter_route_contexts
 
 from app import log
 from app.environment import refuse_development_settings
@@ -24,9 +26,11 @@ from app.wiring import build, unauthenticated_is_acknowledged
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Refuse a production process carrying development settings, then hold the `Database` on
-    `app.state` for the life of the process. Closes the database, then the instruments."""
+    """Refuse a production process carrying development settings, build the routes, then hold
+    the `Database` on `app.state` for the life of the process. Closes the database, then the
+    instruments."""
     refuse_development_settings()
+    _ = await asyncio.to_thread(_routed, app)
     database = build()
     version = await database.check()
     log.serving(database.name, version)
@@ -42,6 +46,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         finally:
             if app.state.instruments is not None:
                 await asyncio.to_thread(app.state.instruments.shutdown)
+
+
+def _routed(app: FastAPI) -> list[RouteContext]:
+    """Every route that `iter_route_contexts` yields for `app`, built, so that no request builds
+    one. A route that `frontend()` adds to an included router is not among them: the first request
+    that no other route matches builds it. Blocks: call it off the event loop."""
+    return list(iter_route_contexts(app.routes))
 
 
 async def _say_what_this_deployment_authenticates(app: FastAPI, substrate: str) -> None:
