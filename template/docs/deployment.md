@@ -71,6 +71,30 @@ Nothing here deletes an audit event, and the application role cannot. Retention 
 [Removing a tenant's audit events](#removing-a-tenants-audit-events) says how an operator
 removes one tenant's events.
 
+## A burst of requests
+
+A burst is many requests that reach the backend at the same moment. One process serves them in
+turn on its CPU. An instance admits them up to its concurrency limit.
+
+A host that adds instances under load can send part of a burst to an instance that is still
+starting. Cloud Run says: "If the CPU of the instance is already highly utilized, Cloud Run might
+not send as many requests to a given instance"
+([about concurrency](https://docs.cloud.google.com/run/docs/about-concurrency)). For each
+request, it "determines if queuing for an upcoming instance or an existing instance is faster
+(in that order) before trying to start a new on-demand instance"
+([about instance autoscaling](https://docs.cloud.google.com/run/docs/about-instance-autoscaling)).
+A request held for an upcoming instance waits until that instance is ready. Its part of the
+screen draws nothing until it answers.
+
+In one deployment, a tab that regained focus sent 18 reads in 30 ms. The warm instance took 3.
+The other 15 waited 37 s for a new instance. Concurrency peaked at 17 of 40, so the limit did not
+turn them away. A busy CPU fits the docs and every timestamp. The metrics did not prove it: they
+report CPU per minute, and the burst arrived in 30 ms.
+
+A screen's first draw is one request, which keeps a burst small. A tab that regains focus reads
+again only what is older than 30 s, which makes a burst rare.
+[frontend.md](frontend.md#reading-server-state) says how.
+
 ## The release step
 
 The application verifies the schema at startup and refuses to serve if it is behind. Applying

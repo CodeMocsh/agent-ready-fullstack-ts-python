@@ -1,9 +1,10 @@
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { startClientEvents } from "@/client-events";
 import { reloadOnceOnMissingChunk } from "@/missing-chunk";
+import { createQueryClient } from "@/query-client";
 import { router } from "@/router";
 import "@/index.css";
 
@@ -28,10 +29,7 @@ window.addEventListener("error", (event) => record("uncaught", event.error));
 window.addEventListener("unhandledrejection", (event) => record("uncaught", event.reason));
 reloadOnceOnMissingChunk(window, () => sessionStorage, import.meta.url);
 
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({ onError: (error) => record("query", error) }),
-  mutationCache: new MutationCache({ onError: (error) => record("mutation", error) }),
-});
+const queryClient = createQueryClient(record);
 
 await enableMocking();
 
