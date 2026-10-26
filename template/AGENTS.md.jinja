@@ -96,7 +96,8 @@ fans out to both. Each half works without the other's toolchain.
   The browser then invalidates the queries that show it. A `refetchInterval` is a backstop, at
   30 s or more. Some values have no write behind them: a value derived at read time, or one held
   outside the tenant tables. Such a value keeps the backstop, or gets a write that the stream
-  reports.
+  reports. Give a query a `staleTime` above 0 only when the browser invalidates that query on a
+  stream event.
   [docs/frontend.md](docs/frontend.md#reading-server-state) says what this project has today.
 - Never assume the app is served from `/`. Derive every path from `import.meta.env.BASE_URL`.
 - Do not add `.env.production`. Nothing tests for one, and it is the file in which mock mode

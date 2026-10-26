@@ -92,7 +92,8 @@ turn them away. A busy CPU fits the docs and every timestamp. The metrics did no
 report CPU per minute, and the burst arrived in 30 ms.
 
 A screen's first draw is one request, which keeps a burst small. A tab that regains focus reads
-again only what is older than 30 s, which makes a burst rare.
+again only the queries the screen mounted: one for its first draw, and one for each part the
+person opened.
 [frontend.md](frontend.md#reading-server-state) says how.
 
 ## The release step
