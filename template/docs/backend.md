@@ -61,10 +61,15 @@ backend/
 - **A step that holds the event loop is reported.** `make dev` runs asyncio's debug mode, which
   logs a WARNING on the `asyncio` logger for each step longer than 0.1 s. The line names the
   task, not the route; the request line beside it names the route. One such line at each start
-  is uvicorn importing the app. In the tests, a step that uses more than `HELD_SECONDS` of CPU,
-  in `tests/event_loop.py`, is an error at teardown of the test that held it. A fixture wider
-  than one test puts the error on the next test. A test that holds the event loop on purpose
-  says so with `asyncio_reports.held_on_purpose()`.
+  is uvicorn importing the app. In the tests, a step that uses more than `HELD_SECONDS` of CPU
+  on the reference core, in `tests/event_loop.py`, is an error at teardown of the test that held
+  it. A fixture wider than one test puts the error on the next test. A test that holds the event
+  loop on purpose says so with `asyncio_reports.held_on_purpose()`.
+- **The limit is in seconds on the reference core, a Google Cloud E2 core.** A Mac runs the same
+  Python several times faster. At the start of each test process, the tests time a fixed
+  workload on the machine and scale the limit to it, so a fast machine allows less CPU. A pass
+  on a fast machine is then a pass on the reference core. The error names the CPU a step used
+  on this machine and what it comes to on the reference core.
 - **A call that waits without `await` uses no CPU, so the tests do not report it.** ruff's
   `ASYNC2` rules refuse a sleep, a file, a process or an HTTP request called directly in an
   `async def`. Nothing refuses a wait inside a synchronous helper, a database driver or a socket

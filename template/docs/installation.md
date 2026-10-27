@@ -174,6 +174,12 @@ What to expect, because it is not all free:
 - **From 0.44.0 CI refuses a lockfile that does not match its manifest.** Before, `uv sync
   --frozen` did not compare `backend/uv.lock` with `backend/pyproject.toml`. Run
   `cd backend && uv lock` and commit the result before you push the update.
+- **From 0.46.0 the event-loop limit is in seconds on the reference core.** On a machine faster
+  than a Google Cloud E2 core, a step may use less CPU than before, so a test that passed can
+  now fail. The error names the step, and the CPU it uses here and on the reference core. Move
+  that work into a `def` route or into `asyncio.to_thread`. `measure_every_step` now takes the
+  limit: if you merged `backend/tests/conftest.py` by hand, keep the template's call. A test of
+  yours that holds the event loop past the limit holds `step_limit.seconds` and a margin.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
