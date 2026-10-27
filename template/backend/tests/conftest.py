@@ -3,12 +3,15 @@
 **The development loop is set before anything imports the app**, so a module that reads
 `APP_ENV` at import reads `development`.
 
-**A step that uses more than `HELD_SECONDS` of CPU on an event loop, in `tests/event_loop.py`,
-is an error at teardown of its test.** asyncio runs in debug mode on every event loop here: the
-one `TestClient` serves the app on, and the one pytest-asyncio runs a test on. Any other record
-asyncio logs from WARNING up is an error too, except its line that a step took long in wall
-time. A record logged between two tests, by a fixture wider than one test, is an error at
-teardown of the next test, or of the last one.
+**A step that uses more than `HELD_SECONDS` of CPU on the reference core, on an event loop, is an
+error at teardown of its test.** A garbage collection during the step does not count.
+`tests/event_loop.py` names the reference core. At import, this module times a fixed workload on
+this machine, once per process, and scales the limit to it. So a step that passes here passes on
+the reference core. asyncio runs in debug mode on every event
+loop here: the one `TestClient` serves the app on, and the one pytest-asyncio runs a test on.
+Any other record asyncio logs from WARNING up is an error too, except its line that a step took
+long in wall time. A record logged between two tests, by a fixture wider than one test, is an
+error at teardown of the next test, or of the last one.
 
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
@@ -38,10 +41,17 @@ os.environ["PYTHONASYNCIODEBUG"] = "1"
 
 from app.migrate import OWNER_URL_ENV
 from app.store.conn import SCHEMA_ENV
-from tests.event_loop import Reported, measure_every_step, reported
+from tests.event_loop import (
+    Reported,
+    StepLimit,
+    measure_every_step,
+    reported,
+    step_limit_on_this_machine,
+)
 from tests.tiers import python_tiers
 
-measure_every_step()
+STEP_LIMIT = step_limit_on_this_machine()
+measure_every_step(STEP_LIMIT)
 
 pytest_plugins = ["pytester"]
 
@@ -65,6 +75,12 @@ def pytest_terminal_summary(
             f"not in this run: tests/{tier.folder}, which needs {tier.needs} -- "
             f"`{tier.runs}` runs it"
         )
+
+
+@pytest.fixture(scope="session")
+def step_limit() -> StepLimit:
+    """The limit every step on an event loop in this process is held to."""
+    return STEP_LIMIT
 
 
 @pytest.fixture(scope="session", autouse=True)
