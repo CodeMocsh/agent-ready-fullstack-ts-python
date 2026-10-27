@@ -6,8 +6,10 @@ step, and calls `Reported.check` after each test.
 """
 
 import asyncio
+import gc
 import logging
 import statistics
+import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -16,7 +18,8 @@ from typing import override
 
 HELD_SECONDS = 1.0
 """The CPU time one step may use on an event loop before its test fails, in seconds on the
-reference core. The time a step waits, for a CPU or for anything else, does not count."""
+reference core. The time a step waits, for a CPU or for anything else, does not count. The CPU
+time of a garbage collection that runs during the step does not count."""
 
 REFERENCE_WORKLOAD_SECONDS = 0.246
 """The CPU time `workload` uses on the reference core: one core of a Cloud Build `E2_HIGHCPU_32`
@@ -28,6 +31,31 @@ WORKLOAD_RUNS = 5
 _WAITED = "Executing %s took %.3f seconds"
 _HELD = "Executing %s used %.3f seconds of CPU, which is %.3f seconds on the reference core"
 _UNMEASURED = asyncio.Handle._run
+
+
+class _Collections(threading.local):
+    """The CPU time of the garbage collections that ran on one thread."""
+
+    def __init__(self) -> None:
+        self.started: float = 0.0
+        self.seconds: float = 0.0
+
+
+_COLLECTIONS = _Collections()
+
+
+def _time_a_collection(phase: str, _info: dict[str, int]) -> None:
+    now = time.thread_time()
+    if phase == "start":
+        _COLLECTIONS.started = now
+    else:
+        _COLLECTIONS.seconds += now - _COLLECTIONS.started
+
+
+def _cpu_seconds_without_collections() -> float:
+    """The CPU time this thread used so far, less the garbage collections that ran on it since
+    `measure_every_step`."""
+    return time.thread_time() - _COLLECTIONS.seconds
 
 
 def workload() -> int:
@@ -75,19 +103,22 @@ def step_limit_on_this_machine() -> StepLimit:
 
 def measure_every_step(limit: StepLimit) -> None:
     """From now on, each step an event loop in this process runs logs a WARNING on the `asyncio`
-    logger when it uses more than `limit.seconds` of CPU. The line names the CPU time on this
-    machine and on the reference core. A second call replaces the limit."""
+    logger when it uses more than `limit.seconds` of CPU. The CPU time of a garbage collection
+    that runs during a step does not count. The line names the CPU time on this machine and on
+    the reference core. A second call replaces the limit, and times garbage collections once."""
 
     def measured(self: asyncio.Handle) -> None:
-        started = time.thread_time()
+        started = _cpu_seconds_without_collections()
         _UNMEASURED(self)
-        used = time.thread_time() - started
+        used = _cpu_seconds_without_collections() - started
         if used > limit.seconds:
             logging.getLogger("asyncio").warning(
                 _HELD, self, used, limit.on_the_reference_core(used)
             )
 
     asyncio.Handle._run = measured
+    if _time_a_collection not in gc.callbacks:
+        gc.callbacks.append(_time_a_collection)
 
 
 def hold_the_event_loop(seconds: float) -> None:

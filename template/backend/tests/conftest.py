@@ -4,9 +4,10 @@
 `APP_ENV` at import reads `development`.
 
 **A step that uses more than `HELD_SECONDS` of CPU on the reference core, on an event loop, is an
-error at teardown of its test.** `tests/event_loop.py` names the reference core. At import, this
-module times a fixed workload on this machine, once per process, and scales the limit to it. So
-a step that passes here passes on the reference core. asyncio runs in debug mode on every event
+error at teardown of its test.** A garbage collection during the step does not count.
+`tests/event_loop.py` names the reference core. At import, this module times a fixed workload on
+this machine, once per process, and scales the limit to it. So a step that passes here passes on
+the reference core. asyncio runs in debug mode on every event
 loop here: the one `TestClient` serves the app on, and the one pytest-asyncio runs a test on.
 Any other record asyncio logs from WARNING up is an error too, except its line that a step took
 long in wall time. A record logged between two tests, by a fixture wider than one test, is an

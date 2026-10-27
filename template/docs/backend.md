@@ -63,7 +63,8 @@ backend/
   task, not the route; the request line beside it names the route. One such line at each start
   is uvicorn importing the app. In the tests, a step that uses more than `HELD_SECONDS` of CPU
   on the reference core, in `tests/event_loop.py`, is an error at teardown of the test that held
-  it. A fixture wider than one test puts the error on the next test. A test that holds the event
+  it. The CPU time of a garbage collection that runs during the step does not count. A fixture
+  wider than one test puts the error on the next test. A test that holds the event
   loop on purpose says so with `asyncio_reports.held_on_purpose()`.
 - **The limit is in seconds on the reference core, a Google Cloud E2 core.** A Mac runs the same
   Python several times faster. At the start of each test process, the tests time a fixed

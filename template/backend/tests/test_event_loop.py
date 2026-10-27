@@ -1,7 +1,7 @@
 """A step that uses more than `HELD_SECONDS` of CPU on the reference core, on an event loop, is
 an error at teardown of its test, from either event loop a test runs on. A step that only waits
-is not. The limit on this machine is `HELD_SECONDS` scaled by how fast it runs a fixed
-workload."""
+is not. A garbage collection that runs during a step does not count. The limit on this machine
+is `HELD_SECONDS` scaled by how fast it runs a fixed workload."""
 
 import asyncio
 
@@ -35,10 +35,38 @@ def test_a_route() -> None:
 """
 
 
-def run_a_route(pytester: pytest.Pytester, step: str) -> pytest.RunResult:
+A_ROUTE_THAT_COLLECTS = """
+import gc
+import time
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+
+def test_a_route_that_collects() -> None:
+    app = FastAPI()
+
+    @app.get("/step")
+    async def step() -> float:
+        collected = 0.0
+        while collected < {seconds}:
+            started = time.thread_time()
+            gc.collect()
+            collected += time.thread_time() - started
+        return collected
+
+    assert TestClient(app).get("/step").json() >= {seconds}
+"""
+
+
+def run(pytester: pytest.Pytester, source: str) -> pytest.RunResult:
     pytester.makeconftest("from tests.conftest import asyncio_logged, asyncio_reports\n")
-    pytester.makepyfile(A_ROUTE.format(step=step))
+    pytester.makepyfile(source)
     return pytester.runpytest("-p", "no:asyncio")
+
+
+def run_a_route(pytester: pytest.Pytester, step: str) -> pytest.RunResult:
+    return run(pytester, A_ROUTE.format(step=step))
 
 
 def test_a_route_that_uses_the_cpu_past_the_limit_is_an_error_that_names_the_reference_core(
@@ -65,6 +93,15 @@ def test_a_route_that_waits_past_the_limit_without_the_cpu_passes(
 ) -> None:
     """The step a busy machine makes of a short one: long in wall time, short in CPU time."""
     ran = run_a_route(pytester, f"time.sleep({step_limit.seconds + 0.05})")
+
+    ran.assert_outcomes(passed=1)
+    assert asyncio_reports.held_on_purpose() != []
+
+
+def test_a_route_whose_garbage_collections_use_the_cpu_past_the_limit_passes(
+    pytester: pytest.Pytester, asyncio_reports: Reported, step_limit: StepLimit
+) -> None:
+    ran = run(pytester, A_ROUTE_THAT_COLLECTS.format(seconds=2 * step_limit.seconds))
 
     ran.assert_outcomes(passed=1)
     assert asyncio_reports.held_on_purpose() != []
