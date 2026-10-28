@@ -78,8 +78,9 @@ every resolver must then live in a module the project does not replace.
     `0`, `false`, `no` and `off` as no.
 - Every log therefore answers "does this deployment authenticate?". That is the first question
   asked of a service after a leak.
-- The guarantee ships with the identity stub. `test_guarantee.py`, `tests/identity/doubles.py`
-  and `tests/identity/test_identity.py` test the seam as the stub ships it. The answer
+- The guarantee ships with the identity stub. `test_guarantee.py`, `tests/identity/doubles.py`,
+  `tests/identity/test_identity.py` and `tests/started/test_identity.py` test the seam as the
+  stub ships it. The answer
   `identity_stub: false`, recorded in `.copier-answers.yml`, stops `copier update` from bringing
   them, beside `app/identity/__init__.py`. `tests/identity/test_shared.py` tests the shared names,
   and reaches every project.

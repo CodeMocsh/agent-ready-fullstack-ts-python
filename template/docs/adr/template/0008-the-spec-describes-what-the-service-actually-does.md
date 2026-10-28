@@ -8,7 +8,7 @@ Accepted.
 
 ## Context
 
-`create_app` in `app/main.py` carries two settings that look like noise and are necessary. The
+`assemble` in `app/main.py` carries two settings that look like noise and are necessary. The
 code that sets them does not show why. The zero-comments rule keeps the reason out of
 `app/main.py`, so this record holds it. Each force below is observed on a running system.
 
@@ -39,9 +39,9 @@ service wrote.
 
 ## Decision
 
-- `create_app` sets `separate_input_output_schemas=False`. Each model is one schema, with its
+- `assemble` sets `separate_input_output_schemas=False`. Each model is one schema, with its
   domain name.
-- `create_app` sets `app.router.redirect_slashes = False`. A trailing slash is a plain `404`. The
+- `assemble` sets `app.router.redirect_slashes = False`. A trailing slash is a plain `404`. The
   spec does not change, because this is behaviour and not contract.
   `test_a_trailing_slash_is_a_404_and_never_a_redirect` in `tests/routes/test_tasks.py` holds it.
 - Every route declares a model for every status code that it can return. `responses(...)` in

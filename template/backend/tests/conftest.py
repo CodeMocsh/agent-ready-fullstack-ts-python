@@ -13,6 +13,10 @@ Any other record asyncio logs from WARNING up is an error too, except its line t
 long in wall time. A record logged between two tests, by a fixture wider than one test, is an
 error at teardown of the next test, or of the last one.
 
+**The app starts only in `tests/started/` and in a tier.** Anywhere else, a test that enters the
+lifespan of `create_app` fails and names where it belongs. A route test mounts its router with
+`tests.routed.routed` instead. `docs/adr/template/0018`.
+
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
 is silence: `pytest -q` reports what it collected and has no way to mention what it never
@@ -24,9 +28,10 @@ import json
 import os
 from collections.abc import Callable, Generator
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, NoReturn
 
 import pytest
+from fastapi import FastAPI
 
 from app.deployment import (
     DATABASE_URL_ENV,
@@ -39,8 +44,12 @@ from app.deployment import (
 os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
 os.environ["PYTHONASYNCIODEBUG"] = "1"
 
+from app import main
+from app.identity.shared import SENTINEL_TENANT
 from app.migrate import OWNER_URL_ENV
+from app.store import Database
 from app.store.conn import SCHEMA_ENV
+from app.store.memory import MemoryDatabase
 from tests.event_loop import (
     Reported,
     StepLimit,
@@ -49,6 +58,11 @@ from tests.event_loop import (
     step_limit_on_this_machine,
 )
 from tests.tiers import python_tiers
+
+TESTS: Final = Path(__file__).parent
+
+STARTED: Final = "started"
+"""The folder under `tests/` that holds the tests of the started app, in the default run."""
 
 STEP_LIMIT = step_limit_on_this_machine()
 measure_every_step(STEP_LIMIT)
@@ -123,3 +137,35 @@ def logged(capsys: pytest.CaptureFixture[str]) -> Logged:
         return [json.loads(line) for line in capsys.readouterr().out.splitlines()]
 
     return read
+
+
+class StartedOutsideItsFolder(RuntimeError):
+    """A test outside `tests/started/` and the tiers entered the lifespan of `create_app`."""
+
+
+@pytest.fixture(autouse=True)
+def the_app_starts_only_where_it_may(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outside `tests/started/` and the folder of each tier, the lifespan of `create_app` raises
+    `StartedOutsideItsFolder` on entry. Building the app is not starting it."""
+    folder = request.node.path.relative_to(TESTS).parts[0]
+    if folder in {STARTED, *(tier.folder for tier in python_tiers())}:
+        return
+    test = request.node.nodeid
+
+    def refused(_app: FastAPI) -> NoReturn:
+        raise StartedOutsideItsFolder(
+            f"{test} started the app, and the app starts only in tests/{STARTED}/ and in a tier. "
+            f"Mount the router under test with tests.routed.routed, or move the test to "
+            f"tests/{STARTED}/. docs/adr/template/0018 says which test goes where."
+        )
+
+    monkeypatch.setattr(main, "lifespan", refused)
+
+
+@pytest.fixture
+def database() -> Database:
+    """A fresh in-memory substrate, seeded as the development loop seeds it.
+    `tests/integration/conftest.py` puts a Postgres substrate under the same name."""
+    return MemoryDatabase(seed_tenant=SENTINEL_TENANT)

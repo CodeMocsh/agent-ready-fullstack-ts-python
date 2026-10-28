@@ -116,6 +116,10 @@ fans out to both. Each half works without the other's toolchain.
   `await`, goes in a `def` route or in `asyncio.to_thread`. The process has one event loop, and
   every other request waits while one step holds it. [docs/backend.md](docs/backend.md) says how
   a held step is reported.
+- The lifespan runs at each start of the process, and in each test in `tests/started/`. Keep it
+  cheap: build setup that is pure and costly once per process, and cache it. A route test mounts
+  its routers with `tests.routed.routed`, and names to it each seam the lifespan puts on
+  `app.state`.
 - Two writers at once both succeed. Shape a write that another can race, cheapest first: append or
   merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
   in the route and write in the store afterwards. A race only shows on Postgres, so its test goes

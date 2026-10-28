@@ -11,10 +11,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import create_app
 from app.models import MAX_CLIENT_EVENTS
+from app.routes import public
+from app.store import Database
 from tests.conftest import Logged
 from tests.doubles import CANARY
+from tests.routed import routed
 
 
 def an_event(**changed: Any) -> dict[str, Any]:
@@ -28,8 +30,8 @@ def an_event(**changed: Any) -> dict[str, Any]:
 
 
 @pytest.fixture
-def client(logged: Logged) -> Iterator[TestClient]:
-    with TestClient(create_app()) as fresh:
+def client(logged: Logged, database: Database) -> Iterator[TestClient]:
+    with TestClient(routed(public.router, database=database)) as fresh:
         logged()
         yield fresh
 

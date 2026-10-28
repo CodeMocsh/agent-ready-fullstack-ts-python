@@ -180,6 +180,15 @@ What to expect, because it is not all free:
   that work into a `def` route or into `asyncio.to_thread`. `measure_every_step` now takes the
   limit: if you merged `backend/tests/conftest.py` by hand, keep the template's call. A test of
   yours that holds the event loop past the limit holds `step_limit.seconds` and a margin.
+- **From 0.47.0 only a test in `tests/started/` or in a tier may start the app.** Any other test
+  that enters `with TestClient(create_app())` fails with `StartedOutsideItsFolder`, which names
+  it. For a route test, mount its routers with `tests.routed.routed` and the `database` fixture:
+  `TestClient(routed(tenant.router, database=database))`. Hand `routed` each seam your lifespan
+  puts on `app.state`, by name. Move a test of what the lifespan does to `tests/started/`.
+  `create_server` now takes the app it mounts: `create_server(bundle, api)`.
+  `docs/backend.md` is yours, so this release does not update it. Copy the two paragraphs on route
+  tests and `tests/started/` from the template's, if you want them.
+  [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

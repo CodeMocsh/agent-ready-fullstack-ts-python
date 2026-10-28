@@ -95,6 +95,7 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tasks.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/started/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/components/task-list.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
@@ -109,6 +110,7 @@ _exclude:
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity/__init__.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/started/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/routes/test_guarantee.py{% endif %}"
   # No workflow, and no test of one, for a project that runs its checks somewhere else.
   - "{% if not github_ci %}.github{% endif %}"

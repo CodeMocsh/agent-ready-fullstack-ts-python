@@ -1,7 +1,8 @@
 """The identity stub: what it answers, and what a deployment running it is told.
 
 `tests/routes/test_guarantee.py` asserts that every route *reaches* this. These assert what
-happens once they get here, and what the process says out loud about it at startup.
+happens once they get here. `tests/started/test_identity.py` asserts what the process says out
+loud about it at startup.
 
 **Every resolver is substituted in both shapes.** A replacement that verifies a credential reaches
 a session store, so `async def` is what one is actually written as — and a suite that only ever
@@ -9,24 +10,19 @@ swapped in a synchronous resolver reported a fully authenticating deployment as 
 nothing, green, on every boot.
 """
 
-from typing import Any
-
-import pytest
 from fastapi import APIRouter, Request
 from fastapi.testclient import TestClient
 
-from app.deployment import ACKNOWLEDGED_ENV
 from app.deps import PrincipalDep
 from app.identity import principal_for
 from app.identity.shared import (
     SENTINEL_PRINCIPAL,
-    SENTINEL_TENANT,
     Actor,
     Principal,
     resolved_without_a_credential,
 )
-from app.main import create_app
 from app.routes import tenant
+from app.store import Database
 from tests.conftest import Logged
 from tests.identity.doubles import (
     AN_ASYNC_PRINCIPAL,
@@ -35,6 +31,7 @@ from tests.identity.doubles import (
     refusing_async,
     resolving_async,
 )
+from tests.routed import routed
 from tests.widgets import router as widgets_router
 
 
@@ -96,103 +93,13 @@ async def test_a_resolver_that_breaks_in_its_own_way_is_silence_too() -> None:
     assert await resolved_without_a_credential(failing) is None
 
 
-def identity_lines(logged: Logged) -> list[dict[str, Any]]:
-    """What one startup wrote about identity, with its level.
-
-    Driven through a real `TestClient` so the lifespan runs, because a test that called the
-    reporting function directly would keep passing after somebody stopped calling it.
-    """
-    return [one for one in logged() if one["message"].startswith("identity:")]
-
-
-def test_a_deployment_that_authenticates_nothing_is_warned_at_every_boot(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The default build is a correct default *and* an indistinguishable one: from outside, a
-    service that meant to have authentication and never got it looks exactly like this one.
-
-    Boot is the moment somebody is watching, so it is where the difference gets said. This test
-    is what stops the line being deleted by the first person who finds it noisy — and it asserts
-    the message names the file to edit, because a warning nobody can act on is decoration.
-    """
-    monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
-
-    with TestClient(create_app()):
-        pass
-
-    said = identity_lines(logged)
-    assert len(said) == 1, said
-    assert said[0]["severity"] == "WARNING"
-    assert "app/identity/__init__.py" in said[0]["message"]
-    assert said[0]["tenant"] == SENTINEL_TENANT
-
-
-def test_a_deployment_that_says_it_is_deliberate_is_told_rather_than_warned(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Serving everybody on purpose is a real thing to be, and a warning that cannot be
-    acknowledged is one a deployment learns to mute — which costs the deployment that needed to
-    hear it.
-
-    The fact is still stated, at `INFO`. Silencing is never total, because "does this
-    authenticate?" is the first question asked of a service that turns out to have leaked, and
-    the log has to answer it either way.
-    """
-    monkeypatch.setenv(ACKNOWLEDGED_ENV, "1")
-
-    with TestClient(create_app()):
-        pass
-
-    said = identity_lines(logged)
-    assert len(said) == 1, said
-    assert said[0]["severity"] == "INFO"
-    assert ACKNOWLEDGED_ENV in said[0]["message"]
-
-
-@pytest.mark.parametrize("denial", ["0", "false", "no", "off", " "])
-def test_a_spelling_of_no_does_not_acknowledge_anything(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch, denial: str
-) -> None:
-    """`UNAUTHENTICATED_IS_INTENTIONAL=0` silencing the warning is the opposite of what somebody
-    typing it meant, and the only way they would find out is by not being told."""
-    monkeypatch.setenv(ACKNOWLEDGED_ENV, denial)
-
-    with TestClient(create_app()):
-        pass
-
-    assert identity_lines(logged)[0]["severity"] == "WARNING"
-
-
-def test_a_deployment_that_verifies_is_neither_warned_nor_nagged(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The third direction, and the one that decides whether any of this is worth keeping. A
-    project that replaced the stub must stop being warned without touching a flag, or the
-    warning outlives the problem and becomes the noise it was supposed to avoid.
-
-    The resolver here is `async`, because that is what a replacement is written as — and a
-    synchronous stand-in is what let this pass while the opposite was true.
-    """
-    monkeypatch.delenv(ACKNOWLEDGED_ENV, raising=False)
-    app = create_app()
-    app.dependency_overrides[principal_for] = refusing_async
-
-    with TestClient(app):
-        pass
-
-    said = identity_lines(logged)
-    assert len(said) == 1, said
-    assert said[0]["severity"] == "INFO"
-    assert "verified" in said[0]["message"]
-
-
 def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resolved(
-    logged: Logged,
+    logged: Logged, database: Database
 ) -> None:
     """The widgets carry whatever the shipped tenant requirement carries, so a requirement that
     reaches the seam without naming its principal fails here, in a project with no tenant route
     yet. `docs/adr/template/0011`."""
-    app = create_app()
+    app = routed(database=database)
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
 
     def named(request: Request) -> Principal:
@@ -216,10 +123,12 @@ def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resol
     ]
 
 
-def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(logged: Logged) -> None:
+def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(
+    logged: Logged, database: Database
+) -> None:
     """It has no tenant to record a request event in, and anybody can send one. Its `request
     completed` line, with a `401` and a null tenant, is the record. `docs/adr/template/0017`."""
-    app = create_app()
+    app = routed(database=database)
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
     app.dependency_overrides[principal_for] = refusing
     with TestClient(app) as client:
@@ -251,7 +160,9 @@ async def test_the_probe_hands_back_a_principal_a_project_extends() -> None:
     assert await resolved_without_a_credential(resolving_a_member) is A_MEMBER
 
 
-def test_a_principal_a_project_extends_reaches_its_route_whole(logged: Logged) -> None:
+def test_a_principal_a_project_extends_reaches_its_route_whole(
+    logged: Logged, database: Database
+) -> None:
     """The seam hands a route the principal the resolver built, with every field the project
     added, and the request line names its tenant and actor."""
     seen: list[Principal] = []
@@ -261,7 +172,7 @@ def test_a_principal_a_project_extends_reaches_its_route_whole(logged: Logged) -
     async def member(principal: PrincipalDep) -> None:
         seen.append(principal)
 
-    app = create_app()
+    app = routed(database=database)
     app.include_router(router)
     app.dependency_overrides[principal_for] = resolving_a_member
     with TestClient(app) as client:
