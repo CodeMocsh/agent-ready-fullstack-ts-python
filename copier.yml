@@ -116,8 +116,9 @@ _exclude:
   - "{% if not github_ci %}.github{% endif %}"
   - "{% if not github_ci %}backend/tests/test_workflow.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may
-  # delete this one; it is excluded on update rather than skipped, so it never comes back.
+  # delete these; each is excluded on update rather than skipped, so it never comes back.
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"
+  - "{% if _copier_operation == 'update' %}backend/tests/started/test_environment.py{% endif %}"
   # Generated from the project's own code, so an update never touches them and the project
   # regenerates them afterwards: `make openapi` writes the first two, `make lint` the third.
   # A merged copy of any of them describes neither tree.

@@ -47,8 +47,9 @@ and the bullet on `identity_stub` below says why.
 - **`frontend/e2e/signed-in.ts` does nothing under the identity stub.** A project that
   authenticates signs in there, and every live spec opens the app through it.
 - **The project's tests of what its production refuses are excluded on update instead.**
-  `tests/environment/test_environment.py` is in `_exclude` in `copier.yml` for an update. Nothing
-  imports a test, so a project may delete it, and `_skip_if_exists` would bring it back.
+  `tests/environment/test_environment.py` and `tests/started/test_environment.py` are in
+  `_exclude` in `copier.yml` for an update. Nothing imports a test, so a project may delete
+  either, and `_skip_if_exists` would bring it back.
 - **A list module re-exports its mechanism.** `app/errors.py` re-exports `ApiError` and
   `responses`. `app/environment.py` re-exports the mechanism from `app/deployment.py`. A project's
   own code imports from the list module.

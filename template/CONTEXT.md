@@ -119,8 +119,8 @@ _Avoid_: fake auth, no-auth mode.
 
 **Route test**:
 A test of the HTTP contract of a requirement or a resource: the requirement, the refusals and
-their `detail`, the statuses and the shapes. It mounts its routers with `tests.routed.routed`,
-and starts nothing.
+their `detail`, the statuses and the shapes. It starts nothing. It usually mounts its routers
+with `tests.routed.routed`.
 _Avoid_: API test, integration test (`tests/integration/` is a tier).
 
 **Started app**:

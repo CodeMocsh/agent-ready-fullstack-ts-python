@@ -62,11 +62,11 @@ class Refusing(NamedTuple):
 
 
 @pytest.fixture
-def refused(database: Database) -> Refusing:
+def refused(database: Database, app_state: dict[str, object]) -> Refusing:
     """An identity seam that refuses everything, driven through a real client.
 
     The app `create_app` builds, so the walk reads every route it serves. It is not started:
-    `database` is put on it here, and the client runs no lifespan.
+    `database` and each of `app_state` are put on it here, and the client runs no lifespan.
 
     `dependency_overrides` rather than monkeypatching the module, because the router holds the
     function object taken at import time and a patched module attribute would never reach it.
@@ -74,6 +74,8 @@ def refused(database: Database) -> Refusing:
     """
     app = create_app()
     app.state.database = database
+    for name, value in app_state.items():
+        setattr(app.state, name, value)
     app.dependency_overrides[principal_for] = refusing
     return Refusing(app, TestClient(app))
 

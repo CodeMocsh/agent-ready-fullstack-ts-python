@@ -13,9 +13,11 @@ Any other record asyncio logs from WARNING up is an error too, except its line t
 long in wall time. A record logged between two tests, by a fixture wider than one test, is an
 error at teardown of the next test, or of the last one.
 
-**The app starts only in `tests/started/` and in a tier.** Anywhere else, a test that enters the
-lifespan of `create_app` fails and names where it belongs. A route test mounts its router with
-`tests.routed.routed` instead. `docs/adr/template/0018`.
+**The app starts only in `tests/started/` and in a tier.** Anywhere else, entering the lifespan
+of `create_app` raises `StartedOutsideItsFolder`, which names the test and where it belongs. The
+check is made when the lifespan starts, so an app built at import is checked too. A started app
+lives for one test: the test that stops it must be the test that started it. A route test mounts its routers with `tests.routed.routed` instead.
+`docs/adr/template/0018`.
 
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
@@ -26,9 +28,10 @@ looked at. `pytest_terminal_summary` prints the tiers that were not in the run, 
 
 import json
 import os
-from collections.abc import Callable, Generator
+from collections.abc import AsyncGenerator, Callable, Generator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Final, NoReturn
+from typing import Any, Final
 
 import pytest
 from fastapi import FastAPI
@@ -44,7 +47,7 @@ from app.deployment import (
 os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
 os.environ["PYTHONASYNCIODEBUG"] = "1"
 
-from app import main
+from app import lifespan, main
 from app.identity.shared import SENTINEL_TENANT
 from app.migrate import OWNER_URL_ENV
 from app.store import Database
@@ -129,7 +132,7 @@ def logged(capsys: pytest.CaptureFixture[str]) -> Logged:
     """What this process wrote to stdout since the last read, one parsed line per record.
 
     Parsed rather than searched, so a line that is not one JSON object fails the test that
-    produced it. `app.log.configure` binds stdout when `create_app` runs, so build the app
+    produced it. `app.log.configure` binds stdout when `assemble` builds an app, so build the app
     inside the test that reads it.
     """
 
@@ -143,29 +146,72 @@ class StartedOutsideItsFolder(RuntimeError):
     """A test outside `tests/started/` and the tiers entered the lifespan of `create_app`."""
 
 
-@pytest.fixture(autouse=True)
-def the_app_starts_only_where_it_may(
-    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Outside `tests/started/` and the folder of each tier, the lifespan of `create_app` raises
-    `StartedOutsideItsFolder` on entry. Building the app is not starting it."""
-    folder = request.node.path.relative_to(TESTS).parts[0]
-    if folder in {STARTED, *(tier.folder for tier in python_tiers())}:
-        return
-    test = request.node.nodeid
+class StartedForMoreThanOneTest(RuntimeError):
+    """A test stopped the app that another test started."""
 
-    def refused(_app: FastAPI) -> NoReturn:
+
+_RUNNING: list[pytest.Item] = []
+_UNGUARDED = lifespan.lifespan
+
+
+def may_start(path: Path) -> bool:
+    """Whether a test in `path` may start the app: one in `tests/started/`, or in the folder of a
+    tier."""
+    parts = path.relative_to(TESTS).parts
+    folders = [Path(STARTED).parts, *(Path(tier.folder).parts for tier in python_tiers())]
+    return any(parts[: len(folder)] == folder for folder in folders)
+
+
+@asynccontextmanager
+async def _started_where_it_may(app: FastAPI) -> AsyncGenerator[None]:
+    running = _RUNNING[-1] if _RUNNING else None
+    if running is None or not may_start(running.path):
+        who = "Something outside any test" if running is None else running.nodeid
         raise StartedOutsideItsFolder(
-            f"{test} started the app, and the app starts only in tests/{STARTED}/ and in a tier. "
-            f"Mount the router under test with tests.routed.routed, or move the test to "
+            f"{who} started the app. The app starts only in a test in tests/{STARTED}/ or in a "
+            f"tier. Mount the routers under test with tests.routed.routed, or move the test to "
             f"tests/{STARTED}/. docs/adr/template/0018 says which test goes where."
         )
+    async with _UNGUARDED(app):
+        yield
+    stopped_by_the_test_that_started_it(running, _RUNNING[-1] if _RUNNING else None)
 
-    monkeypatch.setattr(main, "lifespan", refused)
+
+def stopped_by_the_test_that_started_it(started: pytest.Item, stopping: pytest.Item | None) -> None:
+    """Raises `StartedForMoreThanOneTest` unless `stopping` is `started`."""
+    if stopping is not started:
+        who = "something outside any test" if stopping is None else stopping.nodeid
+        raise StartedForMoreThanOneTest(
+            f"{started.nodeid} started the app, and {who} stopped it. A started app lives for "
+            f"one test. Start it in a fixture that each test gets for itself."
+        )
+
+
+_GUARD = pytest.MonkeyPatch()
+_GUARD.setattr(lifespan, "lifespan", _started_where_it_may)
+_GUARD.setattr(main, "lifespan", _started_where_it_may)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object]:
+    """Names the test that is running, for the lifespan to check where it is."""
+    _RUNNING.append(item)
+    try:
+        return (yield)
+    finally:
+        _RUNNING.pop()
 
 
 @pytest.fixture
 def database() -> Database:
-    """A fresh in-memory substrate, seeded as the development loop seeds it.
-    `tests/integration/conftest.py` puts a Postgres substrate under the same name."""
+    """A fresh in-memory substrate, seeded as the development loop seeds it."""
     return MemoryDatabase(seed_tenant=SENTINEL_TENANT)
+
+
+@pytest.fixture
+def app_state() -> dict[str, object]:
+    """Each value beside the database that the lifespan puts on `app.state`, for an app that a test
+    does not start. Empty here. A project whose lifespan puts more there overrides this fixture in
+    `tests/routes/conftest.py`, which the route guarantee reads, and in the `conftest.py` of each
+    other folder whose tests need them."""
+    return {}

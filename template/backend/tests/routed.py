@@ -6,8 +6,8 @@ statuses and the shapes. None of that needs the process `app/lifespan.py` starts
 lifespan grows with the project. Outside `tests/started/` and the tiers, `tests/conftest.py`
 refuses a test that enters it. `docs/adr/template/0018`.
 
-The template owns this module. A project hands its own seams to `routed` by name, and does not
-edit it.
+The template owns this module. A project hands `routed` each value its lifespan puts on
+`app.state`, by name, and does not edit it. The `app_state` fixture holds those values.
 """
 
 from fastapi import APIRouter, FastAPI
@@ -17,7 +17,7 @@ from app.store import Database
 
 
 def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
-    """An app that serves `routers` through everything `create_app` puts around a route, with
+    """An app that serves `routers` with everything `assemble` puts around a route, with
     `database` and each of `state` on `app.state` under its name. Starts nothing, so a test may
     build one for itself."""
     app = assemble(*routers, lifespan=None)

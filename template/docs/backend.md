@@ -79,11 +79,16 @@ backend/
   call. Keep each of those in a `def` route or in `asyncio.to_thread`.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,
   which assembles them as `create_app` does, with no lifespan. Hand `routed` the `database`
-  fixture and each seam the lifespan would put on `app.state`. Mount a requirement router, such
-  as `tenant.router`, so the requirement is part of what the test asserts. With many routes under
-  one requirement, a request builds each route before the one it reaches. Then mount the resource
-  router under the requirement's dependencies instead:
-  `APIRouter(dependencies=tenant.router.dependencies)`, including it.
+  fixture, and `**app_state` when the lifespan puts other values on `app.state`. The template's
+  lifespan puts none there. Mount a
+  requirement router, such as `tenant.router`, so the requirement is part of what the test
+  asserts. A request builds every route in each router it checks, up to the router that holds
+  its route. With many routes under one requirement, mount only the resource router, under the
+  requirement's dependencies: `app = routed(database=database)`, then
+  `app.include_router(tasks.router, dependencies=tenant.router.dependencies)`.
+- **`create_app` adds nothing but the lifespan.** Each requirement's router goes in `ROUTERS`, and
+  everything around a route goes in `assemble`. A route test then serves what the app serves,
+  and `tests/main/test_main.py` fails when it does not.
 - **A test that starts the app goes in `tests/started/`**, or in a tier: the lines the lifespan
   logs, what it refuses, what it builds before the first request. Anywhere else it fails, and the
   failure names both places. A test that builds `create_app()` and never enters `with

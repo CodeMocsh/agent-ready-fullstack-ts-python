@@ -42,9 +42,9 @@ Only a second implementation that runs the same suite makes these rules a contra
 - `TaskStore.update` returns `None` and `TaskStore.remove` returns `False` for a missing task.
   This passes the *Fail loudly* test in `AGENTS.md`. The design plans for a missing task. The
   contract names it: `404` with a model, in `openapi.json`. The route reports it.
-- No store has a `reset()`. A test that needs a clean substrate builds a clean app with
-  `create_app()`. `database_of` in `app/deps.py` reads the substrate from the request, not from a
-  module-level singleton. One test process can therefore hold two apps on two substrates.
+- No store has a `reset()`. A test takes the `database` fixture, a new substrate for each test.
+  `tests/started/test_tasks.py` holds that two apps share no store. `database_of` in
+  `app/deps.py` reads the substrate from the request, not from a module-level singleton. One test process can therefore hold two apps on two substrates.
 - `app/store/__init__.py` does not re-export `app.store.pg`, and `pg.py` imports asyncpg inside
   the function that connects. A process on the in-memory substrate never loads the driver.
 

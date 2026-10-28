@@ -26,10 +26,9 @@ def create_app() -> FastAPI:
 
 
 def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
-    """An app that serves `routers` and runs `lifespan`, with everything a request to `create_app`
-    passes through before and after its route: the refusal of an unresolved tenant, the request
-    event, the request line and the telemetry. A route test that mounts its router with this
-    gets the answers the app gives. Configures the logging of the whole process."""
+    """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant,
+    the request event, the request line and the telemetry around each route. `create_app` and
+    `tests.routed.routed` build with it. Configures the logging of the whole process."""
     log.configure(build_service_version())
     app = FastAPI(
         title="Tasks API",
