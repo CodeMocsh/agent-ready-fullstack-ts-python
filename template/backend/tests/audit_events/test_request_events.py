@@ -22,8 +22,10 @@ from app.audit_events import (
     serve,
 )
 from app.identity.shared import Actor, Principal, Unauthenticated
-from app.main import create_app
+from app.main import ROUTERS
 from app.request_events import RecordsRequests
+from app.store import Database
+from tests.routed import routed
 from tests.widgets import router as widgets_router
 
 TENANT_HEADER = "x-test-tenant"
@@ -49,10 +51,10 @@ async def served(
     return serve(request, principal)
 
 
-def an_app() -> FastAPI:
+def an_app(database: Database) -> FastAPI:
     """The app, also serving the widgets, `/raises` and `/acting` behind the identity
     dependency."""
-    app = create_app()
+    app = routed(*ROUTERS, database=database)
     extra = APIRouter()
 
     @extra.get("/raises")
@@ -74,8 +76,8 @@ def events_in(client: TestClient, app: FastAPI, tenant_id: str) -> list[Recorded
     return client.portal.call(app.state.database.audit_events(tenant_id).list)
 
 
-def test_each_request_a_principal_made_is_recorded_whatever_it_answered() -> None:
-    app = an_app()
+def test_each_request_a_principal_made_is_recorded_whatever_it_answered(database: Database) -> None:
+    app = an_app(database)
     with TestClient(app, raise_server_exceptions=False) as client:
         client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
         client.post("/widgets", json={"name": "a"}, headers={TENANT_HEADER: "tenant-a"})
@@ -95,8 +97,8 @@ def test_each_request_a_principal_made_is_recorded_whatever_it_answered() -> Non
     }
 
 
-def test_a_request_event_names_the_request_its_response_carries() -> None:
-    app = an_app()
+def test_a_request_event_names_the_request_its_response_carries(database: Database) -> None:
+    app = an_app(database)
     with TestClient(app) as client:
         answered = client.get("/widgets", headers={TENANT_HEADER: "tenant-a"})
         [recorded] = events_in(client, app, "tenant-a")
@@ -104,10 +106,10 @@ def test_a_request_event_names_the_request_its_response_carries() -> None:
     assert recorded.request_id == answered.headers["x-request-id"]
 
 
-def test_a_request_with_no_principal_records_nothing() -> None:
+def test_a_request_with_no_principal_records_nothing(database: Database) -> None:
     """A request the seam refuses has no tenant to record in, and anybody can send one. A public
     route serves nobody."""
-    app = an_app()
+    app = an_app(database)
     with TestClient(app) as client:
         assert client.get("/widgets").status_code == 401
         assert client.get("/health").status_code == 200
@@ -119,15 +121,15 @@ def test_a_request_with_no_principal_records_nothing() -> None:
     assert recorded == []
 
 
-def test_a_request_acts_as_its_principal() -> None:
-    with TestClient(an_app()) as client:
+def test_a_request_acts_as_its_principal(database: Database) -> None:
+    with TestClient(an_app(database)) as client:
         answered = client.get("/acting", headers={TENANT_HEADER: "tenant-a"})
 
     assert Actor.model_validate(answered.json()) == PERSON
 
 
-def test_an_actor_two_levels_deep_is_refused_and_records_nothing() -> None:
-    app = an_app()
+def test_an_actor_two_levels_deep_is_refused_and_records_nothing(database: Database) -> None:
+    app = an_app(database)
     app.dependency_overrides[principal_from_header] = lambda: Principal(
         tenant_id="tenant-a", actor=NESTED
     )
@@ -136,14 +138,14 @@ def test_an_actor_two_levels_deep_is_refused_and_records_nothing() -> None:
         assert events_in(client, app, "tenant-a") == []
 
 
-def test_a_principal_served_from_a_worker_thread_is_refused() -> None:
+def test_a_principal_served_from_a_worker_thread_is_refused(database: Database) -> None:
 
     def served_in_a_thread(
         request: Request, principal: Annotated[Principal, Depends(principal_from_header)]
     ) -> Principal:
         return serve(request, principal)
 
-    app = an_app()
+    app = an_app(database)
     app.dependency_overrides[served] = served_in_a_thread
     with TestClient(app) as client, pytest.raises(ServedOffTheLoop):
         client.get("/acting", headers={TENANT_HEADER: "tenant-a"})
@@ -197,8 +199,10 @@ class RefusingDatabase:
         return RefusingAuditEvents()
 
 
-def test_a_request_whose_event_cannot_be_recorded_fails_and_sends_nothing_it_read() -> None:
-    app = an_app()
+def test_a_request_whose_event_cannot_be_recorded_fails_and_sends_nothing_it_read(
+    database: Database,
+) -> None:
+    app = an_app(database)
     with TestClient(app, raise_server_exceptions=False) as client:
         app.state.database = RefusingDatabase(app.state.database)
         answered = client.get("/acting", headers={TENANT_HEADER: "tenant-a"})

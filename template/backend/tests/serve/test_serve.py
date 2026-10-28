@@ -1,9 +1,10 @@
 """The one-origin entrypoint: what it mounts, what it falls back to, and what it refuses.
 
 Every test here stands on a real `TestClient`, which drives the ASGI lifespan the way a server
-does. That matters more than usual: the failure this module exists to prevent is a mounted
-application whose lifespan never ran, and it is invisible to anything that calls a handler
-directly.
+does. The API mounted here is one `routed` builds, which starts nothing. The failure this module
+exists to prevent is a mounted application whose lifespan never ran, so
+`tests/started/test_serve.py` mounts the app `create_app` builds and asserts that its lifespan
+runs.
 """
 
 import inspect
@@ -12,11 +13,12 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import serve
 from app.deployment import BUNDLE_ENV
-from app.main import create_app
+from app.main import ROUTERS
 from app.serve import (
     ASSETS,
     INDEX,
@@ -27,7 +29,9 @@ from app.serve import (
     Scope,
     create_server,
 )
+from app.store import Database
 from app.wiring import BundleMissing, build_bundle
+from tests.routed import routed
 
 SHELL = "<!doctype html><title>the shell</title>"
 SCRIPT = "export const built = 1;\n"
@@ -70,22 +74,14 @@ def bundle(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def client(bundle: Path) -> Iterator[TestClient]:
-    """The in-memory substrate, which is what no `DATABASE_URL` means."""
-    with TestClient(create_server(bundle)) as fresh:
+def api(database: Database) -> FastAPI:
+    return routed(*ROUTERS, database=database)
+
+
+@pytest.fixture
+def client(bundle: Path, api: FastAPI) -> Iterator[TestClient]:
+    with TestClient(create_server(bundle, api)) as fresh:
         yield fresh
-
-
-def test_the_mounted_api_gets_its_lifespan(client: TestClient) -> None:
-    """The regression this module exists for.
-
-    Starlette does not run a mounted application's lifespan, so without the delegation nothing
-    reaches `app.state` and this answers 500. `/ready` is asked because it needs the database
-    to answer at all — a route that only read its own arguments would pass either way.
-    """
-    answered = client.get("/api/ready")
-    assert answered.status_code == 200, answered.text
-    assert answered.json() == {"status": "ready"}
 
 
 def test_the_prefix_is_stripped_before_the_api_matches(client: TestClient) -> None:
@@ -149,12 +145,12 @@ def test_a_path_cannot_escape_the_bundle(client: TestClient) -> None:
 
 
 def test_a_directory_without_a_shell_is_refused_at_build_rather_than_at_request(
-    tmp_path: Path,
+    tmp_path: Path, api: FastAPI
 ) -> None:
     """A server that came up on an empty directory answers every path with a file it never
     found, which reads as a routing bug rather than as a missing build."""
     with pytest.raises(BundleMissing, match=INDEX):
-        create_server(tmp_path)
+        create_server(tmp_path, api)
 
 
 def test_an_unnamed_bundle_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -277,7 +273,9 @@ def test_a_length_that_is_not_a_number_is_refused_rather_than_crashed_on(
         assert client.send(unparsable).status_code == 400, f"{value!r} was not refused"
 
 
-async def test_a_length_that_is_a_digit_but_not_a_number_is_refused(bundle: Path) -> None:
+async def test_a_length_that_is_a_digit_but_not_a_number_is_refused(
+    bundle: Path, api: FastAPI
+) -> None:
     """`'²'.isdigit()` is `True` while `int('²')` raises, so screening with the wrong predicate
     turns this 400 into an unhandled 500.
 
@@ -286,17 +284,19 @@ async def test_a_length_that_is_a_digit_but_not_a_number_is_refused(bundle: Path
     bytes that decode back as something no predicate calls a digit — a test that goes through a
     client passes here against either spelling, for the wrong reason.
     """
-    started = await drive(create_server(bundle), "POST", UNROUTED, [(b"content-length", b"\xb2")])
+    started = await drive(
+        create_server(bundle, api), "POST", UNROUTED, [(b"content-length", b"\xb2")]
+    )
     assert started["status"] == 400
 
 
 async def test_a_body_on_a_transport_that_frames_it_without_headers_is_refused(
-    bundle: Path,
+    bundle: Path, api: FastAPI
 ) -> None:
     """HTTP/2 makes both framing headers optional, so on it a bodied `DELETE` can announce
     nothing at all — and a rule keyed on the verb waves it through exactly as the chunked one
     was waved through."""
-    started = await drive(create_server(bundle), "DELETE", UNROUTED, [], version="2")
+    started = await drive(create_server(bundle, api), "DELETE", UNROUTED, [], version="2")
 
     assert started["status"] == 411
     named = {name.lower() for name, _ in started["headers"]}
@@ -342,7 +342,7 @@ def test_a_refusal_still_carries_the_headers(client: TestClient) -> None:
     assert "content-security-policy" in answered.headers
 
 
-def test_a_server_error_still_carries_the_headers(bundle: Path) -> None:
+def test_a_server_error_still_carries_the_headers(bundle: Path, api: FastAPI) -> None:
     """A policy that lapses exactly when something breaks is not a policy.
 
     Starlette wraps every user middleware in its own error handler, so headers applied *as* a
@@ -354,7 +354,7 @@ def test_a_server_error_still_carries_the_headers(bundle: Path) -> None:
     deploy that swaps the directory beneath a live process is how this actually happens, it
     needs no private name to arrange, and the build-time check cannot catch it.
     """
-    server = create_server(bundle)
+    server = create_server(bundle, api)
     (bundle / INDEX).unlink()
 
     with TestClient(server, raise_server_exceptions=False) as fresh:
@@ -413,11 +413,11 @@ def test_the_server_adds_exactly_the_bundle_surface() -> None:
     )
 
 
-def test_the_service_on_its_own_sets_none_of_them() -> None:
+def test_the_service_on_its_own_sets_none_of_them(api: FastAPI) -> None:
     """`app.main` is what runs behind a real proxy, and an edge's headers are that proxy's to
     set. Two `content-security-policy` headers are enforced as their intersection, so a second
     copy from here would silently narrow whatever the deployment's edge allowed."""
-    with TestClient(create_app()) as bare:
+    with TestClient(api) as bare:
         headers = bare.get("/ready").headers
     for header in SECURITY_HEADERS:
         assert header not in headers

@@ -22,9 +22,11 @@ from fastapi.testclient import TestClient
 from app import log
 from app.deployment import RESOURCE_ATTRIBUTES_ENV
 from app.identity.shared import Actor, Principal, Unauthenticated
-from app.main import create_app
+from app.main import ROUTERS
+from app.store import Database
 from tests.conftest import Logged
 from tests.doubles import CANARY
+from tests.routed import routed
 from tests.widgets import router as widgets_router, with_widgets
 
 SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -52,22 +54,23 @@ def named_principal(
 
 
 @pytest.fixture
-def app() -> FastAPI:
-    return with_widgets(create_app())
+def app(database: Database) -> FastAPI:
+    return with_widgets(routed(*ROUTERS, database=database))
 
 
 @pytest.fixture
 def client(app: FastAPI, logged: Logged) -> Iterator[TestClient]:
-    """A served app whose boot lines are already read, so a test sees only its own requests."""
+    """A client onto `app`, with what came before its first request already read, so a test sees
+    only its own requests."""
     with TestClient(app) as fresh:
         logged()
         yield fresh
 
 
 @pytest.fixture
-def guarded() -> FastAPI:
+def guarded(database: Database) -> FastAPI:
     """The app, also serving the widgets and `/raises` behind `named_principal`."""
-    app = create_app()
+    app = routed(*ROUTERS, database=database)
     failing = APIRouter()
 
     @failing.get("/raises")
@@ -103,30 +106,22 @@ def test_every_line_is_one_json_object_with_the_fields_every_cloud_reads(
     [("service.version=1.4.2", "1.4.2"), ("deployment.environment.name=prod", None)],
 )
 def test_every_line_names_the_version_the_deployment_gave_and_none_when_it_gave_none(
-    logged: Logged, monkeypatch: pytest.MonkeyPatch, said: str, version: str | None
+    logged: Logged,
+    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
+    said: str,
+    version: str | None,
 ) -> None:
     """What lets a session that spans a deploy be read: each line says which build wrote it."""
     monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
 
-    with TestClient(with_widgets(create_app())) as client:
+    with TestClient(with_widgets(routed(*ROUTERS, database=database))) as client:
         client.get("/widgets")
 
     lines = logged()
 
     assert completed(lines)
     assert {line["service.version"] for line in lines} == {version}
-
-
-def test_the_boot_lines_are_in_the_same_format(app: FastAPI, logged: Logged) -> None:
-    """The lines a deployment greps first -- which substrate, whether it authenticates -- are
-    written before any request, so they are the ones a request-only test would miss."""
-    with TestClient(app):
-        pass
-
-    said = {line["message"]: line for line in logged()}
-
-    assert said["serving"]["substrate"] == "memory"
-    assert said["serving"]["severity"] == "INFO"
 
 
 def test_a_request_is_logged_once_by_its_route_template_and_the_id_it_answered_with(

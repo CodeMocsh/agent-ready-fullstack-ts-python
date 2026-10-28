@@ -6,12 +6,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from app.routes import public
+from app.store import Database
+from tests.routed import routed
 
 
 @pytest.fixture
-def app() -> FastAPI:
-    return create_app()
+def app(database: Database) -> FastAPI:
+    return routed(public.router, database=database)
 
 
 @pytest.fixture

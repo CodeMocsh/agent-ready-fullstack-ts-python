@@ -6,11 +6,9 @@ inheriting the `development` that `tests/conftest.py` gives the rest of the suit
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from app.deployment import DATABASE_URL_ENV, ENVIRONMENT_ENV, DevelopmentSettingInProduction
 from app.environment import refuse_development_settings
-from app.main import create_app
 
 
 @pytest.fixture
@@ -46,11 +44,3 @@ def test_the_development_loop_may_run_on_memory(unnamed: pytest.MonkeyPatch) -> 
     unnamed.delenv(DATABASE_URL_ENV, raising=False)
 
     refuse_development_settings()
-
-
-def test_a_production_process_on_memory_does_not_start(unnamed: pytest.MonkeyPatch) -> None:
-    """Refused by the lifespan, so the process that cannot serve never answers a request."""
-    unnamed.delenv(DATABASE_URL_ENV, raising=False)
-
-    with pytest.raises(DevelopmentSettingInProduction), TestClient(create_app()):
-        pass

@@ -29,7 +29,9 @@ backend/
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
   app/migrate.py      the entrypoint `make migrate` runs
   app/store/          the data layer; ddl.py is the schema, as data
-  tests/              mirrors app/, except tests/integration/, which is a tier
+  tests/              mirrors app/, except tests/started/ and each tier
+  tests/routed.py     the app a route test drives: its routers, and no lifespan
+  tests/started/      the tests that start the app
   tests/tiers.py      what a tier needs and what runs it
   tests/test_gate.py  tests the repository rather than the app
 ```
@@ -75,6 +77,23 @@ backend/
   `ASYNC2` rules refuse a sleep, a file, a process or an HTTP request called directly in an
   `async def`. Nothing refuses a wait inside a synchronous helper, a database driver or a socket
   call. Keep each of those in a `def` route or in `asyncio.to_thread`.
+- **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,
+  which assembles them as `create_app` does, with no lifespan. Hand `routed` the `database`
+  fixture, and `**app_state` when the lifespan puts other values on `app.state`. The template's
+  lifespan puts none there. Mount a
+  requirement router, such as `tenant.router`, so the requirement is part of what the test
+  asserts. A request builds every route in each router it checks, up to the router that holds
+  its route. With many routes under one requirement, mount only the resource router, under the
+  requirement's dependencies: `app = routed(database=database)`, then
+  `app.include_router(tasks.router, dependencies=tenant.router.dependencies)`.
+- **`create_app` adds nothing but the lifespan.** Each requirement's router goes in `ROUTERS`, and
+  everything around a route goes in `assemble`. A route test then serves what the app serves,
+  and `tests/main/test_main.py` fails when it does not.
+- **A test that starts the app goes in `tests/started/`**, or in a tier: the lines the lifespan
+  logs, what it refuses, what it builds before the first request. Anywhere else it fails, and the
+  failure names both places. A test that builds `create_app()` and never enters `with
+  TestClient(...)` starts nothing, and may stay. [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md)
+  says why.
 - **A lifespan step holds the event loop like a route step**, and the tests report it the same
   way. Startup work that is CPU work, such as compiling or validating a large document, runs in
   `await asyncio.to_thread(compile_spec)`.

@@ -1,7 +1,9 @@
 from functools import cache
+from typing import Final
 
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.types import Lifespan
 
 from app import log, request_events, telemetry
 from app.identity.shared import Unauthenticated
@@ -10,13 +12,23 @@ from app.models import ErrorBody
 from app.routes import public, tenant
 from app.wiring import build_service_version, build_telemetry
 
+ROUTERS: Final = (public.router, tenant.router)
+"""Every router the app serves: one for each requirement in `app/routes/`."""
+
 
 def create_app() -> FastAPI:
     """The app, assembled. A function so a test can hold two with different substrates.
 
-    `docs/adr/template/0008` holds the settings below and why each one is off. Building one configures
-    the logging of the whole process: see `app.log.configure`.
+    `docs/adr/template/0008` holds the settings `assemble` makes and why each one is off.
+    Building one configures the logging of the whole process: see `app.log.configure`.
     """
+    return assemble(*ROUTERS, lifespan=lifespan)
+
+
+def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
+    """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant,
+    the request event, the request line and the telemetry around each route. `create_app` and
+    `tests.routed.routed` build with it. Configures the logging of the whole process."""
     log.configure(build_service_version())
     app = FastAPI(
         title="Tasks API",
@@ -25,8 +37,8 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.router.redirect_slashes = False
-    app.include_router(public.router)
-    app.include_router(tenant.router)
+    for router in routers:
+        app.include_router(router)
     app.add_exception_handler(Unauthenticated, _refuse)
     request_events.instrument(app)
     log.instrument(app)

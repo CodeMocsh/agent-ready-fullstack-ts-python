@@ -130,19 +130,20 @@ specification, not a library's detail, so writing it costs five lines and owes n
 
 
 def build_server() -> ASGIApp:
-    """The server this deployment runs, with the bundle the environment names."""
-    return create_server(build_bundle())
+    """The server this deployment runs: the app `create_app` builds, with the bundle the
+    environment names."""
+    return create_server(build_bundle(), create_app())
 
 
-def create_server(bundle: Path) -> ASGIApp:
-    """One origin: the API under `/api`, and the built frontend under everything else."""
+def create_server(bundle: Path, api: FastAPI) -> ASGIApp:
+    """One origin: `api` under `/api`, and the built frontend under everything else. Runs the
+    lifespan of `api` as its own."""
     index = bundle / INDEX
     if not index.is_file():
         raise BundleMissing(
             f"{bundle} holds no {INDEX}, so there is no application to serve. Run `make build` "
             f"and point at the directory it wrote."
         )
-    api = create_app()
 
     @asynccontextmanager
     async def lifespan(_server: FastAPI) -> AsyncGenerator[None, None]:

@@ -180,6 +180,25 @@ What to expect, because it is not all free:
   that work into a `def` route or into `asyncio.to_thread`. `measure_every_step` now takes the
   limit: if you merged `backend/tests/conftest.py` by hand, keep the template's call. A test of
   yours that holds the event loop past the limit holds `step_limit.seconds` and a margin.
+- **From 0.47.0 only a test in `tests/started/` or in a tier may start the app.** Any other test
+  that enters `with TestClient(create_app())` fails with `StartedOutsideItsFolder`, which names
+  it. For a route test, mount its routers with `tests.routed.routed` and the `database` fixture:
+  `TestClient(routed(tenant.router, database=database))`. Hand `routed` each other value your
+  lifespan puts on `app.state`, by name. Override the `app_state` fixture to hold those values,
+  in `tests/routes/conftest.py`: the route guarantee reads it there. With many routes under one
+  requirement, mount only the resource router: `app = routed(database=database)`, then
+  `app.include_router(tasks.router, dependencies=tenant.router.dependencies)`.
+  Move a test of what the lifespan does to `tests/started/`. Move
+  `test_a_production_process_on_memory_does_not_start` from your
+  `tests/environment/test_environment.py` to `tests/started/test_environment.py`: an update
+  brings neither file. In its new file, it calls `monkeypatch.delenv(ENVIRONMENT_ENV)` in place of
+  the `unnamed` fixture. In `app/main.py`, put each requirement's router in `ROUTERS` and
+  everything around a route in `assemble`, never in `create_app`. `create_server` now takes the
+  app it mounts: `create_server(bundle, api)`. `docs/backend.md` is yours, so this release does
+  not update it. From the template's copy, take the bullets that start "A route test starts
+  nothing", "`create_app` adds nothing but the lifespan" and "A test that starts the app", and
+  the `tests/routed.py` and `tests/started/` lines of the layout.
+  [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

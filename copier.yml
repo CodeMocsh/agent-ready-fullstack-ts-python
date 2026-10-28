@@ -95,6 +95,7 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tasks.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/started/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/components/task-list.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
@@ -109,13 +110,15 @@ _exclude:
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/app/identity/__init__.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/identity/doubles.py{% endif %}"
+  - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/started/test_identity.py{% endif %}"
   - "{% if not identity_stub and _copier_operation == 'update' %}backend/tests/routes/test_guarantee.py{% endif %}"
   # No workflow, and no test of one, for a project that runs its checks somewhere else.
   - "{% if not github_ci %}.github{% endif %}"
   - "{% if not github_ci %}backend/tests/test_workflow.py{% endif %}"
   # The project's tests of what its production refuses. Nothing imports a test, so a project may
-  # delete this one; it is excluded on update rather than skipped, so it never comes back.
+  # delete these; each is excluded on update rather than skipped, so it never comes back.
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"
+  - "{% if _copier_operation == 'update' %}backend/tests/started/test_environment.py{% endif %}"
   # Generated from the project's own code, so an update never touches them and the project
   # regenerates them afterwards: `make openapi` writes the first two, `make lint` the third.
   # A merged copy of any of them describes neither tree.

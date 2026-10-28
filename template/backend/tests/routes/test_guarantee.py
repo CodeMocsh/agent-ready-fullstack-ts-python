@@ -12,7 +12,6 @@ not an audit of every handler.
 """
 
 import re
-from collections.abc import Iterator
 from typing import NamedTuple
 
 import pytest
@@ -22,6 +21,7 @@ from starlette.routing import Mount
 
 from app.identity import principal_for
 from app.main import create_app
+from app.store import Database
 from tests import widgets
 from tests.identity.doubles import REFUSAL, refusing
 from tests.routes.walk import UNKNOWN, endpoints_of, routes_of
@@ -62,17 +62,22 @@ class Refusing(NamedTuple):
 
 
 @pytest.fixture
-def refused() -> Iterator[Refusing]:
+def refused(database: Database, app_state: dict[str, object]) -> Refusing:
     """An identity seam that refuses everything, driven through a real client.
+
+    The app `create_app` builds, so the walk reads every route it serves. It is not started:
+    `database` and each of `app_state` are put on it here, and the client runs no lifespan.
 
     `dependency_overrides` rather than monkeypatching the module, because the router holds the
     function object taken at import time and a patched module attribute would never reach it.
     The override is resolved per request, which is the path a real deployment's resolver takes.
     """
     app = create_app()
+    app.state.database = database
+    for name, value in app_state.items():
+        setattr(app.state, name, value)
     app.dependency_overrides[principal_for] = refusing
-    with TestClient(app) as client:
-        yield Refusing(app, client)
+    return Refusing(app, TestClient(app))
 
 
 def answering_without_a_tenant(refused: Refusing) -> list[tuple[str, str]]:

@@ -57,7 +57,7 @@ def configure(service_version: str | None) -> None:
     Idempotent, and it touches only what it installed: a handler from an earlier call is
     replaced, and any other handler on the root logger is left alone. Below `WARNING` only
     `_SAYS_INFO` is heard. uvicorn's access log is off; `request completed` replaces it. Call it
-    after uvicorn has configured its own loggers and before it serves -- `create_app` does.
+    after uvicorn has configured its own loggers and before it serves -- `assemble` does.
     """
     handler = _Stdout()
     handler.setFormatter(

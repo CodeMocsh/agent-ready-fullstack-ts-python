@@ -6,13 +6,9 @@ what is asserted is what an OTLP exporter would have been handed.
 
 import json
 import re
-import socket
-import threading
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, override
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
@@ -24,10 +20,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from app import serve, telemetry
-from app.deployment import OTLP_ENDPOINT_ENV, RESOURCE_ATTRIBUTES_ENV, SERVICE_NAME_ENV
-from app.main import create_app
+from app.deployment import RESOURCE_ATTRIBUTES_ENV
+from app.main import ROUTERS
+from app.store import Database
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
+from tests.routed import routed
 from tests.widgets import with_widgets
 
 STATE_CANARY = "canary6f1e2d"
@@ -35,7 +33,6 @@ CALLER_TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
 CALLER_SPAN = "00f067aa0ba902b7"
 TRACEPARENT = f"00-{CALLER_TRACE}-{CALLER_SPAN}-01"
 TRACESTATE = f"vendor={STATE_CANARY}"
-EXPORT_TIMEOUT_SECONDS = 1
 
 
 @dataclass
@@ -73,8 +70,8 @@ class Instrumented:
         ]
 
 
-def instrumented(*, trust: bool, ratio: float = 1.0) -> Iterator[Instrumented]:
-    app = with_widgets(create_app())
+def instrumented(database: Database, *, trust: bool, ratio: float = 1.0) -> Iterator[Instrumented]:
+    app = with_widgets(routed(*ROUTERS, database=database))
 
     @app.get("/raises")
     async def raises() -> None:
@@ -94,23 +91,23 @@ def instrumented(*, trust: bool, ratio: float = 1.0) -> Iterator[Instrumented]:
 
 
 @pytest.fixture
-def untrusting() -> Iterator[Instrumented]:
-    yield from instrumented(trust=False)
+def untrusting(database: Database) -> Iterator[Instrumented]:
+    yield from instrumented(database, trust=False)
 
 
 @pytest.fixture
-def trusting() -> Iterator[Instrumented]:
-    yield from instrumented(trust=True)
+def trusting(database: Database) -> Iterator[Instrumented]:
+    yield from instrumented(database, trust=True)
 
 
 @pytest.fixture
-def unsampled() -> Iterator[Instrumented]:
-    yield from instrumented(trust=False, ratio=0.0)
+def unsampled(database: Database) -> Iterator[Instrumented]:
+    yield from instrumented(database, trust=False, ratio=0.0)
 
 
 @pytest.fixture
-def trusting_unsampled() -> Iterator[Instrumented]:
-    yield from instrumented(trust=True, ratio=0.0)
+def trusting_unsampled(database: Database) -> Iterator[Instrumented]:
+    yield from instrumented(database, trust=True, ratio=0.0)
 
 
 def trace_of(span: ReadableSpan) -> str:
@@ -136,10 +133,10 @@ def everything_in(span: ReadableSpan) -> str:
 
 
 @pytest.fixture
-def versioned(monkeypatch: pytest.MonkeyPatch) -> Iterator[Instrumented]:
+def versioned(monkeypatch: pytest.MonkeyPatch, database: Database) -> Iterator[Instrumented]:
     """A version that needs decoding: the one two readers of the variable could read apart."""
     monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, "service.version=1.4.2%2Bbuild.7")
-    yield from instrumented(trust=False)
+    yield from instrumented(database, trust=False)
 
 
 def test_a_span_names_the_version_every_log_line_names(
@@ -352,86 +349,21 @@ def test_a_probe_under_the_one_origin_prefix_is_a_probe_too(path: str) -> None:
 
 
 @pytest.mark.usefixtures("untrusting")
-def test_a_second_app_in_the_same_process_refuses_to_be_instrumented() -> None:
+def test_a_second_app_in_the_same_process_refuses_to_be_instrumented(database: Database) -> None:
     with pytest.raises(RuntimeError, match="already instrumented"):
         telemetry.instrument(
-            with_widgets(create_app()),
+            with_widgets(routed(*ROUTERS, database=database)),
             telemetry_settings(),
             InMemorySpanExporter(),
             InMemoryMetricReader(),
         )
 
 
-def test_an_app_with_no_endpoint_is_not_instrumented(logged: Logged) -> None:
-    app = with_widgets(create_app())
+def test_an_app_with_no_endpoint_is_not_instrumented(logged: Logged, database: Database) -> None:
+    app = with_widgets(routed(*ROUTERS, database=database))
 
     with TestClient(app) as client:
         client.get("/widgets")
 
     assert app.state.instruments is None
     assert all("trace_id" not in line for line in logged())
-
-
-@pytest.fixture
-def silent_collector() -> Iterator[str]:
-    """Accepts connections and never answers, like a Collector that has hung."""
-    with socket.socket() as listening:
-        listening.bind(("127.0.0.1", 0))
-        listening.listen(64)
-        yield f"http://127.0.0.1:{listening.getsockname()[1]}"
-
-
-def test_a_collector_that_hangs_slows_no_request_and_holds_shutdown_to_two_timeouts(
-    monkeypatch: pytest.MonkeyPatch, silent_collector: str
-) -> None:
-    monkeypatch.setenv(OTLP_ENDPOINT_ENV, silent_collector)
-    monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", str(EXPORT_TIMEOUT_SECONDS))
-
-    with TestClient(with_widgets(create_app())) as client:
-        routed = client.get("/widgets")
-        started = time.monotonic()
-        answered = client.get("/widgets")
-        answering = time.monotonic() - started
-        stopping = time.monotonic()
-    stopped = time.monotonic() - stopping
-
-    assert routed.status_code == answered.status_code == 200
-    assert answering < EXPORT_TIMEOUT_SECONDS / 2
-    assert stopped < 2 * EXPORT_TIMEOUT_SECONDS + 1.5
-
-
-@pytest.fixture
-def collector() -> Iterator[tuple[str, list[str]]]:
-    """Something listening where a Collector would, and the paths posted to it."""
-    received: list[str] = []
-
-    class Recording(BaseHTTPRequestHandler):
-        def do_POST(self) -> None:
-            self.rfile.read(int(self.headers["content-length"]))
-            received.append(self.path)
-            self.send_response(200)
-            self.end_headers()
-
-        @override
-        def log_message(self, format: str, *args: object) -> None:
-            return
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Recording)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{server.server_address[1]}", received
-    server.shutdown()
-
-
-def test_an_app_given_an_endpoint_exports_traces_and_metrics_to_it_over_otlp(
-    monkeypatch: pytest.MonkeyPatch, collector: tuple[str, list[str]]
-) -> None:
-    endpoint, received = collector
-    monkeypatch.setenv(OTLP_ENDPOINT_ENV, endpoint)
-    monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
-
-    with TestClient(with_widgets(create_app())) as client:
-        client.get("/widgets")
-
-    assert "/v1/traces" in received
-    assert "/v1/metrics" in received

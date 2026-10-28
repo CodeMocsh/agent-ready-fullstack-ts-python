@@ -609,7 +609,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="audit_events deployment devtools environment errors identity integration lifespan
-              log main models observe routes serve store telemetry wiring"
+              log main models observe routes serve started store telemetry wiring"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -909,7 +909,8 @@ need_only f docs/adr/template \
     0014-the-gate-runs-once-per-tree-and-one-at-a-time.md \
     0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md \
     0016-the-template-s-decisions-are-numbered-apart-from-yours.md \
-    0017-the-database-records-every-write-and-the-request-layer-every-request.md
+    0017-the-database-records-every-write-and-the-request-layer-every-request.md \
+    0018-a-route-test-never-starts-the-app.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

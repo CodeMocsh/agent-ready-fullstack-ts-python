@@ -115,6 +115,19 @@ to the sentinel principal. A project that authenticates replaces it, then record
 resolver shares, `app/identity/shared.py`, is not the stub, and an update brings it either way.
 _Avoid_: fake auth, no-auth mode.
 
+## Tests
+
+**Route test**:
+A test of the HTTP contract of a requirement or a resource: the requirement, the refusals and
+their `detail`, the statuses and the shapes. It starts nothing. It usually mounts its routers
+with `tests.routed.routed`.
+_Avoid_: API test, integration test (`tests/integration/` is a tier).
+
+**Started app**:
+The app `create_app` builds, with its lifespan run. Only a test in `tests/started/` or in a tier
+starts it.
+_Avoid_: end-to-end (that is the browser tier, `make test-e2e`), full app, real app.
+
 ## Logs
 
 **Log line**:
