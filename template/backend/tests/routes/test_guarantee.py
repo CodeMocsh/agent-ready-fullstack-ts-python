@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from starlette.routing import Mount
 
 from app.identity import principal_for
+from app.lifespan import build_routes
 from app.main import create_app
 from app.store import Database
 from tests import widgets
@@ -66,7 +67,8 @@ def refused(database: Database, app_state: dict[str, object]) -> Refusing:
     """An identity seam that refuses everything, driven through a real client.
 
     The app `create_app` builds, so the walk reads every route it serves. It is not started:
-    `database` and each of `app_state` are put on it here, and the client runs no lifespan.
+    `database` and each of `app_state` are put on it here, and its routes are built here, as the
+    lifespan builds them. The client runs no lifespan.
 
     `dependency_overrides` rather than monkeypatching the module, because the router holds the
     function object taken at import time and a patched module attribute would never reach it.
@@ -77,6 +79,7 @@ def refused(database: Database, app_state: dict[str, object]) -> Refusing:
     for name, value in app_state.items():
         setattr(app.state, name, value)
     app.dependency_overrides[principal_for] = refusing
+    _ = build_routes(app)
     return Refusing(app, TestClient(app))
 
 

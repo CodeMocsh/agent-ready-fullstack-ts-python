@@ -12,16 +12,19 @@ The template owns this module. A project hands `routed` each value its lifespan 
 
 from fastapi import APIRouter, FastAPI
 
+from app.lifespan import build_routes
 from app.main import assemble
 from app.store import Database
 
 
 def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
     """An app that serves `routers` with everything `assemble` puts around a route, with
-    `database` and each of `state` on `app.state` under its name. Starts nothing, so a test may
-    build one for itself."""
+    `database` and each of `state` on `app.state` under its name, and each of its routes built, as
+    the lifespan builds them. Starts nothing, so a test may build one for itself. Blocks: call it
+    off the event loop."""
     app = assemble(*routers, lifespan=None)
     app.state.database = database
     for name, value in state.items():
         setattr(app.state, name, value)
+    _ = build_routes(app)
     return app

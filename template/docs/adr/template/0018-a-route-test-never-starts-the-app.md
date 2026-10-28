@@ -31,7 +31,9 @@ runs the lifespan only inside `with`, so an app that is not started still serves
 - **One assembly.** `assemble` in `app/main.py` puts the refusal of an unresolved tenant, the
   request event, the request line and the telemetry around each route. `create_app` is
   `assemble(*ROUTERS, lifespan=lifespan)`. `routed` is `assemble(*routers, lifespan=None)`, with
-  `database` and each value a test names on `app.state`.
+  `database` and each value a test names on `app.state`. `routed` builds the routes it mounts
+  before it returns, with `build_routes` from `app/lifespan.py`, as the lifespan does. A first
+  request then builds no route on the event loop. `tests/test_routed.py` holds that.
   `test_a_route_test_assembles_what_the_app_serves` in `tests/main/test_main.py` fails when
   `create_app` serves something that `routed(*ROUTERS)` does not.
 - **The guard.** `tests/conftest.py` replaces the lifespan when it is imported. The replacement

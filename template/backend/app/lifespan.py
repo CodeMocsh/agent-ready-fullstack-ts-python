@@ -1,4 +1,4 @@
-"""What this process runs beside the app: the routes `_routed` names, built before the first
+"""What this process runs beside the app: the routes `build_routes` names, built before the first
 request; one `Database`, verified before the first request and closed after the last; and the
 instruments that observe it.
 
@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     the `Database` on `app.state` for the life of the process. Closes the database, then the
     instruments."""
     refuse_development_settings()
-    _ = await asyncio.to_thread(_routed, app)
+    _ = await asyncio.to_thread(build_routes, app)
     database = build()
     version = await database.check()
     log.serving(database.name, version)
@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await asyncio.to_thread(app.state.instruments.shutdown)
 
 
-def _routed(app: FastAPI) -> list[RouteContext]:
+def build_routes(app: FastAPI) -> list[RouteContext]:
     """Every route that `iter_route_contexts` yields for `app`, built, so that no request builds
     one. A route that `frontend()` adds to an included router is not among them: the first request
     that no other route matches builds it. Blocks: call it off the event loop."""
