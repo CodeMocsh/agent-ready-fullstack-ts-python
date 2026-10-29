@@ -199,6 +199,24 @@ What to expect, because it is not all free:
   nothing", "`create_app` adds nothing but the lifespan" and "A test that starts the app", and
   the `tests/routed.py` and `tests/started/` lines of the layout.
   [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md) says why.
+- **From 0.48.0 `routed` builds the app for a set of routers once per process, and shares it.**
+  Each test that asks for it gets a new `app.state` and no `dependency_overrides`. A test that
+  changes what the app serves fails at its teardown with `SharedAppChanged`: it adds a route to
+  the app or to a router the app includes, includes a router, adds a middleware or an exception
+  handler, or sets an attribute of the app. Build that app with `tests.routed.assembled`, which
+  takes the same arguments and builds a new app on each call. A test that mounts only a resource
+  router, as the 0.47.0 step shows, mounts its requirement router with `routed` instead: the
+  shared app builds those routes once. A test that asks `routed`
+  twice for the same routers fails with `SharedTwiceInOneTest`, and a test that configures
+  telemetry fails with `SharedWithTelemetry`. Build each of those apps with `assembled` too.
+  Something that reads the state of a shared app after its test ended fails with
+  `SharedPastItsTest`: ask for the app in a fixture that each test gets for itself. If you merged
+  `backend/tests/conftest.py` by hand, take the template's `pytest_runtest_teardown`, which ends
+  each share. Without it, the second test that asks `routed` for an app fails with
+  `SharedTwiceInOneTest`. In
+  `docs/backend.md`, take the template's bullets that start "A route test starts nothing" and
+  "`routed` builds the app".
+  [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

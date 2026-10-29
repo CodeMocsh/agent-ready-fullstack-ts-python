@@ -25,7 +25,7 @@ from app.identity.shared import Actor, Principal, Unauthenticated
 from app.main import ROUTERS
 from app.request_events import RecordsRequests
 from app.store import Database
-from tests.routed import routed
+from tests.routed import assembled
 from tests.widgets import router as widgets_router
 
 TENANT_HEADER = "x-test-tenant"
@@ -54,7 +54,7 @@ async def served(
 def an_app(database: Database) -> FastAPI:
     """The app, also serving the widgets, `/raises` and `/acting` behind the identity
     dependency."""
-    app = routed(*ROUTERS, database=database)
+    app = assembled(*ROUTERS, database=database)
     extra = APIRouter()
 
     @extra.get("/raises")

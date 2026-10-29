@@ -36,6 +36,19 @@ runs the lifespan only inside `with`, so an app that is not started still serves
   request then builds no route on the event loop. `tests/test_routed.py` holds that.
   `test_a_route_test_assembles_what_the_app_serves` in `tests/main/test_main.py` fails when
   `create_app` serves something that `routed(*ROUTERS)` does not.
+- **One shared app for each set of routers, in each process.** In a project with many routes,
+  building them is most of the CPU of a route test, and the routes are the same for each test.
+  `routed` builds the app once for each set of routers, and shares it with one test at a time.
+  Each test gets a new `app.state` and no `dependency_overrides`, because a test changes both. A
+  test may not change what the app serves: its other attributes, its routes, the routes of each router
+  it includes, its middleware and its exception handlers. At the teardown of each test,
+  `take_back` in `tests/routed.py` compares them with what the build made. It raises
+  `SharedAppChanged`, which names the test. It ends the share too: a later read of the state of
+  that app raises `SharedPastItsTest`. A test that asks twice for the same app raises
+  `SharedTwiceInOneTest`. In an environment that configures telemetry, `routed` raises
+  `SharedWithTelemetry`,
+  because an instrumented app holds exporters for the whole process. A test that changes its app
+  builds it with `assembled`, which shares nothing. `tests/test_routed.py` holds each of these.
 - **The guard.** `tests/conftest.py` replaces the lifespan when it is imported. The replacement
   checks the running test when the lifespan starts, not when the app is built. Outside
   `tests/started/` and the tier folders, it raises `StartedOutsideItsFolder`, which names the
@@ -64,16 +77,22 @@ runs the lifespan only inside `with`, so an app that is not started still serves
   start it when route tests do not.
 - **One started app for each module.** A test changes `dependency_overrides` and the substrate,
   and the next test then reads what it left. Share only what does not change.
+- **Share the built routes, and build a new app around them for each test.** FastAPI keeps the
+  routes it builds on what `include_router` adds to one app, and they point back to that app for
+  `dependency_overrides`. Only the whole app can be shared without the private API of FastAPI.
+- **Share the app, and trust each test to leave it as it found it.** Most of the template's own
+  tests that change an app add a route or a router to it. A change that nothing checks leaks into
+  every later test, in an order that changes from run to run.
 - **Check where the app is built, not where it starts.** A test then starts an app that an
   earlier test or an import built, and the check does not see it.
-- **Always mount one resource router, never the requirement router.** A request builds every
-  route in each router it checks, up to the router that holds its route. For most projects the
-  cost of a requirement router is small next to a start. Where it is not, a test mounts the
-  resource router under the dependencies of the requirement. `docs/backend.md` shows how.
+- **Always mount one resource router, never the requirement router.** The test then does not
+  assert the requirement. Each process builds the routes of a shared app once, so the routes of
+  the requirement router cost a route test almost nothing.
 
 ## Consequences
 
 - A test that starts the app moves to `tests/started/`, or mounts its routers with `routed`.
+- A test that changes what its app serves builds it with `assembled`, and pays for the build.
 - A value that the lifespan puts on `app.state` reaches a route test only when the test gives it
   to `routed`. A route test that leaves one out fails where the route reads it.
 - A route test does not prove the lifespan. `tests/started/`, and the contract suite against a

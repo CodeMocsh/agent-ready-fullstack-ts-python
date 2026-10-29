@@ -31,7 +31,7 @@ from tests.identity.doubles import (
     refusing_async,
     resolving_async,
 )
-from tests.routed import routed
+from tests.routed import assembled
 from tests.widgets import router as widgets_router
 
 
@@ -99,7 +99,7 @@ def test_a_route_under_the_tenant_requirement_names_the_principal_the_seam_resol
     """The widgets carry whatever the shipped tenant requirement carries, so a requirement that
     reaches the seam without naming its principal fails here, in a project with no tenant route
     yet. `docs/adr/template/0011`."""
-    app = routed(database=database)
+    app = assembled(database=database)
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
 
     def named(request: Request) -> Principal:
@@ -128,7 +128,7 @@ def test_a_request_the_seam_refuses_is_recorded_only_on_its_request_line(
 ) -> None:
     """It has no tenant to record a request event in, and anybody can send one. Its `request
     completed` line, with a `401` and a null tenant, is the record. `docs/adr/template/0017`."""
-    app = routed(database=database)
+    app = assembled(database=database)
     app.include_router(widgets_router, dependencies=tenant.router.dependencies)
     app.dependency_overrides[principal_for] = refusing
     with TestClient(app) as client:
@@ -172,7 +172,7 @@ def test_a_principal_a_project_extends_reaches_its_route_whole(
     async def member(principal: PrincipalDep) -> None:
         seen.append(principal)
 
-    app = routed(database=database)
+    app = assembled(database=database)
     app.include_router(router)
     app.dependency_overrides[principal_for] = resolving_a_member
     with TestClient(app) as client:

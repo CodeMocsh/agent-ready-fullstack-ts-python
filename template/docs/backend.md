@@ -82,10 +82,13 @@ backend/
   fixture, and `**app_state` when the lifespan puts other values on `app.state`. The template's
   lifespan puts none there. Mount a
   requirement router, such as `tenant.router`, so the requirement is part of what the test
-  asserts. A request builds every route in each router it checks, up to the router that holds
-  its route. With many routes under one requirement, mount only the resource router, under the
-  requirement's dependencies: `app = routed(database=database)`, then
-  `app.include_router(tasks.router, dependencies=tenant.router.dependencies)`.
+  asserts.
+- **`routed` builds the app for a set of routers once per process, and shares it.** Each test
+  gets a new `app.state` and no `dependency_overrides`, and may change both. A test that changes
+  what the app serves, such as a route, a middleware, an exception handler or an attribute, fails
+  at its teardown. A test that asks `routed` for an app while it configures telemetry fails too.
+  Build its app with `tests.routed.assembled`, which no other test shares. `routed` shares by
+  the routers it is given, so build each router once, at import.
 - **`create_app` adds nothing but the lifespan.** Each requirement's router goes in `ROUTERS`, and
   everything around a route goes in `assemble`. A route test then serves what the app serves,
   and `tests/main/test_main.py` fails when it does not.
