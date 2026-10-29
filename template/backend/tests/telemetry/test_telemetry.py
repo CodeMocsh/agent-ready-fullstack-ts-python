@@ -25,7 +25,7 @@ from app.main import ROUTERS
 from app.store import Database
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
-from tests.routed import routed
+from tests.routed import assembled
 from tests.widgets import with_widgets
 
 STATE_CANARY = "canary6f1e2d"
@@ -71,7 +71,7 @@ class Instrumented:
 
 
 def instrumented(database: Database, *, trust: bool, ratio: float = 1.0) -> Iterator[Instrumented]:
-    app = with_widgets(routed(*ROUTERS, database=database))
+    app = with_widgets(assembled(*ROUTERS, database=database))
 
     @app.get("/raises")
     async def raises() -> None:
@@ -352,7 +352,7 @@ def test_a_probe_under_the_one_origin_prefix_is_a_probe_too(path: str) -> None:
 def test_a_second_app_in_the_same_process_refuses_to_be_instrumented(database: Database) -> None:
     with pytest.raises(RuntimeError, match="already instrumented"):
         telemetry.instrument(
-            with_widgets(routed(*ROUTERS, database=database)),
+            with_widgets(assembled(*ROUTERS, database=database)),
             telemetry_settings(),
             InMemorySpanExporter(),
             InMemoryMetricReader(),
@@ -360,7 +360,7 @@ def test_a_second_app_in_the_same_process_refuses_to_be_instrumented(database: D
 
 
 def test_an_app_with_no_endpoint_is_not_instrumented(logged: Logged, database: Database) -> None:
-    app = with_widgets(routed(*ROUTERS, database=database))
+    app = with_widgets(assembled(*ROUTERS, database=database))
 
     with TestClient(app) as client:
         client.get("/widgets")

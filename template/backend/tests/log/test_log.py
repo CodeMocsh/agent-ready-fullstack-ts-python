@@ -26,7 +26,7 @@ from app.main import ROUTERS
 from app.store import Database
 from tests.conftest import Logged
 from tests.doubles import CANARY
-from tests.routed import routed
+from tests.routed import assembled
 from tests.widgets import router as widgets_router, with_widgets
 
 SEVERITIES = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
@@ -55,7 +55,7 @@ def named_principal(
 
 @pytest.fixture
 def app(database: Database) -> FastAPI:
-    return with_widgets(routed(*ROUTERS, database=database))
+    return with_widgets(assembled(*ROUTERS, database=database))
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ def client(app: FastAPI, logged: Logged) -> Iterator[TestClient]:
 @pytest.fixture
 def guarded(database: Database) -> FastAPI:
     """The app, also serving the widgets and `/raises` behind `named_principal`."""
-    app = routed(*ROUTERS, database=database)
+    app = assembled(*ROUTERS, database=database)
     failing = APIRouter()
 
     @failing.get("/raises")
@@ -115,7 +115,7 @@ def test_every_line_names_the_version_the_deployment_gave_and_none_when_it_gave_
     """What lets a session that spans a deploy be read: each line says which build wrote it."""
     monkeypatch.setenv(RESOURCE_ATTRIBUTES_ENV, said)
 
-    with TestClient(with_widgets(routed(*ROUTERS, database=database))) as client:
+    with TestClient(with_widgets(assembled(*ROUTERS, database=database))) as client:
         client.get("/widgets")
 
     lines = logged()

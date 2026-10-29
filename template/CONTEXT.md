@@ -123,6 +123,12 @@ their `detail`, the statuses and the shapes. It starts nothing. It usually mount
 with `tests.routed.routed`.
 _Avoid_: API test, integration test (`tests/integration/` is a tier).
 
+**Shared app**:
+The app `tests.routed.routed` builds once for a set of routers in each test process. It is shared
+with one test at a time, which may change its `app.state` and `dependency_overrides` and nothing
+else. A test that changes its app builds it with `tests.routed.assembled`.
+_Avoid_: cached app, fixture app.
+
 **Started app**:
 The app `create_app` builds, with its lifespan run. Only a test in `tests/started/` or in a tier
 starts it.

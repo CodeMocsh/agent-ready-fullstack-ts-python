@@ -23,7 +23,7 @@ def test_any_other_name_is_still_missing() -> None:
 
 
 def test_a_route_test_assembles_what_the_app_serves(database: Database) -> None:
-    served, assembled = main.create_app(), routed(*main.ROUTERS, database=database)
+    served, mounted = main.create_app(), routed(*main.ROUTERS, database=database)
 
     assert (
         [repr(one) for one in served.user_middleware],
@@ -31,10 +31,10 @@ def test_a_route_test_assembles_what_the_app_serves(database: Database) -> None:
         routes_of(served),
         [(type(one).__name__, getattr(one, "path", None)) for one in served.routes],
     ) == (
-        [repr(one) for one in assembled.user_middleware],
-        assembled.exception_handlers,
-        routes_of(assembled),
-        [(type(one).__name__, getattr(one, "path", None)) for one in assembled.routes],
+        [repr(one) for one in mounted.user_middleware],
+        mounted.exception_handlers,
+        routes_of(mounted),
+        [(type(one).__name__, getattr(one, "path", None)) for one in mounted.routes],
     ), (
         "create_app serves something that routed(*ROUTERS) does not, so a route test answers "
         "differently from the app. Put each requirement's router in ROUTERS, and everything "

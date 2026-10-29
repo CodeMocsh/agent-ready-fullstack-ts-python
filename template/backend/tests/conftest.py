@@ -19,6 +19,10 @@ check is made when the lifespan starts, so an app built at import is checked too
 lives for one test: the test that stops it must be the test that started it. A route test mounts its routers with `tests.routed.routed` instead.
 `docs/adr/template/0018`.
 
+**A share of an app lasts for one test.** After every fixture of a test is torn down,
+`take_back` ends each share that `tests.routed.routed` made with it, and raises
+`SharedAppChanged` when the test changed what a shared app serves.
+
 **What a run left out, said out loud.** `norecursedirs` keeps each tier in `tiers.py` out of the default run, which is what lets every
 test in this project be a test that runs rather than one that skips itself. The cost of that
 is silence: `pytest -q` reports what it collected and has no way to mention what it never
@@ -60,6 +64,7 @@ from tests.event_loop import (
     reported,
     step_limit_on_this_machine,
 )
+from tests.routed import take_back
 from tests.tiers import python_tiers
 
 TESTS: Final = Path(__file__).parent
@@ -200,6 +205,16 @@ def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object
         return (yield)
     finally:
         _RUNNING.pop()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, object, object]:
+    """Ends each share that `tests.routed.routed` made with `item`, after every fixture of `item`
+    is torn down."""
+    try:
+        return (yield)
+    finally:
+        take_back(item.nodeid)
 
 
 @pytest.fixture
