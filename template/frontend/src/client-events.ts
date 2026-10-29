@@ -9,7 +9,7 @@ const CATEGORY = ["app", "client-events"];
 const UNDELIVERABLE = [...CATEGORY, "undeliverable"];
 const MAX_PER_PAGE = 20;
 
-function describe(kind: ClientEvent["kind"], error: unknown): ClientEvent {
+function clientEventFor(kind: ClientEvent["kind"], error: unknown): ClientEvent {
   const refused = error instanceof ApiError ? error : null;
   return {
     kind,
@@ -44,7 +44,7 @@ export function startClientEvents(): RecordClientEvent {
   const logger = getLogger(CATEGORY);
   const sent = new Set<string>();
   return (kind, error) => {
-    const event = describe(kind, error);
+    const event = clientEventFor(kind, error);
     const fingerprint = `${event.kind} ${event.error} ${event.route} ${event.status}`;
     if (sent.has(fingerprint) || sent.size >= MAX_PER_PAGE) {
       return;
