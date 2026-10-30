@@ -200,3 +200,14 @@ it("shows another writer's change when a screen mounts after a navigation that f
   await settle();
   expect(screen.getCurrentResult().data).toBe(AS_CHANGED);
 });
+
+it("shows another writer's change when a query mounts after the router reloads its routes", async () => {
+  client.setQueryData(TASKS, AS_READ);
+  held = AS_CHANGED;
+  await settle();
+  await act(() => router.invalidate());
+  await settle();
+  const screen = aQueryOfTasks();
+  await settle();
+  expect(screen.getCurrentResult().data).toBe(AS_CHANGED);
+});
