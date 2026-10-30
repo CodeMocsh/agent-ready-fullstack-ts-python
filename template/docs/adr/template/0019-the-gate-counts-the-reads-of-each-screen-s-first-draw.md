@@ -19,8 +19,7 @@ incident, and nothing stopped the next screen.
 
 The reads of a draw are not visible in the source. A child mounts after its parent's response
 and then starts its own query. A lazy route loads its component first. A `beforeLoad` reads
-before anything renders. A second observer of a query that has data refetches when it mounts,
-because `staleTime` is 0. Only a draw shows all of them.
+before anything renders. Only a draw shows all of them.
 
 ## Decision
 

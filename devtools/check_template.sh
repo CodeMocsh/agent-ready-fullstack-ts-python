@@ -840,6 +840,7 @@ need_grep 'VITE_ENABLE_MSW=false' frontend/.env.live
 need_grep '"private": true' frontend/package.json
 need_grep 'strip-mock-worker' frontend/vite.config.ts "The worker is a public/ asset, and only this plugin keeps it out of a production build."
 need_grep 'BASE_URL}mockServiceWorker.js' frontend/src/main.tsx "A hard-coded leading slash breaks a deploy under a subpath."
+need_grep 'followNavigations(router, queryClient)' frontend/src/main.tsx "Without it, the app's query client refuses to mount a query over data, and no test runs main.tsx."
 need_grep 'basepath: import.meta.env.BASE_URL' frontend/src/router.tsx "A hard-coded leading slash breaks a deploy under a subpath."
 need_grep 'import.meta.env.BASE_URL' frontend/src/api/base.ts "A hard-coded leading slash breaks a deploy under a subpath."
 
@@ -911,7 +912,8 @@ need_only f docs/adr/template \
     0016-the-template-s-decisions-are-numbered-apart-from-yours.md \
     0017-the-database-records-every-write-and-the-request-layer-every-request.md \
     0018-a-route-test-never-starts-the-app.md \
-    0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md
+    0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md \
+    0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

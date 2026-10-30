@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { AppProviders } from "@/app-providers";
 import { startClientEvents } from "@/client-events";
 import { reloadOnceOnMissingChunk } from "@/missing-chunk";
-import { createQueryClient } from "@/query-client";
+import { createQueryClient, followNavigations } from "@/query-client";
 import { router } from "@/router";
 import "@/index.css";
 
@@ -31,6 +31,7 @@ window.addEventListener("unhandledrejection", (event) => record("uncaught", even
 reloadOnceOnMissingChunk(window, () => sessionStorage, import.meta.url);
 
 const queryClient = createQueryClient(record);
+followNavigations(router, queryClient);
 
 await enableMocking();
 

@@ -9,7 +9,7 @@ import { render, waitFor } from "@testing-library/react";
 import { API_BASE_URL } from "@/api/base";
 import { AppProviders } from "@/app-providers";
 import { server } from "@/mocks/node";
-import { createQueryClient } from "@/query-client";
+import { createQueryClient, followNavigations } from "@/query-client";
 import { router } from "@/router";
 
 export type ReadBudget = { visit: string; reads: number; lands?: string };
@@ -95,15 +95,13 @@ async function settled(
 
 type Recorder = {
   open: Map<string, string>;
-  failures: unknown[];
   takeReads: () => string[];
   stop: () => void;
 };
 
-function recordRequests(streams: readonly RegExp[]): Recorder {
+function recordRequests(streams: readonly RegExp[], failures: unknown[]): Recorder {
   const api = new URL(API_BASE_URL, window.location.href).href;
   const open = new Map<string, string>();
-  const failures: unknown[] = [];
   const reads: string[] = [];
   const pathOf = (request: Request) => `${request.method} ${new URL(request.url).pathname}`;
 
@@ -137,7 +135,6 @@ function recordRequests(streams: readonly RegExp[]): Recorder {
   }
   return {
     open,
-    failures,
     takeReads: () => reads.splice(0),
     stop: () => {
       server.events.removeListener("request:start", started);
@@ -151,17 +148,19 @@ function recordRequests(streams: readonly RegExp[]): Recorder {
 }
 
 export async function readsOf(visit: string, streams: readonly RegExp[]): Promise<Reads> {
-  const recorder = recordRequests(streams);
-  const { open, failures } = recorder;
+  const failures: unknown[] = [];
+  const queryClient = createQueryClient((_kind, error) => failures.push(error));
+  const defaults = queryClient.getDefaultOptions();
+  queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, retry: false } });
+  const visited = createRouter({
+    ...router.options,
+    history: createMemoryHistory({ initialEntries: [visit] }),
+    context: contextFor(queryClient),
+  });
+  const stopFollowing = followNavigations(visited, queryClient);
+  const recorder = recordRequests(streams, failures);
+  const { open } = recorder;
   try {
-    const queryClient = createQueryClient((_kind, error) => failures.push(error));
-    const defaults = queryClient.getDefaultOptions();
-    queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, retry: false } });
-    const visited = createRouter({
-      ...router.options,
-      history: createMemoryHistory({ initialEntries: [visit] }),
-      context: contextFor(queryClient),
-    });
     const drawn = render(
       <QueryClientProvider client={queryClient}>
         <AppProviders>
@@ -186,6 +185,7 @@ export async function readsOf(visit: string, streams: readonly RegExp[]): Promis
     }
   } finally {
     recorder.stop();
+    stopFollowing();
     focusManager.setFocused(undefined);
   }
 }
