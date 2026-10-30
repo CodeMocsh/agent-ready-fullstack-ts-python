@@ -217,6 +217,7 @@ ignore = [
 "app/telemetry.py" = ["TID251"]
 "tests/telemetry/test_telemetry.py" = ["TID251"]
 "tests/integration/test_telemetry.py" = ["TID251"]
+"tests/started/test_telemetry.py" = ["TID251"]
 # The one listener on asyncio's logger, which reports a step that held the event loop.
 "tests/event_loop.py" = ["TID251"]
 # The devtools are command-line scripts, and stdout is where they answer.
@@ -258,6 +259,11 @@ min-callables = 50
 
 [tool.basedpyright]
 include = ["app", "tests", "devtools"]
+# `sys._current_frames` is the only way one thread sees where another one is, and the loop watch
+# needs it to say where a held event loop was. One file, and one rule in it.
+executionEnvironments = [
+    { root = "app/loop_watch.py", extraPaths = ["."], reportPrivateUsage = false },
+]
 reportIgnoreCommentWithoutRule = false
 reportUnnecessaryTypeIgnoreComment = false
 reportMissingTypeStubs = false

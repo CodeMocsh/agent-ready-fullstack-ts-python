@@ -1,5 +1,6 @@
-"""What the lifespan does with the instruments: it shuts them down after the last request, and
-the shutdown flushes what the app recorded to the Collector, within two export timeouts."""
+"""What the lifespan does with the instruments: it records how late the event loop ran, it shuts
+them down after the last request, and the shutdown flushes what the app recorded to the
+Collector, within two export timeouts."""
 
 import socket
 import threading
@@ -10,9 +11,14 @@ from typing import override
 
 import pytest
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from app import telemetry
 from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
+from app.loop_watch import TICK_SECONDS
 from app.main import create_app
+from app.wiring import TelemetrySettings
 from tests.widgets import with_widgets
 
 EXPORT_TIMEOUT_SECONDS = 1
@@ -81,3 +87,28 @@ def test_an_app_given_an_endpoint_exports_traces_and_metrics_to_it_over_otlp(
 
     assert "/v1/traces" in received
     assert "/v1/metrics" in received
+
+
+def test_a_started_app_records_how_late_its_event_loop_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+    metrics = InMemoryMetricReader()
+
+    def in_memory(
+        _settings: TelemetrySettings,
+    ) -> tuple[InMemorySpanExporter, InMemoryMetricReader]:
+        return InMemorySpanExporter(), metrics
+
+    monkeypatch.setattr(telemetry, "otlp", in_memory)
+    monkeypatch.setenv(OTLP_ENDPOINT_ENV, "http://unused")
+    monkeypatch.setenv(SERVICE_NAME_ENV, "tasks-test")
+
+    with TestClient(create_app()):
+        time.sleep(3 * TICK_SECONDS)
+        collected = metrics.get_metrics_data()
+
+    assert collected is not None
+    assert telemetry.LOOP_DELAY in {
+        metric.name
+        for resource in collected.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }

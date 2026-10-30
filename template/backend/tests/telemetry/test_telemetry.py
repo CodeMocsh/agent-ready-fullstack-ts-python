@@ -348,6 +348,15 @@ def test_a_probe_under_the_one_origin_prefix_is_a_probe_too(path: str) -> None:
     assert not re.search(telemetry.PROBES, f"http://testserver{serve.PREFIX}/widgets{path}")
 
 
+def test_a_loop_delay_is_recorded_in_seconds_in_its_own_buckets(untrusting: Instrumented) -> None:
+    untrusting.instruments.loop_delay()(0.3)
+
+    [point] = [point for name, point in untrusting.points() if name == telemetry.LOOP_DELAY]
+    assert point.sum == 0.3
+    assert tuple(point.explicit_bounds) == telemetry.LOOP_DELAY_BUCKETS
+    assert dict(point.attributes or {}) == {}
+
+
 @pytest.mark.usefixtures("untrusting")
 def test_a_second_app_in_the_same_process_refuses_to_be_instrumented(database: Database) -> None:
     with pytest.raises(RuntimeError, match="already instrumented"):
