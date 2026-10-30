@@ -134,6 +134,21 @@ The app `create_app` builds, with its lifespan run. Only a test in `tests/starte
 starts it.
 _Avoid_: end-to-end (that is the browser tier, `make test-e2e`), full app, real app.
 
+**Screen**:
+A route with no children: what a person sees at one path. `screens` in `tests/first-draw.tsx`
+lists them.
+_Avoid_: page, view.
+
+**First draw**:
+What a screen sends from the start of the visit until the router is idle and no request is open.
+A part the person opens later is not in it.
+_Avoid_: initial load, page load.
+
+**Read budget**:
+The most GET requests to the API that a screen's first draw may send, and again on a focus.
+`tests/read-budgets.ts` holds one for each screen.
+_Avoid_: request limit, quota.
+
 ## Logs
 
 **Log line**:
