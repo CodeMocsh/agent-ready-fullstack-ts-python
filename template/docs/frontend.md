@@ -12,11 +12,13 @@ frontend/
   src/components/     UI; ui/ is vendored shadcn
   src/index.css       the @theme block
   src/router.tsx      routes
+  src/app-providers.tsx the providers around the router -- yours
   src/query-client.ts the query client
   src/client-events.ts reports a failure the browser saw to the backend's log
   src/missing-chunk.ts reloads the tab once when a deploy removed a chunk it asks for
   tests/              mirrors src/
   tests/read-budgets.ts the reads each screen's first draw may send -- yours
+  tests/signed-in.ts  how the read-budget test signs in -- yours
   e2e/                Playwright; *.live.spec.ts needs a running backend
   e2e/signed-in.ts    how a live spec signs in -- yours
   devtools/           the frontend's own gates, and the scanner they share

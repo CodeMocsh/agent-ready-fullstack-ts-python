@@ -2,6 +2,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { AppProviders } from "@/app-providers";
 import { startClientEvents } from "@/client-events";
 import { reloadOnceOnMissingChunk } from "@/missing-chunk";
 import { createQueryClient } from "@/query-client";
@@ -36,7 +37,9 @@ await enableMocking();
 createRoot(rootElement, { onCaughtError: (error) => record("caught", error) }).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <AppProviders>
+        <RouterProvider router={router} />
+      </AppProviders>
     </QueryClientProvider>
   </StrictMode>,
 );
