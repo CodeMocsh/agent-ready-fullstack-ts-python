@@ -217,6 +217,14 @@ What to expect, because it is not all free:
   `docs/backend.md`, take the template's bullets that start "A route test starts nothing" and
   "`routed` builds the app".
   [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md) says why.
+- **From 0.52.0 a query client from `createQueryClient` must follow a router.** Call
+  `followNavigations(router, queryClient)` after you create the client, as `src/main.tsx` does.
+  Until then, the client refuses to mount a query over data. If you set defaults on that client,
+  merge them: `setDefaultOptions` replaces the default `refetchOnMount`. A client of yours that
+  `createQueryClient` does not make reads again on each mount. In `docs/frontend.md`, take the
+  template's bullets that start "A read stays current" and "A second `useQuery` call".
+  [adr/template/0020](adr/template/0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
+  says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
