@@ -25,13 +25,15 @@ and passed when the machine was idle.
   or reconnect, or when this tab invalidated it.** `createQueryClient` sets this as the default
   `refetchOnMount`. A second `useQuery` call of a key that the draw already read shares that read
   when it mounts.
-- **`followNavigations(router, client)` records the time.** It records it when it is called, when
-  the router starts a navigation while it is idle, when the tab regains focus, and when the tab
-  comes back online. A redirect starts while another navigation loads, and so does a navigation
-  that replaces one that loads. Neither records the time, so a read before it stays current for
-  the screen it ends on.
-  `router.invalidate()` starts a navigation while the router is idle. `src/main.tsx` calls
-  `followNavigations` once. `readsOf` in `tests/first-draw.tsx` calls it for each draw, so the
+- **`followNavigations(router, client)` records the time.** It records it when it is called, when a
+  navigation starts while no load is open, when the tab regains focus, and when the tab comes back
+  online. A load opens at `onBeforeLoad`. A load closes at `onResolved`. The router's `status` at an
+  event is not the same in each version of `@tanstack/router-core`. Version 1.171.15 stops emitting
+  `onBeforeNavigate` after a redirect. `followNavigations` reads neither the `status` nor
+  `onBeforeNavigate`. A redirect starts before the load that throws it closes, and so does a
+  navigation that replaces one that loads. Neither records the time, so a read before it stays
+  current for the screen it ends on. `router.invalidate()` counts as a navigation. `src/main.tsx`
+  calls `followNavigations` once. `readsOf` in `tests/first-draw.tsx` calls it for each draw, so the
   count measures what the app does. The function it returns stops the following and forgets the
   time.
 - **A client that follows no router refuses to mount a query over data.** The default
@@ -42,7 +44,9 @@ and passed when the machine was idle.
 - **The time of a read is when its answer arrives.** A read that starts before a navigation and
   ends after it is current. A read in the same millisecond as the navigation is current too:
   `Date.now()` has a resolution of 1 ms, and a mocked answer can arrive in that millisecond.
-- `tests/query-client.test.ts` holds each rule.
+- `tests/query-client.test.tsx` holds each rule but the one for a navigation that replaces one that
+  loads. It renders the router, because some versions of
+  the router emit `onResolved` only when it renders.
 
 ## Considered options
 
@@ -60,6 +64,8 @@ and passed when the machine was idle.
 - A project that creates its own `QueryClient` does not get this default, and its read budgets
   measure a different client from the one the app uses.
 - A query option `refetchOnMount` on one query replaces the default for that query.
+- `followNavigations` needs a router that a `RouterProvider` renders. Without one, some versions of
+  the router never close the first load, and no navigation after it records the time.
 - A `useQuery` call that turns `enabled`, or changes its key, reads again in the same draw.
 - `renderWithQuery` in `tests/render.tsx` creates its own `QueryClient`, so a component test
   runs TanStack's default.

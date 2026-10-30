@@ -39,9 +39,16 @@ export function followNavigations(router: AnyRouter, queryClient: QueryClient): 
       recordedTimes.set(queryClient, Date.now());
     }
   };
+  let loading = false;
   recordTimeWhen(true);
   const stops = [
-    router.subscribe("onBeforeNavigate", () => recordTimeWhen(router.state.status === "idle")),
+    router.subscribe("onBeforeLoad", () => {
+      recordTimeWhen(!loading);
+      loading = true;
+    }),
+    router.subscribe("onResolved", () => {
+      loading = false;
+    }),
     focusManager.subscribe(recordTimeWhen),
     onlineManager.subscribe(recordTimeWhen),
   ];

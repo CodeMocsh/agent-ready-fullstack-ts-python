@@ -11,8 +11,10 @@ import {
   createRoute,
   createRouter,
   Outlet,
+  RouterProvider,
   redirect,
 } from "@tanstack/react-router";
+import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createQueryClient, followNavigations } from "@/query-client";
 
@@ -62,25 +64,23 @@ function aQueryOfTasks() {
 }
 
 async function settle(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(1);
+  vi.advanceTimersByTime(1);
+  await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
 async function navigateTo(to: string): Promise<void> {
-  const navigated = router.navigate({ to });
-  await settle();
-  await navigated;
+  await act(() => router.navigate({ to }));
   await settle();
 }
 
 beforeEach(async () => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({ toFake: ["Date"] });
   client = createQueryClient(vi.fn());
   client.mount();
   router = aRouter();
   unsubscribes.push(followNavigations(router, client));
-  const loaded = router.load();
+  render(<RouterProvider router={router} />);
   await settle();
-  await loaded;
   held = AS_READ;
   reads = 0;
 });
@@ -188,4 +188,26 @@ it("reads again when a query mounts over data older than the moment its client s
 
 it("refuses a second router for a client that already follows one", () => {
   expect(() => followNavigations(aRouter(), client)).toThrow(/already follows a router/);
+});
+
+it("shows another writer's change when a screen mounts after a navigation that follows a redirect", async () => {
+  await navigateTo("/");
+  client.setQueryData(TASKS, AS_READ);
+  held = AS_CHANGED;
+  await settle();
+  await navigateTo("/other");
+  const screen = aQueryOfTasks();
+  await settle();
+  expect(screen.getCurrentResult().data).toBe(AS_CHANGED);
+});
+
+it("shows another writer's change when a query mounts after the router reloads its routes", async () => {
+  client.setQueryData(TASKS, AS_READ);
+  held = AS_CHANGED;
+  await settle();
+  await act(() => router.invalidate());
+  await settle();
+  const screen = aQueryOfTasks();
+  await settle();
+  expect(screen.getCurrentResult().data).toBe(AS_CHANGED);
 });

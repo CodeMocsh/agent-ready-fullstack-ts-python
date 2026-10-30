@@ -43,13 +43,13 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   keeps TanStack's default `staleTime` of `0`. A `useQuery` call that mounts reads again when its
   data arrived before the last navigation, focus or reconnect, or when this tab invalidated it.
   `followNavigations` records the time of each. `src/main.tsx` calls it once. A navigation that
-  starts while another one loads, such as a redirect, records nothing. `router.invalidate()`
-  counts as a navigation. A tab that regains focus reads again every mounted query. Without a
-  stream, these reads are the only way a tab learns of a write it did not make. Another person,
-  another tab and a job outside a request make such writes. With a longer `staleTime`, the
-  screen shows their change late. The screen does not show that it is late. A part that opens
-  without a navigation can show data as old as the last navigation, focus or reconnect.
-  `tests/query-client.test.ts` holds this.
+  starts while another one loads, such as a redirect, records nothing. `router.invalidate()` counts
+  as a navigation. A tab that regains focus reads again every mounted query. Without a stream, these
+  reads are the only way a tab learns of a write it did not make. Another person, another tab and a
+  job outside a request make such writes. With a longer `staleTime`, the screen shows their change
+  late. The screen does not show that it is late. A part that opens without a navigation can show
+  data as old as the last navigation, focus or reconnect.
+  `tests/query-client.test.tsx` holds this.
   [adr/template/0020](adr/template/0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
   says why.
 - **A second `useQuery` call of a key shares the read only when it mounts.** A call that turns
