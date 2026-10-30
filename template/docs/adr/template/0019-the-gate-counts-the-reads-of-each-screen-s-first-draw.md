@@ -26,7 +26,9 @@ because `staleTime` is 0. Only a draw shows all of them.
 
 - **Each screen has a read budget.** `tests/read-budgets.ts` gives each screen the path it
   visits and the most GET requests to the API that its first draw may send. A screen is a route
-  with no children. The project owns the file, and an update does not touch it.
+  with no children. The project owns the file, and an update does not touch it. A screen that
+  only redirects names in `lands` the screen its visit draws. The budget then counts that whole
+  draw. A screen behind sign-in never lands on the sign-in screen: `signedIn` signs it in.
 - **The budgets name every screen and nothing else.** `tests/first-draw.test.tsx` fails when the
   paths in `tests/read-budgets.ts` differ from the screens that `src/router.tsx` serves. A new
   screen fails the gate until it has a budget.
@@ -36,6 +38,14 @@ because `staleTime` is 0. Only a draw shows all of them.
   counts from before the router loads, so a `beforeLoad` read counts. The draw has settled when
   the router is idle, no query fetches, and no request is open, for 150 ms. A child that mounts
   after a response therefore counts.
+- **A draw has the providers the app has.** `src/main.tsx` and `readsOf` both put the router
+  inside `AppProviders` from `src/app-providers.tsx`, inside the query client's provider. The
+  project owns that file. A provider that the project adds there is in each draw too.
+- **`signedIn` wraps each draw.** `signedIn` in `tests/signed-in.ts` wraps each draw, and
+  gets the path of the screen. The project owns the file. A screen such as a sign-in screen is
+  drawn signed out. A project that signs in stores a credential before the draw, and removes it
+  in a `finally`. `tests/setup.ts` clears the browser storage only after each file, so a draw
+  that throws would otherwise leave the credential for the next draw.
 - **A focus reads within the same budget.** After the first draw, `readsOf` reports a focus to
   TanStack Query and counts again.
 - **A draw that fails is a failure, not a count.** An error in a route, in a render or in a

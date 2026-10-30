@@ -8,10 +8,8 @@ Accepted.
 
 ## Context
 
-Some code reads a list that every project adds to: its refusals, what its production refuses, its
-tiers, its model layering, the fields on its request line, its own log lines, how its browser tests
-sign in, its read budgets, and how it resolves a principal. The template keeps changing the code
-around each list.
+Some code reads a list that every project adds to. The table below names each list. The template
+keeps changing the code around each list.
 
 `copier update` merges a template change into a file the project changed. When the project's
 lines and the template's lines sit close together, the merge conflicts. It conflicts even when
@@ -35,6 +33,8 @@ and the bullet on `identity_stub` below says why.
 | `app/log_lines.py`: its own log lines | `app/log.py`: the format, the request line, the template's lines |
 | `frontend/e2e/signed-in.ts`: how its live specs sign in | the live specs that use its `test` |
 | `frontend/tests/read-budgets.ts`: its screens' read budgets, and its streams | `frontend/tests/first-draw.tsx`: `ReadBudget`, `readsOf`, `screens` |
+| `frontend/tests/signed-in.ts`: how the read-budget test signs in | `frontend/tests/first-draw.test.tsx` |
+| `frontend/src/app-providers.tsx`: the providers around the router | `frontend/src/main.tsx`, `frontend/tests/first-draw.tsx`, `frontend/tests/render.tsx` |
 | `app/identity/__init__.py`: its resolver, `principal_for` | `app/identity/shared.py`: `Principal`, `Actor`, `Unauthenticated`, the sentinel, the probe |
 
 - **`_skip_if_exists` in `copier.yml` carries every list module but `app/identity/__init__.py`.**
@@ -52,9 +52,9 @@ and the bullet on `identity_stub` below says why.
   `tests/environment/test_environment.py` and `tests/started/test_environment.py` are in
   `_exclude` in `copier.yml` for an update. Nothing imports a test, so a project may delete
   either, and `_skip_if_exists` would bring it back.
-- **A list module re-exports its mechanism.** `app/errors.py` re-exports `ApiError` and
-  `responses`. `app/environment.py` re-exports the mechanism from `app/deployment.py`. A project's
-  own code imports from the list module.
+- **A list module that has a mechanism module re-exports what it needs from it.** `app/errors.py`
+  re-exports `ApiError` and `responses`. `app/environment.py` re-exports the mechanism from
+  `app/deployment.py`. A project's own code imports from the list module.
 - **The template's code imports a mechanism from the mechanism module.** It imports a variable
   name from `app/deployment.py`, never from `app/environment.py`. A template update that adds a
   variable then needs nothing from the project. The example resource imports as a project's route

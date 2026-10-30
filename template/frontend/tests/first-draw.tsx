@@ -7,11 +7,12 @@ import {
 } from "@tanstack/react-router";
 import { render, waitFor } from "@testing-library/react";
 import { API_BASE_URL } from "@/api/base";
+import { AppProviders } from "@/app-providers";
 import { server } from "@/mocks/node";
 import { createQueryClient } from "@/query-client";
 import { router } from "@/router";
 
-export type ReadBudget = { visit: string; reads: number };
+export type ReadBudget = { visit: string; reads: number; lands?: string };
 
 export type Reads = { landed: string; firstDraw: string[]; afterFocus: string[] };
 
@@ -163,7 +164,9 @@ export async function readsOf(visit: string, streams: readonly RegExp[]): Promis
     });
     const drawn = render(
       <QueryClientProvider client={queryClient}>
-        <RouterProvider router={visited} />
+        <AppProviders>
+          <RouterProvider router={visited} />
+        </AppProviders>
       </QueryClientProvider>,
       { onCaughtError: (error) => failures.push(error) },
     );
