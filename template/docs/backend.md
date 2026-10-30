@@ -27,6 +27,7 @@ backend/
   app/log.py          how the application logs, and the template's own lines
   app/log_lines.py    every other line the application logs -- yours
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
+  app/loop_watch.py   reports a held event loop, in every deployment
   app/migrate.py      the entrypoint `make migrate` runs
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/started/ and each tier
@@ -77,6 +78,14 @@ backend/
   `ASYNC2` rules refuse a sleep, a file, a process or an HTTP request called directly in an
   `async def`. Nothing refuses a wait inside a synchronous helper, a database driver or a socket
   call. Keep each of those in a `def` route or in `asyncio.to_thread`.
+- **A deployment reports a held event loop too.** While the app serves, the lifespan runs
+  `app/loop_watch.py`. A tick every `TICK_SECONDS` adds how late it ran to the
+  `asyncio.event_loop.delay` histogram, in seconds, when telemetry is on. When the loop's
+  thread uses more than `REPORTED_CPU_SECONDS` of CPU between two ticks, the WARNING line
+  `event loop held` names `cpu_ms`, `late_ms`, `code.function.name` and `code.line.number`.
+  The function is the innermost frame of this project's own code where the loop was, or the
+  innermost frame when none is. A wait uses no CPU and is not named. A hold in code that keeps
+  the interpreter lock names no function. `docs/deployment.md` says what to alert on.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,
   which assembles them as `create_app` does, with no lifespan. Hand `routed` the `database`
   fixture, and `**app_state` when the lifespan puts other values on `app.state`. The template's

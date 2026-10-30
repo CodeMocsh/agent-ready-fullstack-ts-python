@@ -194,6 +194,21 @@ def span_attribute_dropped(attribute: str) -> None:
     _LOG.info("span attribute dropped", attribute=attribute)
 
 
+def loop_held(
+    cpu_seconds: float, late_seconds: float, function: str | None, line: int | None
+) -> None:
+    """The event loop's thread used `cpu_seconds` of CPU between two ticks of `app.loop_watch`,
+    and the second tick ran `late_seconds` late. `function` is a module and a qualified name, and
+    `line` a line in it, where the loop was while the tick was overdue: `None` for both when
+    nothing looked. Never a path, a value or a message."""
+    _LOG.warning(
+        "event loop held",
+        cpu_ms=round(cpu_seconds * 1000, 1),
+        late_ms=round(late_seconds * 1000, 1),
+        **{"code.function.name": function, "code.line.number": line},
+    )
+
+
 _IDENTITY_OPEN_ON_PURPOSE: Final = (
     f"identity: none, and {ACKNOWLEDGED_ENV} says that is deliberate -- every request is "
     f"served as one tenant"

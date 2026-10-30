@@ -5,7 +5,8 @@ is a server span named by its route template, every query it makes a database sp
 request adds to `http.server.request.duration`; `/health` and `/ready` are left out. Only a
 request starts a trace. A query exports a span only inside a traced request. A pooled substrate
 reports its connections as `db.client.connection.count`, by state, and as
-`db.client.connection.max`. This module instruments and `app.log` reads the current span; ruff
+`db.client.connection.max`. Each tick of `app.loop_watch` adds how late it ran to
+`LOOP_DELAY`. This module instruments and `app.log` reads the current span; ruff
 refuses `opentelemetry` anywhere else.
 
 **What leaves the process is declared here.** A span keeps only the attributes in
@@ -17,7 +18,7 @@ trace. `docs/adr/template/0012` holds the reasoning.
 """
 
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Final, final, override
 
@@ -89,6 +90,12 @@ METRIC_ATTRIBUTES: Final = frozenset(
 )
 """The metric attributes that may leave the process. Never a tenant or a user."""
 
+LOOP_DELAY: Final = "asyncio.event_loop.delay"
+"""The histogram of how late each tick of `app.loop_watch` ran, in seconds."""
+
+LOOP_DELAY_BUCKETS: Final = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
+"""The bucket boundaries of `LOOP_DELAY`, in seconds."""
+
 PROBES: Final = r"^https?://[^/]+(/api)?/(health|ready)$"
 """The URLs never traced or measured: the two probes, bare or under `app.serve`'s prefix."""
 
@@ -127,6 +134,16 @@ class Instruments:
         )
         meter.create_observable_up_down_counter(
             "db.client.connection.max", callbacks=[most], unit="{connection}"
+        )
+
+    def loop_delay(self) -> Callable[[float], None]:
+        """What adds one delay, in seconds, to `LOOP_DELAY`."""
+        return (
+            self.meter_provider.get_meter(__name__)
+            .create_histogram(
+                LOOP_DELAY, unit="s", explicit_bucket_boundaries_advisory=LOOP_DELAY_BUCKETS
+            )
+            .record
         )
 
     def shutdown(self) -> None:

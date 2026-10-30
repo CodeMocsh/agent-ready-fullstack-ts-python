@@ -302,6 +302,14 @@ burn rate rather than on thresholds: for a 99.9% target, page at 14.4 times the 
 hour and five minutes, page at 6 times over six hours and thirty minutes, and open a ticket at
 once over three days and six hours.
 
+**A held event loop.** A held loop delays every request on the instance. The WARNING line
+`event loop held` names a loop held in CPU, and where it was held. Make a log-based metric that
+counts that line, and alert on the metric. Do not alert on a p99 of `asyncio.event_loop.delay`:
+a short hold is one sample among hundreds a minute. The delay histogram shows the trend. A
+platform that throttles CPU between requests, such as Cloud Run with request-based billing, runs
+the loop late while nothing holds it. There the delay rises on an idle instance, and the line
+stays silent.
+
 **Probes.** `/health` answers while the process does; point liveness at it. `/ready` answers
 once the substrate does and its schema is current; point readiness at it, so a database outage
 takes an instance out of rotation instead of restarting it. Under `app.serve` both sit under
