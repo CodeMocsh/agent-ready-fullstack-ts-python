@@ -11,6 +11,8 @@ const PATIENCE_MS = 5000;
 
 configure({ asyncUtilTimeout: PATIENCE_MS });
 
+window.scrollTo = () => undefined;
+
 const inFlight = new Map<string, string>();
 
 function settled({ requestId }: { requestId: string }): void {

@@ -16,6 +16,7 @@ frontend/
   src/client-events.ts reports a failure the browser saw to the backend's log
   src/missing-chunk.ts reloads the tab once when a deploy removed a chunk it asks for
   tests/              mirrors src/
+  tests/read-budgets.ts the reads each screen's first draw may send -- yours
   e2e/                Playwright; *.live.spec.ts needs a running backend
   e2e/signed-in.ts    how a live spec signs in -- yours
   devtools/           the frontend's own gates, and the scanner they share
@@ -43,9 +44,15 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   writes. With a longer `staleTime`, the screen shows their change late. The screen does not
   show that it is late.
   `tests/query-client.test.ts` holds this.
+  Because `staleTime` is 0, a child that mounts after the response and calls `useQuery` with the
+  same key reads again. Give the child the data of the screen's query.
 - **A screen's first draw is one query, and so one request.** Its response holds everything the
   screen draws first. A part the person opens later mounts its own query when it opens.
   `TaskList` in `src/components/task-list.tsx` draws from one query.
+  `tests/first-draw.test.tsx` draws each screen and counts its reads against
+  `tests/read-budgets.ts`, then counts again on a focus.
+  [adr/template/0019](adr/template/0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md)
+  says why.
 - **A burst costs more than its requests.** Each query that a draw or a focus starts reaches the
   backend at the same moment. An instance serves the ones it takes in turn.
   [deployment.md](deployment.md#a-burst-of-requests) says what that costs on a host that adds

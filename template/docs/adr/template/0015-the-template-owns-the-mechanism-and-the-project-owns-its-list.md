@@ -10,7 +10,8 @@ Accepted.
 
 Some code reads a list that every project adds to: its refusals, what its production refuses, its
 tiers, its model layering, the fields on its request line, its own log lines, how its browser tests
-sign in, and how it resolves a principal. The template keeps changing the code around each list.
+sign in, its read budgets, and how it resolves a principal. The template keeps changing the code
+around each list.
 
 `copier update` merges a template change into a file the project changed. When the project's
 lines and the template's lines sit close together, the merge conflicts. It conflicts even when
@@ -33,6 +34,7 @@ and the bullet on `identity_stub` below says why.
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |
 | `app/log_lines.py`: its own log lines | `app/log.py`: the format, the request line, the template's lines |
 | `frontend/e2e/signed-in.ts`: how its live specs sign in | the live specs that use its `test` |
+| `frontend/tests/read-budgets.ts`: its screens' read budgets, and its streams | `frontend/tests/first-draw.tsx`: `ReadBudget`, `readsOf`, `screens` |
 | `app/identity/__init__.py`: its resolver, `principal_for` | `app/identity/shared.py`: `Principal`, `Actor`, `Unauthenticated`, the sentinel, the probe |
 
 - **`_skip_if_exists` in `copier.yml` carries every list module but `app/identity/__init__.py`.**

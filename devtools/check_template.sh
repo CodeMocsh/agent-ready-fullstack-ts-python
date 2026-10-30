@@ -910,7 +910,8 @@ need_only f docs/adr/template \
     0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md \
     0016-the-template-s-decisions-are-numbered-apart-from-yours.md \
     0017-the-database-records-every-write-and-the-request-layer-every-request.md \
-    0018-a-route-test-never-starts-the-app.md
+    0018-a-route-test-never-starts-the-app.md \
+    0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1492,6 +1493,24 @@ PY
 
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
+echo "==> assert the read budget refuses a screen whose first draw reads twice"
+TASK_LIST=frontend/src/components/task-list.tsx
+ONE_READ='  const tasks = useQuery({ queryKey: TASKS_KEY, queryFn: tasksApi.list });'
+grep -qxF "$ONE_READ" "$TASK_LIST" || fail "$TASK_LIST no longer says '$ONE_READ', so the read budget mutation tests nothing"
+cp "$TASK_LIST" "$WORK/task-list.tsx"
+python3 - "$TASK_LIST" "$ONE_READ" <<'PY'
+import pathlib
+import sys
+
+file, line = pathlib.Path(sys.argv[1]), sys.argv[2]
+second = '  useQuery({ queryKey: ["tasks", "again"], queryFn: tasksApi.list, enabled: tasks.data !== undefined });'
+file.write_text(file.read_text(encoding="utf-8").replace(line, f"{line}\n{second}"), encoding="utf-8")
+PY
+budget_refused=0
+pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || budget_refused=$?
+cp "$WORK/task-list.tsx" "$TASK_LIST"
+[ "$budget_refused" -ne 0 ] || fail "tests/first-draw.test.tsx passed a first draw that reads again after its first response, against a budget of one"
+grep -q 'the first draw read:' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a first draw that reads twice, but not on its count"; }
 echo "==> assert the mock build is still a mock build"
 bundles_msw() { grep -rl 'setupWorker' frontend/dist/assets/*.js >/dev/null 2>&1; }
 run "vite build --mode mock" pnpm -C frontend build:mock
