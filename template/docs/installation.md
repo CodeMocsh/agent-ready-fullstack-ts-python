@@ -225,7 +225,7 @@ What to expect, because it is not all free:
   template's bullets that start "A read stays current" and "A second `useQuery` call".
   [adr/template/0020](adr/template/0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
   says why.
-- **From 0.53.0 `make lint` counts the files the backend loads before it serves.** An update
+- **From 0.53.0 `make lint` checks the startup count.** An update
   does not bring `backend/.startup-baseline.json`, so `make lint` fails until you record your
   own count. In `backend/`, run
   `uv run python devtools/startup.py --baseline .startup-baseline.json --update-baseline` and

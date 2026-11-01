@@ -10,7 +10,7 @@ TOLERANCE: Final = 0.05
 SHOWN: Final = 8
 
 _DESCRIPTION: Final = (
-    "Count the files of app and of its installed packages that the backend loads before it serves. "
+    "Count the files of app and of the installed packages that the backend loads before it serves. "
     "See docs/deployment.md#a-cold-start."
 )
 
@@ -37,7 +37,9 @@ import json
 from importlib.metadata import packages_distributions
 
 installed = packages_distributions()
-counted = {path: package for path, package in loaded.items() if package == "app" or package in installed}
+counted = {
+    path: package for path, package in loaded.items() if package == "app" or package in installed
+}
 
 with open(sys.argv[1], "w") as out:
     json.dump(counted, out)
@@ -97,8 +99,8 @@ def check(now: dict[str, int], baseline: Path, tighten: bool) -> int:
     }
     if files > recorded * (1 + TOLERANCE):
         print(
-            f"FAIL: the process loads {files} files before it serves. The baseline is "
-            f"{recorded}, and the tolerance is {TOLERANCE:.0%}.\n"
+            f"FAIL: the startup count is {files} files. The baseline is {recorded}, and the "
+            f"tolerance is {TOLERANCE:.0%}.\n"
             f"  grew: {_largest(grown, '+')}\n"
             "Import the package where it is used, or record the rise with --update-baseline. "
             "The rise is then in the diff for review.",
@@ -109,8 +111,8 @@ def check(now: dict[str, int], baseline: Path, tighten: bool) -> int:
         if tighten:
             return _record(baseline, now, "tightened")
         print(
-            f"FAIL: the process loads {files} files before it serves, and the baseline is "
-            f"{recorded}. A baseline this far above the count stops gating. Run `make lint`.",
+            f"FAIL: the startup count is {files} files, and the baseline is {recorded}. "
+            "A baseline this far above the count stops gating. Run `make lint`.",
             file=sys.stderr,
         )
         return 1
