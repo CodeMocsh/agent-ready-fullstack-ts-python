@@ -1,8 +1,6 @@
 {
-  "files": 225,
+  "files": 223,
   "packages": {
-    "_sysconfigdata__darwin_darwin": 1,
-    "_virtualenv": 1,
     "annotated_doc": 2,
     "annotated_types": 1,
     "anyio": 15,

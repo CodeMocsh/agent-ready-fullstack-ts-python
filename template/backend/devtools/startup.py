@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -11,7 +10,7 @@ TOLERANCE: Final = 0.05
 SHOWN: Final = 8
 
 _DESCRIPTION: Final = (
-    "Count the files outside the standard library that a process loads before it serves. "
+    "Count the files of app and of its installed packages that the backend loads before it serves. "
     "See docs/deployment.md#a-cold-start."
 )
 
@@ -19,8 +18,10 @@ _PROBE: Final = """
 import os
 import sys
 
-from app.deployment import BUNDLE_ENV
+from app.deployment import BUNDLE_ENV, TELEMETRY_ENV
 
+for name in TELEMETRY_ENV:
+    os.environ.pop(name, None)
 os.environ[BUNDLE_ENV] = sys.argv[2]
 
 from app.serve import build_server
@@ -28,20 +29,23 @@ from app.serve import build_server
 build_server()
 loaded = {}
 for name, module in list(sys.modules.items()):
-    package = name.partition(".")[0]
     path = getattr(module, "__file__", None)
-    if isinstance(path, str) and package not in sys.stdlib_module_names:
-        loaded.setdefault(path, package)
+    if isinstance(path, str):
+        loaded.setdefault(path, name.partition(".")[0])
 
 import json
+from importlib.metadata import packages_distributions
+
+installed = packages_distributions()
+counted = {path: package for path, package in loaded.items() if package == "app" or package in installed}
 
 with open(sys.argv[1], "w") as out:
-    json.dump(loaded, out)
+    json.dump(counted, out)
 """
 
 
 def measure() -> dict[str, int]:
-    """The files outside the standard library that `app.serve.build_server` loads, in a new
+    """The files of `app` and of installed packages that `app.serve.build_server` loads, in a new
     process with the production dependencies only and no telemetry, counted by the top-level
     package of each. Raises `CalledProcessError` when that process fails."""
     with tempfile.TemporaryDirectory() as work:
@@ -54,7 +58,6 @@ def measure() -> dict[str, int]:
                 *("uv", "run", "--isolated", "--no-dev", "--frozen", "--quiet"),
                 *("python", "-c", _PROBE, str(out), str(bundle)),
             ],
-            env={name: value for name, value in os.environ.items() if not name.startswith("OTEL_")},
             check=True,
         )
         loaded: dict[str, str] = json.loads(out.read_text())

@@ -149,6 +149,12 @@ The most GET requests to the API that a screen's first draw may send, and again 
 `tests/read-budgets.ts` holds one for each screen.
 _Avoid_: request limit, quota.
 
+**Startup count**:
+The files of `app` and of its installed packages that the backend loads before it serves,
+without telemetry. `backend/.startup-baseline.json` holds it, and the startup gate in `make lint` holds
+the backend to it.
+_Avoid_: import count, module count, cold start.
+
 ## Logs
 
 **Log line**:

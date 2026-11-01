@@ -106,7 +106,7 @@ image by blocks. In one deployment the first read of a file cost about 5 ms ther
 read 2,720 files before it served, and the import took 22 to 26 s for 8 to 10 s of CPU. Read
 one after another, the same files took 13 s. Read on 8 to 32 threads, they took about 1 s, and
 the import after them took 8 s, the same as its CPU. The number of files was the cost, not the
-bytes and not the CPU. Lambda and other hosts that load an image lazily have the same cost.
+bytes and not the CPU.
 
 Three things keep it down:
 
@@ -121,12 +121,13 @@ Three things keep it down:
   start. Record their list when you build the image, and read them on many threads before
   uvicorn starts. This belongs in the project's image: the template ships none.
 
-**The gate counts the files.** `backend/devtools/startup.py` starts a new process with the
-production dependencies only and no telemetry. It builds the server as `app.serve.build_server`
-does, and counts the files that process loaded outside the standard library.
-`backend/.startup-baseline.json` holds that count, and the count of each top-level package. The
-interpreter sets the standard library, and the template sets telemetry, so the count leaves
-both out.
+**The startup gate counts the files.** `backend/devtools/startup.py` starts a new process with
+the production dependencies only and no telemetry. It builds the server as
+`app.serve.build_server` does. Then it counts the files of `app`, and of the installed packages,
+that the process loaded. This is the startup count. `backend/.startup-baseline.json` holds it,
+and the count of each top-level package. The interpreter sets the standard library, so the count
+leaves it out. The count also leaves out the files that configured telemetry adds: the exporters
+and the instrumentations. The `opentelemetry` API that `app.log` reads is in the count.
 
 - **A rise past the tolerance fails `make lint` and `make lint-check`.** The message names the
   packages that grew. Import the package where it is used. If the rise is the cost of what you
