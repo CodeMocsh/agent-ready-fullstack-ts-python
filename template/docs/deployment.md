@@ -96,6 +96,46 @@ again only the queries the screen mounted: one for its first draw, and one for e
 person opened.
 [frontend.md](frontend.md#reading-server-state) says how.
 
+## A cold start
+
+A request held for an upcoming instance waits for that instance's whole start. Most of a
+start is the import: Python reads each module file once, one file after another.
+
+A host that pulls the image on demand pays for each first read of a file. Cloud Run streams the
+image by blocks. In one deployment the first read of a file cost about 5 ms there. The process
+read 2,720 files before it served, and the import took 22 to 26 s for 8 to 10 s of CPU. Read
+one after another, the same files took 13 s. Read on 8 to 32 threads, they took about 1 s, and
+the import after them took 8 s, the same as its CPU. The number of files was the cost, not the
+bytes and not the CPU. Lambda and other hosts that load an image lazily have the same cost.
+
+Three things keep it down:
+
+- **Import a package where it is used.** A package imported at the top of a module loads in
+  every process, also in one that never calls it. `app.main` imports `app.telemetry` only when
+  telemetry is configured, and `app.store.pg` imports asyncpg only when it opens a connection.
+- **Compile the bytecode when you build the image.** A process that cannot write `__pycache__`
+  compiles each module again at each start. `UV_COMPILE_BYTECODE=1` compiles only the packages
+  that uv installs. The backend is not installed (`package = false`), so compile it as well:
+  `python -m compileall app`.
+- **Read the files in parallel before the import.** A process loads the same files at each
+  start. Record their list when you build the image, and read them on many threads before
+  uvicorn starts. This belongs in the project's image: the template ships none.
+
+**The gate counts the files.** `backend/devtools/startup.py` starts a new process with the
+production dependencies only and no telemetry. It builds the server as `app.serve.build_server`
+does, and counts the files that process loaded outside the standard library.
+`backend/.startup-baseline.json` holds that count, and the count of each top-level package. The
+interpreter sets the standard library, and the template sets telemetry, so the count leaves
+both out.
+
+- **A rise past the tolerance fails `make lint` and `make lint-check`.** The message names the
+  packages that grew. Import the package where it is used. If the rise is the cost of what you
+  added, record it with
+  `uv run python devtools/startup.py --baseline .startup-baseline.json --update-baseline` in
+  `backend/`. The new count is then in the diff, for review.
+- **A fall past the tolerance fails `make lint-check`.** A baseline far above the count stops
+  gating. `make lint` lowers it.
+
 ## The release step
 
 The application verifies the schema at startup and refuses to serve if it is behind. Applying

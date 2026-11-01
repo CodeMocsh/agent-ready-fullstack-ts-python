@@ -225,6 +225,13 @@ What to expect, because it is not all free:
   template's bullets that start "A read stays current" and "A second `useQuery` call".
   [adr/template/0020](adr/template/0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
   says why.
+- **From 0.53.0 `make lint` counts the files the backend loads before it serves.** An update
+  does not bring `backend/.startup-baseline.json`, so `make lint` fails until you record your
+  own count. In `backend/`, run
+  `uv run python devtools/startup.py --baseline .startup-baseline.json --update-baseline` and
+  commit the file. `app/main.py` now imports `app.telemetry` inside `_instrument`, only when
+  telemetry is configured. If you merged `assemble` by hand, take the template's.
+  [deployment.md](deployment.md#a-cold-start) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

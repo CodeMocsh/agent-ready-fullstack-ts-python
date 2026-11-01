@@ -1,0 +1,20 @@
+{
+  "files": 225,
+  "packages": {
+    "_sysconfigdata__darwin_darwin": 1,
+    "_virtualenv": 1,
+    "annotated_doc": 2,
+    "annotated_types": 1,
+    "anyio": 15,
+    "app": 34,
+    "asgi_correlation_id": 6,
+    "fastapi": 38,
+    "opentelemetry": 13,
+    "pydantic": 66,
+    "pydantic_core": 3,
+    "starlette": 22,
+    "structlog": 19,
+    "typing_extensions": 1,
+    "typing_inspection": 3
+  }
+}

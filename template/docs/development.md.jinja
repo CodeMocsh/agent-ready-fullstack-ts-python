@@ -80,6 +80,10 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   upward, is not the way to green. `make lint` lowers a stale baseline for you, and records again
   one that the codebase moved by changing size rather than shape; either change belongs in your
   commit.
+- **So is a startup baseline.** `make lint` fails when the backend loads more files before it
+  serves than `backend/.startup-baseline.json` allows, and names the packages that grew.
+  [deployment.md](deployment.md#a-cold-start) says why the count costs, and how to record a
+  rise.
 
 ## The tiers
 

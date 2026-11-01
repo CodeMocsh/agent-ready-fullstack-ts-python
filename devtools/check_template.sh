@@ -1043,6 +1043,8 @@ need backend/tests/devtools/test_comments.py "The table is the only witness that
 (cd backend && python3 devtools/comments.py app tests devtools) \
     || fail "the rendered backend carries a comment"
 need_grep '"--tree"' backend/devtools/lint.py "make lint is what holds the project's scripts to the comment ban."
+need backend/.startup-baseline.json "Without it, make lint fails on every project until somebody records a count"
+need_grep 'devtools/startup.py' backend/devtools/lint.py "make lint is what holds the backend to the files it loads before it serves."
 python3 backend/devtools/comments.py --tree "$REPO" \
     || fail "a script in this repository or in the template carries a comment. AGENTS.md holds both to the rules the template ships."
 
@@ -1428,6 +1430,18 @@ fi
 echo "==> backend: lint, test"
 run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
+echo "==> assert the startup gate refuses telemetry imported in every process"
+MAIN=backend/app/main.py
+LAZY='from app import log, request_events'
+grep -qxF "$LAZY" "$MAIN" || fail "$MAIN no longer says '$LAZY', so the startup gate mutation tests nothing"
+cp "$MAIN" "$WORK/main.py"
+sed -i.bak "s/^$LAZY\$/$LAZY, telemetry/" "$MAIN" && rm -f "$MAIN.bak"
+grep -qxF "$LAZY, telemetry" "$MAIN" || fail "the startup gate mutation did not import app.telemetry in $MAIN"
+startup_refused=0
+(cd backend && uv run --no-sync python devtools/startup.py --baseline .startup-baseline.json) >"$WORK/step.log" 2>&1 || startup_refused=$?
+cp "$WORK/main.py" "$MAIN"
+[ "$startup_refused" -ne 0 ] || fail "devtools/startup.py passed a backend that imports app.telemetry in every process"
+grep -q 'grew: opentelemetry' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "devtools/startup.py refused a backend that imports app.telemetry in every process, but did not name opentelemetry first among the packages that grew"; }
 if [ "$VARIANT" = "default" ]; then
     run "test_gate.py without the workflow" sh -c \
         "cd '$NO_CI/backend' && '$OUT/backend/.venv/bin/python' -m pytest -q -p no:cacheprovider tests/test_gate.py"

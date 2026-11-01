@@ -74,6 +74,8 @@ fans out to both. Each half works without the other's toolchain.
 - Run `make pre-commit`, then commit. The gate runs once per tree. A run that skipped a half says
   so on stderr; read that before you believe the green.
 - When a complexity gate fails, split the function. Do not raise a threshold to get green.
+- When the startup gate fails, import the package where it is used. Do not record a rise to get
+  green.
 - Do not restyle vendored code: `frontend/src/components/ui/**`, `frontend/src/lib/utils.ts`,
   `frontend/public/mockServiceWorker.js`. Regenerate the worker with
   `pnpm -C frontend exec msw init public --save`.

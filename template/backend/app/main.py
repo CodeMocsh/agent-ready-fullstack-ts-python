@@ -1,16 +1,19 @@
 from functools import cache
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import Lifespan
 
-from app import log, request_events, telemetry
+from app import log, request_events
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
 from app.routes import public, tenant
-from app.wiring import build_service_version, build_telemetry
+from app.wiring import TelemetrySettings, build_service_version, build_telemetry
+
+if TYPE_CHECKING:
+    from app.telemetry import Instruments
 
 ROUTERS: Final = (public.router, tenant.router)
 """Every router the app serves: one for each requirement in `app/routes/`."""
@@ -43,10 +46,19 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     request_events.instrument(app)
     log.instrument(app)
     settings = build_telemetry()
-    app.state.instruments = (
-        None if settings is None else telemetry.instrument(app, settings, *telemetry.otlp(settings))
-    )
+    app.state.instruments = None if settings is None else _instrument(app, settings)
     return app
+
+
+def _instrument(app: FastAPI, settings: TelemetrySettings) -> "Instruments":
+    """`app` instrumented, exporting to the Collector `settings` names.
+
+    Imports `app.telemetry` here, so a process without telemetry loads no exporter and no
+    instrumentation: `docs/deployment.md#a-cold-start` says what each loaded file costs.
+    """
+    from app import telemetry
+
+    return telemetry.instrument(app, settings, *telemetry.otlp(settings))
 
 
 async def _refuse(_request: Request, refusal: Exception) -> JSONResponse:

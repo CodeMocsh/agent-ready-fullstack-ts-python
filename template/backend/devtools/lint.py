@@ -10,6 +10,7 @@ PROJECT_ROOT = ".."
 DOC_PATHS = ["../README.md", "../docs"]
 COMPLEXITY_PATHS = ["app"]
 COMPLEXITY_BASELINE = ".complexity-baseline.json"
+STARTUP_BASELINE = ".startup-baseline.json"
 
 
 reconfigure(emoji=not get_console().options.legacy_windows)
@@ -40,6 +41,15 @@ def main() -> int:
             *COMPLEXITY_PATHS,
             "--baseline",
             COMPLEXITY_BASELINE,
+            *([] if args.check else ["--tighten-baseline"]),
+        ]
+    )
+    errcount += run(
+        [
+            sys.executable,
+            "devtools/startup.py",
+            "--baseline",
+            STARTUP_BASELINE,
             *([] if args.check else ["--tighten-baseline"]),
         ]
     )
