@@ -38,9 +38,17 @@ trustPolicyExclude:
 # nanoid and source-map-js reach this project through vite -> postcss. Every nanoid
 # below 3.3.18 carries GHSA-2v37-7h3g-55p8 (a custom generator can loop forever when
 # size is 0), and every source-map-js below 1.2.2 carries GHSA-68fv-2mgg-jv7q.
+#
+# seroval and seroval-plugins reach this project through @tanstack/router-core. Their
+# 1.7.2 was published by hand; the releases on each side came from the maintainer's
+# CI with a trusted publisher. trustPolicy refuses it, and while it is the newest
+# release past the cool-off, every install fails. The range skips that one release.
+# It admits every later 1.x, so the entry needs no edit as later releases age in.
 overrides:
   nanoid: '^3.3.18'
   source-map-js: '^1.2.2'
+  seroval: '1.7.1 || ^1.7.3'
+  seroval-plugins: '1.7.1 || ^1.7.3'
 
 # How long a `pnpm dlx` package stays usable from the store without re-resolving,
 # in minutes (30 days). The default is a day, which would mean `make openapi` --
