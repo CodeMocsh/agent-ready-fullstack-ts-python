@@ -11,6 +11,24 @@ A [Copier](https://copier.readthedocs.io/) **template** that generates a **monor
 application** — a React frontend talking to a FastAPI backend — set up to work well with AI
 coding agents out of the box.
 
+## Why
+
+An agent writes code faster than anyone can review it. Without constraints, it solves the same
+problem a different way each time. The codebase drifts into slop, and the drift gets worse once
+the code grows past tens of thousands of lines.
+
+This template constrains the output space from the first commit. Lint rules, a complexity
+ratchet, architectural invariants and opinionated patterns leave the agent fewer ways to be
+wrong. Each gate states its fix in its own failure, so the agent corrects itself. The gates
+cover the frontend, the backend and the contract between them;
+[docs/conformance.md](docs/conformance.md) lists each one and the measurements behind it.
+
+Security is a pattern too. The backend is multi-tenant, and forced row-level security in
+Postgres enforces the tenant on every row. A query that forgets to filter still cannot cross a
+tenant. A test drives every route the app declares, so no route can escape the identity seam.
+
+## What it generates
+
 A generated project starts with a working screen: a small CRUD list, wired end to end through
 TanStack Query. Run `make dev` and both halves come up, the browser talks to Python, and the
 data is real. Run `make dev-frontend` and the same screen works with **no backend and no
