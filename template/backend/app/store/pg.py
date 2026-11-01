@@ -112,7 +112,8 @@ def _driver() -> Any:
     at each call site — and `AGENTS.md` bans the spelling of a suppression outright.
 
     Imported inside the function so that importing this module costs nothing on a process that
-    never opens a connection, and so a project that deletes asyncpg still starts.
+    never opens a connection. A project that deletes asyncpg still starts without telemetry;
+    with telemetry, `app.telemetry` imports asyncpg through its instrumentation.
     """
     import asyncpg
 

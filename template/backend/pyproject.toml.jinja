@@ -45,7 +45,9 @@ requires-python = ">=3.12"
 # half of what makes `app/store/` a contract instead of a claim -- one suite runs against
 # both substrates, and a substrate you cannot import is a substrate nobody checks. It is
 # imported lazily (app/store/pg.py), so a project that never sets DATABASE_URL never opens
-# a connection, and one that deletes this line still starts on the in-memory substrate.
+# a connection. One that deletes this line still starts on the in-memory substrate, but only
+# while OTEL_EXPORTER_OTLP_ENDPOINT is unset: app/telemetry.py imports the asyncpg
+# instrumentation, and the instrumentation imports asyncpg.
 #
 # structlog and asgi-correlation-id are the log: one JSON line per record and an id per
 # request. Neither writes any part of the contract. docs/adr/template/0011 says why these two.

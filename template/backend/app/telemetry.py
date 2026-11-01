@@ -1,8 +1,8 @@
 """Traces and metrics, sent over OTLP to the Collector a deployment names.
 
-Nothing here runs unless `wiring.build_telemetry` returns settings. When it does, every request
-is a server span named by its route template, every query it makes a database span, and every
-request adds to `http.server.request.duration`; `/health` and `/ready` are left out. Only a
+`app.main` imports this module only when `wiring.build_telemetry` returns settings. Then every
+request is a server span named by its route template, every query it makes a database span, and
+every request adds to `http.server.request.duration`; `/health` and `/ready` are left out. Only a
 request starts a trace. A query exports a span only inside a traced request. A pooled substrate
 reports its connections as `db.client.connection.count`, by state, and as
 `db.client.connection.max`. Each tick of `app.loop_watch` adds how late it ran to
