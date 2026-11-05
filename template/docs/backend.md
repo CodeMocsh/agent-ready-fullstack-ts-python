@@ -28,6 +28,7 @@ backend/
   app/log_lines.py    every other line the application logs -- yours
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
   app/loop_watch.py   reports a held event loop, in every deployment
+  app/waits.py        bounds each wait outside the process; beside runs the long ones
   app/migrate.py      the entrypoint `make migrate` runs
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/started/ and each tier
@@ -86,6 +87,23 @@ backend/
   The function is the innermost frame of this project's own code where the loop was, or the
   innermost frame when none is. A wait uses no CPU and is not named. A hold in code that keeps
   the interpreter lock names no function. `docs/deployment.md` says what to alert on.
+- **A request waits on one system for less than the request budget.** Wrap each call to a
+  system outside the process in `async with waiting(seconds, on="sqlserver.login")`, from
+  `app/waits.py`. The block is cancelled at `seconds`, and `WaitTimedOut` names `on`. In a
+  request, a bound that is not under `REQUEST_BUDGET_SECONDS` raises `WaitOutlastsTheRequest`
+  before the call starts. A call in `asyncio.to_thread` stops being awaited at the bound and runs
+  on in its thread, so hand its driver the same constant as its own timeout.
+- **Wrap the call into the port, not the call inside the adapter.** A route test replaces the
+  adapter with a double, so a `waiting` inside the real adapter runs in no route test. Keep the
+  bound as a constant beside the port. The adapter hands it to its driver, and the caller hands
+  it to `waiting`. The double then runs inside the same block, and the route test fails.
+- **Start a wait past the budget with `beside(work, name=...)`**, and answer `202`. The task runs
+  outside every request, and acts as the actor of the request that started it. Never start it
+  with `asyncio.create_task`: a task copies the request it starts in, so its `waiting` still
+  raises. A task that raises writes the ERROR line `work beside the requests failed`. The lifespan
+  cancels each task that still runs at shutdown, and `work beside the requests cancelled` names
+  it. Postgres is not wrapped: the process refuses to start on a bound that is not under the
+  budget. [adr/template/0021](adr/template/0021-a-request-waits-on-one-system-for-less-than-the-request-budget.md) says why.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,
   which assembles them as `create_app` does, with no lifespan. Hand `routed` the `database`
   fixture, and `**app_state` when the lifespan puts other values on `app.state`. The template's

@@ -5,7 +5,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import Lifespan
 
-from app import log, request_events
+from app import log, request_events, waits
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
@@ -30,8 +30,9 @@ def create_app() -> FastAPI:
 
 def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
     """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant,
-    the request event, the request line and the telemetry around each route. `create_app` and
-    `tests.routed.routed` build with it. Configures the logging of the whole process."""
+    the mark `app.waits.waiting` reads, the request event, the request line and the telemetry
+    around each route. `create_app` and `tests.routed.routed` build with it. Configures the
+    logging of the whole process."""
     log.configure(build_service_version())
     app = FastAPI(
         title="Tasks API",
@@ -43,6 +44,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     for router in routers:
         app.include_router(router)
     app.add_exception_handler(Unauthenticated, _refuse)
+    waits.instrument(app)
     request_events.instrument(app)
     log.instrument(app)
     settings = build_telemetry()

@@ -232,6 +232,18 @@ What to expect, because it is not all free:
   commit the file. `app/main.py` now imports `app.telemetry` inside `_instrument`, only when
   telemetry is configured. If you merged `assemble` by hand, take the template's.
   [deployment.md](deployment.md#a-cold-start) says why.
+- **From 0.54.0 a request waits on one system for less than the request budget.** If you merged
+  `assemble` in `app/main.py` by hand, take the template's `waits.instrument(app)`: without it no
+  request is marked, and `waiting` refuses nothing. If you merged `app/lifespan.py` by hand, take
+  `await cancel_beside()` before `database.close()`. Replace each `asyncio.create_task` that
+  starts work from a route with `app.waits.beside`, and drop the set that held its tasks. Wrap
+  each call to a system outside the process in `app.waits.waiting`. A deployment that sets
+  `DATABASE_STATEMENT_TIMEOUT` to 9 s or more, or `DATABASE_ACQUIRE_TIMEOUT` to 10 s or more,
+  now refuses to start. `app/waits.py` is one more file in the startup count: record your count
+  again. In `docs/backend.md`, take the template's bullets that start "A request waits on one
+  system", "Wrap the call into the port" and "Start a wait past the budget".
+  [adr/template/0021](adr/template/0021-a-request-waits-on-one-system-for-less-than-the-request-budget.md)
+  says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

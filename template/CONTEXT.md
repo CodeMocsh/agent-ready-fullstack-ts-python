@@ -149,6 +149,11 @@ The most GET requests to the API that a screen's first draw may send, and again 
 `tests/read-budgets.ts` holds one for each screen.
 _Avoid_: request limit, quota.
 
+**Request budget**:
+How long a request may take before the slow-request alert fires: `REQUEST_BUDGET_SECONDS` in
+`app/waits.py`. One wait in a request on a system outside the process lasts less.
+_Avoid_: request timeout, deadline.
+
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,
 without telemetry. `backend/.startup-baseline.json` holds it, and the startup gate in

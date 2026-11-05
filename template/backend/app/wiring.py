@@ -47,6 +47,7 @@ from app.store import Database
 from app.store.conn import SCHEMA_ENV
 from app.store.memory import MemoryDatabase
 from app.store.pg import SMALLEST_BOUND, TIMEOUTS, PostgresDatabase, Timeouts
+from app.waits import REQUEST_BUDGET_SECONDS
 
 DENIALS: Final = frozenset({"", "0", "false", "no", "off"})
 """Spellings of "no" that must not read as an acknowledgement.
@@ -215,12 +216,25 @@ def _sampling_ratio() -> float:
 def build_timeouts() -> Timeouts:
     """The bounds on every wait on Postgres: `TIMEOUTS`, with each one a deployment set replaced
     by its value in seconds. Raises `TimeoutsMisconfigured` on a value that is not a number of
-    seconds of at least `SMALLEST_BOUND`."""
-    return Timeouts(
+    seconds of at least `SMALLEST_BOUND`, and on a bound that makes a request wait on Postgres
+    for as long as `REQUEST_BUDGET_SECONDS`: the answer to a statement, or a connection."""
+    timeouts = Timeouts(
         statement=_seconds(STATEMENT_TIMEOUT_ENV, TIMEOUTS.statement),
         idle_in_transaction=_seconds(IDLE_IN_TRANSACTION_TIMEOUT_ENV, TIMEOUTS.idle_in_transaction),
         acquire=_seconds(ACQUIRE_TIMEOUT_ENV, TIMEOUTS.acquire),
     )
+    for variable, wait, seconds in (
+        (STATEMENT_TIMEOUT_ENV, "an answer", timeouts.answer),
+        (ACQUIRE_TIMEOUT_ENV, "a connection", timeouts.acquire),
+    ):
+        if seconds >= REQUEST_BUDGET_SECONDS:
+            raise TimeoutsMisconfigured(
+                f"{variable}={stated(variable)!r} makes a request wait {seconds} s for {wait}, "
+                f"and a request waits on one system for less than {REQUEST_BUDGET_SECONDS} s. "
+                f"Run long work with app.waits.beside, and raise the bound for it alone with "
+                f"SET LOCAL statement_timeout."
+            )
+    return timeouts
 
 
 def _seconds(variable: str, shipped: float) -> float:
