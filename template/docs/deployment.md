@@ -216,8 +216,8 @@ Each one answers `500` and writes its traceback to the log. Your platform's requ
 not replace them. It closes the client's connection and leaves the handler running with a
 connection in hand, so a database that stops answering fills the pool.
 
-To change a bound, set it in seconds. Each applies to every route, and an unset one keeps the
-value `Timeouts` ships with:
+To change a bound, set it in seconds. Each applies to every route and to every task beside the
+requests, and an unset one keeps the value `Timeouts` ships with:
 
 | Variable | Bounds | Ships with |
 |---|---|---|
@@ -225,9 +225,39 @@ value `Timeouts` ships with:
 | `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT` | a transaction left open with nothing sent | 10 |
 | `DATABASE_ACQUIRE_TIMEOUT` | the wait for a connection | 5 |
 
-Raise the first two for a process that holds a connection across long work, such as a
-transaction around an advisory lock. The process refuses to start on a value that is not a
-number of seconds of at least a millisecond, and on any of them set without `DATABASE_URL`.
+Each wait in a request has a bound under the request budget, `REQUEST_BUDGET_SECONDS` in
+`app/waits.py`. So the process refuses to start when an answer (`DATABASE_STATEMENT_TIMEOUT` plus
+a second) or a connection (`DATABASE_ACQUIRE_TIMEOUT`) may take as long as the budget. Do not
+raise either for long work. Run that work beside the requests. The pool's answer bound applies to
+every call, so give each long call its own `timeout=` in asyncpg. In its transaction, set
+`SET LOCAL statement_timeout`, and `SET LOCAL idle_in_transaction_session_timeout` when the
+transaction stays open across long work, such as a transaction around an advisory lock. The
+process also refuses to start on a value that is not a number of seconds of at least a
+millisecond, and on any of them set without `DATABASE_URL`.
+
+## Work beside the requests
+
+Each wait in a request on a system outside the process has a bound under the request budget.
+`app.waits.waiting` bounds each such wait, and refuses one in a request whose bound is not
+under the budget. Work that waits longer starts with `app.waits.beside`. The route answers
+`202`, and the work tells the browser its result when it ends. `docs/backend.md` says how to
+write it.
+
+- **Alert on a request slower than `REQUEST_BUDGET_SECONDS`, and keep the threshold equal to
+  the constant.** The gate catches each wrapped wait that a route test runs. The alert catches
+  the rest: a wait nobody wrapped, a wrapped wait no route test runs, and waits that each have a
+  bound under the budget and add up past it. Find the wait, and put it in `waiting` or beside the
+  request.
+- **A platform that throttles CPU between requests starves the work.** Cloud Run with
+  request-based billing gives an instance CPU only while a request is open, so work that runs
+  after the `202` stalls. Run such a service with CPU always allocated (instance-based billing).
+- **Work beside the requests ends with its process.** At shutdown the lifespan cancels each task
+  that still runs, and the WARNING line `work beside the requests cancelled` names it. A task
+  that does not end within `CANCELLED_WITHIN_SECONDS` of the cancel fails the shutdown with
+  `BesideOutlivedItsCancel`, which names it. The lifespan then closes the database within
+  `CLOSED_WITHIN_SECONDS`. The result of the work is lost. Record what the work is doing where a new process can find it, and settle an
+  unfinished record when the work starts again. A task that raises writes the ERROR line
+  `work beside the requests failed`, with its traceback.
 
 ## Logs
 

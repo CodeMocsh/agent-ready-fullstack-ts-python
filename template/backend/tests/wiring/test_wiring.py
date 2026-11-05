@@ -164,11 +164,25 @@ def test_no_timeout_variable_is_the_shipped_bounds() -> None:
 def test_each_timeout_a_deployment_sets_is_read_in_seconds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, "30")
+    monkeypatch.setenv(STATEMENT_TIMEOUT_ENV, "8")
     monkeypatch.setenv(IDLE_IN_TRANSACTION_TIMEOUT_ENV, " 600.5 ")
     monkeypatch.setenv(ACQUIRE_TIMEOUT_ENV, "0.25")
 
-    assert build_timeouts() == Timeouts(statement=30.0, idle_in_transaction=600.5, acquire=0.25)
+    assert build_timeouts() == Timeouts(statement=8.0, idle_in_transaction=600.5, acquire=0.25)
+
+
+@pytest.mark.parametrize(
+    ("variable", "said"),
+    [(STATEMENT_TIMEOUT_ENV, "9"), (ACQUIRE_TIMEOUT_ENV, "10")],
+    ids=["an-answer", "a-connection"],
+)
+def test_a_timeout_that_makes_a_request_wait_the_request_budget_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, variable: str, said: str
+) -> None:
+    monkeypatch.setenv(variable, said)
+
+    with pytest.raises(TimeoutsMisconfigured, match=variable):
+        build_timeouts()
 
 
 @pytest.mark.parametrize("said", ["soon", "0", "0.0005", "-1", "nan", "inf", "5s"])

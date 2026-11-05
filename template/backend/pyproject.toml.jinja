@@ -215,6 +215,8 @@ ignore = [
 "app/log.py" = ["TID251"]
 "app/log_lines.py" = ["TID251"]
 "tests/log/**" = ["TID251"]
+# The tests that start a task in a request, to show that it is still in the request.
+"tests/waits/**" = ["TID251"]
 # The one module that instruments the app, and the tests that read what it exports.
 "app/telemetry.py" = ["TID251"]
 "tests/telemetry/test_telemetry.py" = ["TID251"]
@@ -229,6 +231,12 @@ ignore = [
 "logging".msg = "Log through a function in app/log_lines.py, which declares every field a line can carry."
 "structlog".msg = "Log through a function in app/log_lines.py, which declares every field a line can carry."
 "opentelemetry".msg = "Instrument in app/telemetry.py, which declares every attribute a span or metric can carry."
+# A task started in a request is still in the request, so app.waits.waiting refuses its long wait.
+"asyncio.create_task".msg = "Start work beside the requests with app.waits.beside, and await concurrent work in an asyncio.TaskGroup."
+"asyncio.ensure_future".msg = "Start work beside the requests with app.waits.beside, and await concurrent work in an asyncio.TaskGroup."
+"fastapi.BackgroundTasks".msg = "FastAPI's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
+"fastapi.background".msg = "FastAPI's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
+"starlette.background".msg = "Starlette's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
 
 [tool.ruff.lint.isort]
 # A package re-exports with `X as X` rather than a second list of names in `__all__`, and without

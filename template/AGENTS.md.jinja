@@ -117,9 +117,14 @@ fans out to both. Each half works without the other's toolchain.
 
 - A route goes in the `app/routes/` module for what its caller presents.
 - Blocking work in a request runs off the event loop: CPU work, or a call that waits without
-  `await`, goes in a `def` route or in `asyncio.to_thread`. The process has one event loop, and
-  every other request waits while one step holds it. [docs/backend.md](docs/backend.md) says how
-  a held step is reported.
+  `await`, goes in a `def` route or in `asyncio.to_thread`. A call to a system outside the
+  process goes in `asyncio.to_thread`, inside `app.waits.waiting`. The process has one event
+  loop, and every other request waits while one step holds it.
+  [docs/backend.md](docs/backend.md) says how a held step is reported.
+- Each wait in a request has a bound under the request budget. Wrap each call to a system
+  outside the process, except Postgres, in `app.waits.waiting`, at the call into its port. Start
+  work that waits longer with `app.waits.beside`, answer `202`, and tell the browser the result
+  when the work ends. A WebSocket is not a request, and `waiting` does not hold it.
 - The lifespan runs at each start of the process, and in each test that starts the app. Keep it
   cheap: build setup that is pure and costly once per process, and cache it. A route test mounts
   its routers with `tests.routed.routed`, and hands it each value the lifespan puts on

@@ -1,10 +1,10 @@
 {
-  "files": 223,
+  "files": 224,
   "packages": {
     "annotated_doc": 2,
     "annotated_types": 1,
     "anyio": 15,
-    "app": 34,
+    "app": 35,
     "asgi_correlation_id": 6,
     "fastapi": 38,
     "opentelemetry": 13,

@@ -209,6 +209,18 @@ def loop_held(
     )
 
 
+def beside_failed(work: str, error: BaseException) -> None:
+    """The task `app.waits.beside` started under the name `work` raised `error`. The traceback
+    goes whole into `exception`."""
+    _LOG.error("work beside the requests failed", work=work, exc_info=error)
+
+
+def beside_cancelled(work: str) -> None:
+    """The task `app.waits.beside` started under the name `work` was cancelled before it ended, as
+    at shutdown."""
+    _LOG.warning("work beside the requests cancelled", work=work)
+
+
 _IDENTITY_OPEN_ON_PURPOSE: Final = (
     f"identity: none, and {ACKNOWLEDGED_ENV} says that is deliberate -- every request is "
     f"served as one tenant"
