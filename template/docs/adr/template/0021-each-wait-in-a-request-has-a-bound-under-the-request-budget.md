@@ -21,6 +21,10 @@ each one. No rule said that a request must not wait that long. The fix in each c
 work out of the request: the route answers `202`, a task settles the result, and the browser is
 told. The project wrote the code that starts that task four times.
 
+The same project also shared work between callers. Several requests awaited one task through
+`asyncio.shield`, so a cancelled caller left the task for the others. That task cannot run
+beside the requests: a request that joins it waits as long as the work.
+
 ## Decision
 
 - **The request budget is `REQUEST_BUDGET_SECONDS` in `app/waits.py`: 10 s.** The deployment's
@@ -39,10 +43,17 @@ told. The project wrote the code that starts that task four times.
   `work beside the requests cancelled` when it is cancelled. The task acts as the actor of the
   code that started it. The lifespan calls `cancel_beside` before it closes the database.
   `cancel_beside` raises `BesideOutlivedItsCancel` for a task that does not end within
-  `CANCELLED_WITHIN_SECONDS`.
-- **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's
-  `BackgroundTasks`.** Each is in `banned-api` in `pyproject.toml`, and each message names
-  `beside`. A task they start is still in its request.
+  `CANCELLED_WITHIN_SECONDS`. The task ends with the result of the work.
+- **`SharedWork[K, T]` runs work that several callers await at once.** `joined(key, start)`
+  starts one run at a time for each key, and each caller that arrives before the run ends awaits
+  the same run. A cancelled caller leaves the run for the others. Each run is in a request,
+  whoever starts it, because a request may join it. Each failure writes `shared work failed`, and
+  each cancellation `shared work cancelled`. `cancel_beside` cancels a run still in flight.
+- **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's `BackgroundTasks`.**
+  Each is in `banned-api` in `pyproject.toml`, and each message names `beside`. The messages for
+  `create_task` and `ensure_future` also name `SharedWork` and `asyncio.TaskGroup`. A task they
+  start is still in its request. A loop that the lifespan starts is in a module the project names
+  in `per-file-ignores`, because the lifespan is not in a request.
 - **The template ships no record of the work, no settling and no stream.** A project has those,
   and the template has no slow work to need them.
 - **Postgres is held at start, not through the seam.** `wiring.build_timeouts` refuses to start
@@ -71,6 +82,14 @@ told. The project wrote the code that starts that task four times.
   of the request that starts it, and FastAPI's `BackgroundTasks` run inside the request, so each
   is still in the request. An unreferenced task can be collected before it ends, and an exception nobody
   retrieves is a line from asyncio at garbage collection.
+- **Shared work in a module of the project, named in `per-file-ignores`.** Each such module
+  decides again whether its run is in a request, holds its task, retrieves a failure no caller
+  awaits, and is cancelled at shutdown. Those are the reasons ruff refuses `create_task`.
+- **Shared work outside the request, as `beside` runs it.** A request that joins it waits as long
+  as the work, and no `waiting` in it is checked against the budget.
+- **A primitive for a loop the lifespan owns.** The order in which loops stop, and what a loop
+  that dies does to the process, are the project's. A `TaskGroup` around the lifespan's `yield`
+  ends the lifespan when a loop dies, and the server serves on with the database closed.
 - **A record of the work, its settling and a stream, in the template.** They would have no
   caller here.
 
@@ -90,6 +109,12 @@ told. The project wrote the code that starts that task four times.
   asyncpg, because the pool's bound applies to every call. Its transaction sets
   `SET LOCAL statement_timeout`, and `SET LOCAL idle_in_transaction_session_timeout` when it stays
   open across long work.
+- Each caller of shared work gets the result of the work that the first caller started, in the
+  context of the first caller: its actor, its request id and its trace. The key names everything
+  the result depends on, and nothing checks that it does.
+- Two reports name a failure of shared work that a caller awaits: it raises in the caller, and
+  `shared work failed` names it. The same holds for work beside the requests.
+- `cancel_beside` and `BesideOutlivedItsCancel` also cover shared work, which is in a request.
 - Work beside the requests ends with its process, and its result is lost. A project records its
   work where a new process can find it.
 - On a platform that gives an instance CPU only while a request is open, a task beside the

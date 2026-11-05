@@ -1,7 +1,7 @@
 """What this process runs beside the app: the routes `build_routes` names, built before the first
 request; one `Database`, verified before the first request and closed after the last; a
-`LoopWatch` while it serves; the work `app.waits.beside` started, cancelled before the database
-closes; and the instruments that observe both.
+`LoopWatch` while it serves; the work `app.waits.beside` and `app.waits.SharedWork` started,
+cancelled before the database closes; and the instruments that observe both.
 
 `app/wiring.py` answers *what did this deployment configure*; this answers *what is this process
 running*, and reads no variable. A `build_` function that reads none belongs here.
@@ -36,8 +36,8 @@ CLOSED_WITHIN_SECONDS: Final = 5.0
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Refuse a production process carrying development settings, build the routes, then hold
     the `Database` on `app.state` for the life of the process. Watches the event loop while it
-    serves. Cancels the work beside the requests, then closes the database, then the
-    instruments."""
+    serves. Cancels the work beside the requests and the shared work, then closes the database,
+    then the instruments."""
     refuse_development_settings()
     _ = await asyncio.to_thread(build_routes, app)
     database = build()
@@ -56,8 +56,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 async def _stop(app: FastAPI, database: Database) -> None:
-    """Cancel the work beside the requests, then close `database` within `CLOSED_WITHIN_SECONDS`,
-    then the instruments. Each step runs when the one before it raises."""
+    """Cancel the work beside the requests and the shared work, then close `database` within
+    `CLOSED_WITHIN_SECONDS`, then the instruments. Each step runs when the one before it raises."""
     try:
         try:
             await cancel_beside()
