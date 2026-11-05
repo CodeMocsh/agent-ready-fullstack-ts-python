@@ -161,8 +161,9 @@ past the request budget, and the lifespan cancels it at shutdown.
 _Avoid_: background task (FastAPI's `BackgroundTasks` run inside the request).
 
 **Shared work**:
-Work that several callers await at once, run once for each key by `app.waits.SharedWork`. A
-cancelled caller does not stop it for the others. It is in a request, whoever starts it.
+Work that several callers await at once, which `app.waits.SharedWork` runs one run at a time for
+each key. A run is one execution of it. A cancelled caller does not stop a run for the others. A
+run is in a request, whoever starts it. `cancel_beside` cancels a run at shutdown.
 _Avoid_: single-flight, dedupe.
 
 **Startup count**:

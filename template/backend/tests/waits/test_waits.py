@@ -1,6 +1,7 @@
 """Each wait in a request has a bound under the request budget. A wait that may last longer
-runs beside the requests, and work beside the requests reports how it ended. Shared work runs
-once for the callers that await it, inside the budget."""
+runs beside the requests, and work beside the requests reports how it ended. Shared work runs one
+run at a time for each key, for the callers that await it, and each wait in a run has a bound
+under the budget."""
 
 import asyncio
 import math
@@ -209,7 +210,7 @@ async def test_callers_that_arrive_while_a_run_is_in_flight_await_that_run() -> 
     shared: SharedWork[str, str] = SharedWork(SHARED)
     draws = Draws()
 
-    async with asyncio.TaskGroup() as callers:
+    async with asyncio.timeout(1), asyncio.TaskGroup() as callers:
         first = callers.create_task(shared.joined("plan", draws.draw))
         second = callers.create_task(shared.joined("plan", draws.draw))
         await asyncio.sleep(0)
@@ -231,7 +232,7 @@ async def test_a_run_goes_on_for_the_others_when_one_caller_is_cancelled() -> No
     shared: SharedWork[str, str] = SharedWork(SHARED)
     draws = Draws()
 
-    async with asyncio.TaskGroup() as callers:
+    async with asyncio.timeout(1), asyncio.TaskGroup() as callers:
         cancelled = callers.create_task(shared.joined("plan", draws.draw))
         stays = callers.create_task(shared.joined("plan", draws.draw))
         await asyncio.sleep(0)
@@ -259,7 +260,9 @@ async def test_shared_work_acts_as_the_actor_that_started_it() -> None:
         assert await shared.joined("plan", its_actor) == ACTOR
 
 
-async def test_a_failure_of_shared_work_raises_in_each_caller(logged: Logged) -> None:
+async def test_a_failure_of_shared_work_raises_in_each_caller_and_writes_its_traceback(
+    logged: Logged,
+) -> None:
     log.configure(None)
     shared: SharedWork[str, None] = SharedWork(SHARED)
 
@@ -268,34 +271,25 @@ async def test_a_failure_of_shared_work_raises_in_each_caller(logged: Logged) ->
     )
 
     assert [type(failure) for failure in failures] == [ConnectionRefusedError] * 2
-    assert [one for one in logged() if one["message"] == "shared work failed"] == []
-
-
-async def test_a_failure_of_shared_work_that_no_caller_awaits_writes_its_traceback(
-    logged: Logged,
-) -> None:
-    log.configure(None)
-    shared: SharedWork[str, None] = SharedWork(SHARED)
-    released = asyncio.Event()
-
-    async def fails_when_released() -> None:
-        _ = await released.wait()
-        await fails()
-
-    caller = asyncio.create_task(shared.joined("plan", fails_when_released))
-    await asyncio.sleep(0)
-    [run] = [task for task in asyncio.all_tasks() if task.get_name() == SHARED]
-    _ = caller.cancel()
-    released.set()
-    _ = await asyncio.wait([run])
-
     [line] = [one for one in logged() if one["message"] == "shared work failed"]
     assert line["severity"] == "ERROR"
     assert line["work"] == SHARED
     assert "ConnectionRefusedError" in line["exception"]
 
 
-async def test_shutdown_cancels_shared_work_still_in_flight() -> None:
+async def test_a_run_that_joins_its_own_key_is_refused() -> None:
+    shared: SharedWork[str, None] = SharedWork(SHARED)
+
+    async def joins_its_own_key() -> None:
+        await shared.joined("plan", joins_its_own_key)
+
+    with pytest.raises(RuntimeError, match="its own key"):
+        async with asyncio.timeout(1):
+            await shared.joined("plan", joins_its_own_key)
+
+
+async def test_shutdown_cancels_shared_work_still_in_flight_and_names_it(logged: Logged) -> None:
+    log.configure(None)
     shared: SharedWork[str, None] = SharedWork(SHARED)
     caller = asyncio.create_task(shared.joined("plan", waits_for_ever))
     await asyncio.sleep(0)
@@ -305,3 +299,6 @@ async def test_shutdown_cancels_shared_work_still_in_flight() -> None:
     with pytest.raises(asyncio.CancelledError):
         async with asyncio.timeout(1):
             await caller
+    [line] = [one for one in logged() if one["message"] == "shared work cancelled"]
+    assert line["severity"] == "WARNING"
+    assert line["work"] == SHARED

@@ -259,8 +259,9 @@ write it.
   unfinished record when the work starts again. A task that raises writes the ERROR line
   `work beside the requests failed`, with its traceback.
 - **Shared work ends with its process too.** At shutdown the lifespan cancels each run still in
-  flight, and each caller that awaits it is cancelled. A run that raises when no caller awaits it
-  writes the ERROR line `shared work failed`, with its traceback.
+  flight, and each caller that awaits it is cancelled. The WARNING line `shared work cancelled`
+  names the run. A run that raises writes the ERROR line `shared work failed`, with its
+  traceback.
 
 ## Logs
 

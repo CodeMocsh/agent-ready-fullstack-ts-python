@@ -252,23 +252,29 @@ What to expect, because it is not all free:
     the call into the port", "Start a wait past the budget" and "Postgres is not wrapped".
   [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **From 0.55.0 `beside` ends with the result of its work, and `SharedWork` runs shared work.**
-  Move each `asyncio.create_task` and `asyncio.ensure_future` to one of four homes:
-  - Work that runs past the request, such as a job or a build that a poll reads later:
-    `app.waits.beside(work, name=...)`. The task ends with the result of `work`. Drop the set that
-    held its tasks.
-  - Work that a caller awaits together, such as `asyncio.gather` over tasks it started: an
-    `asyncio.TaskGroup`. A `gather` over coroutines is not refused, and can stay.
+  Move each `asyncio.create_task`, `asyncio.ensure_future` and `BackgroundTasks` to one of four
+  homes:
+  - Work that runs past the request, such as a job, a `BackgroundTasks` task, or a build that a
+    poll reads later: `app.waits.beside(work, name=...)`, and answer `202`. The task ends with
+    the result of `work`. Drop the set that held its tasks.
+  - Work that a caller awaits together: an `asyncio.TaskGroup`. Move an `asyncio.gather` without
+    `return_exceptions=True` there too. ruff does not refuse it, but it leaves the others running
+    after the first failure.
   - Work that several callers await at once, shielded so that one cancelled caller leaves it
-    running: `shared: SharedWork[K, T] = SharedWork(name)` from `app.waits`, and `await shared.joined(key, start)`. Drop the
-    dict that held the runs, and the `asyncio.shield`. A `waiting` in it is now held to the
-    budget, also when work outside a request starts it.
+    running: `shared: SharedWork[K, T] = SharedWork(name)` from `app.waits`, and
+    `await shared.joined(key, start)`. Drop the dict that held the runs, and the
+    `asyncio.shield`. Put the tenant, the actor and the arguments in the key. A `waiting` in it
+    now has a bound under the budget, also when work outside a request starts it. Shorten a
+    longer bound, or move that wait to `beside` and a poll.
   - A loop that the lifespan starts and stops in its own order: one module of yours, named in the
-    `per-file-ignores` of `pyproject.toml` with its reason. The lifespan is not in a request, so
-    the loop is not either.
-  - Do not start a task with `loop.create_task`. ruff cannot see it, and the task is still in its
-    request.
+    `per-file-ignores` of `pyproject.toml` as `["TID251"]`, with its reason. The lifespan is not
+    in a request, so the loop is not either. The entry also lets the module import `logging` and
+    the other banned modules, so keep it to the loops.
+  - Do not start a task with `loop.create_task` or `asyncio.Task`. ruff cannot see them, and the
+    task is still in its request.
   - In `docs/backend.md`, take the template's bullets that start "Start a wait past the budget",
-    "Share work" and "Each task has one of four homes".
+    "Share work", "The key names everything", "Shared work reports" and "Each task has one of
+    four homes".
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

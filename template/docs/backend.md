@@ -111,17 +111,24 @@ backend/
   shutdown with `BesideOutlivedItsCancel`.
 - **Share work that several callers await at once with `SharedWork`.** Hold one
   `shared: SharedWork[K, T] = SharedWork(name)` for each kind of work, and
-  `await shared.joined(key, start)`. The first
-  call for `key` starts `start()`, and each call that arrives before it ends awaits the same run.
-  A cancelled caller stops awaiting, and the run goes on for the others. A request may join any
-  run, so each run is in a request, and its `waiting` is held to the budget. The run acts as the
-  actor of the caller that started it: keep it read-only, or put the actor in the key. A failure
-  raises in each caller that awaits the run, and the ERROR line `shared work failed` names one
-  that no caller awaits. The lifespan cancels a run still in flight at shutdown.
+  `await shared.joined(key, start)`. The first call for `key` starts `start()`, and each call
+  that arrives before the run ends awaits the same run. A cancelled caller stops awaiting, and
+  the run goes on for the others. Each run is in a request, whoever starts it, so each `waiting`
+  in it has a bound under the budget. A wait that may last longer goes in `beside`, with a poll.
+- **The key names everything the result of shared work depends on.** Each caller gets the result of
+  the work that the first caller started, in the context of the first caller: its actor, its
+  request id and its trace. Put the tenant, the actor and the arguments in the key. A key without
+  the tenant gives one tenant the rows of another.
+- **Shared work reports how each run ended.** A failure raises in each caller that awaits the
+  run, and the ERROR line `shared work failed` names it. The lifespan cancels a run still in
+  flight at shutdown, and the WARNING line `shared work cancelled` names it.
 - **Each task has one of four homes.** Work that waits past the budget goes in `beside`. Work a
-  caller awaits together goes in an `asyncio.TaskGroup`. Work several callers await at once goes
-  in `SharedWork`. A loop that the lifespan starts and stops in its own order goes in one module
-  of yours, named in the `per-file-ignores` of `pyproject.toml` with its reason.
+  caller awaits together goes in an `asyncio.TaskGroup`, and so does an `asyncio.gather` without
+  `return_exceptions=True`: it leaves the others running after the first failure. Work several
+  callers await at once goes in `SharedWork`. A loop that the lifespan starts and stops in its own
+  order goes in one module of yours, named in the `per-file-ignores` of `pyproject.toml` as
+  `["TID251"]`, with its reason. That entry also lets the module import `logging` and the other
+  banned modules, so keep it to the loops.
 - **Postgres is not wrapped.** The process refuses to start on a bound that is not under the
   budget. [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,

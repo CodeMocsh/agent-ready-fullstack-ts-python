@@ -3,8 +3,9 @@
 A wait in a request has a bound under `REQUEST_BUDGET_SECONDS`. `waiting` bounds each wait, and
 refuses one in a request that may last as long as the budget. Work that waits longer runs beside
 the requests: `beside` starts it outside every request. Work that several callers await at once
-is shared work: `SharedWork` runs it once for them, inside the budget. The lifespan cancels what
-is still running at shutdown. `docs/adr/template/0021`.
+is shared work: `SharedWork` runs it one run at a time for each key, and each wait in a run has a
+bound under the budget. The lifespan cancels what is still running at shutdown.
+`docs/adr/template/0021`.
 """
 
 import asyncio
@@ -32,7 +33,8 @@ _STARTED: Final[set[asyncio.Task[Any]]] = set()
 
 
 class WaitOutlastsTheRequest(RuntimeError):
-    """A request started a wait whose bound is not under `REQUEST_BUDGET_SECONDS`."""
+    """A wait in a request, or in shared work, has a bound that is not under
+    `REQUEST_BUDGET_SECONDS`."""
 
 
 class WaitTimedOut(TimeoutError):
@@ -81,9 +83,9 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
         raise ValueError(f"{on} is bounded by {seconds} s, which is not a bound")
     if _IN_A_REQUEST.get() and seconds >= REQUEST_BUDGET_SECONDS:
         raise WaitOutlastsTheRequest(
-            f"{on} may wait {seconds} s in a request, and each wait in a request has a bound under "
-            f"{REQUEST_BUDGET_SECONDS} s. Start the work with app.waits.beside, answer 202, and "
-            f"tell the browser the result when the work ends."
+            f"{on} may wait {seconds} s in a request or in shared work, and each wait there has a "
+            f"bound under {REQUEST_BUDGET_SECONDS} s. Start the work with app.waits.beside, answer "
+            f"202, and tell the browser the result when the work ends."
         )
     bound = asyncio.timeout(seconds)
     try:
@@ -97,66 +99,57 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
 
 def beside[T](work: Coroutine[Any, Any, T], name: str) -> asyncio.Task[T]:
     """Run `work` on the running loop, outside every request, as the task named `name`, and
-    return the task. A request does not await it: a request that awaits it waits as long as the
-    work.
+    return the task. The task ends with the result of `work`. A request does not await it: a
+    request that awaits it waits as long as the work.
 
     A `waiting` in it may last past `REQUEST_BUDGET_SECONDS`. It acts as the actor the caller acts
     as. `log.beside_failed` names a failure, and `log.beside_cancelled` a cancellation, before the
     task is done for anything that awaits it. `cancel_beside` cancels it at shutdown. Raises
     `RuntimeError` off the event loop.
     """
-    task = _started(work, name, in_a_request=False)
-    task.add_done_callback(_beside_ended)
-    return task
-
-
-class _Run[T]:
-    def __init__(self, task: asyncio.Task[T]) -> None:
-        self.task: Final = task
-        self.awaiting: Final[set[asyncio.Future[T]]] = set()
+    return _started(
+        work, name, in_a_request=False, failed=log.beside_failed, cancelled=log.beside_cancelled
+    )
 
 
 class SharedWork[K, T]:
-    """Work that several callers await at once, run once for each key, as the tasks named `name`.
+    """Work that several callers await at once, as runs named `name`: one run at a time for each
+    key.
 
-    A request may join any run, so each run is in a request: a `waiting` in it is held to
-    `REQUEST_BUDGET_SECONDS`, whoever started it. A run acts as the actor of the caller that
-    started it, so keep shared work read-only, or put the actor in the key.
+    Each run is in a request, whoever starts it: a `waiting` in it has a bound under
+    `REQUEST_BUDGET_SECONDS`. Each caller that joins a run gets the result of the work that the
+    first caller started, in the context of the first caller: its actor, its request id and its
+    trace. The
+    key names everything the result depends on, such as the tenant, the actor and the arguments.
     """
 
     def __init__(self, name: str) -> None:
         self._name: Final = name
-        self._runs: Final[dict[K, _Run[T]]] = {}
+        self._runs: Final[dict[K, asyncio.Task[T]]] = {}
 
     async def joined(self, key: K, start: Callable[[], Coroutine[Any, Any, T]]) -> T:
         """The result of the run for `key`. Joins the run in flight, or starts `start()` when
-        none is. The run ends before the next call for `key` starts another, and nothing keeps
-        its result.
+        none is. A call after the run ends starts another run, and nothing keeps the result.
 
         A cancelled caller stops awaiting, and the run goes on for the others. A failure raises in
-        each caller that awaits the run, and `log.shared_failed` names a failure that no caller
-        awaits. `cancel_beside` cancels a run at shutdown. Raises `RuntimeError` off the event
-        loop.
+        each caller that awaits the run. `log.shared_failed` names each failure, and
+        `log.shared_cancelled` a cancellation. `cancel_beside` cancels a run at shutdown. Raises
+        `RuntimeError` when the task of a run joins its own key, which would wait for ever.
         """
         run = self._runs.get(key)
         if run is None:
-            run = _Run(_started(start(), self._name, in_a_request=True))
+            run = _started(
+                start(),
+                self._name,
+                in_a_request=True,
+                failed=log.shared_failed,
+                cancelled=log.shared_cancelled,
+            )
             self._runs[key] = run
-            run.task.add_done_callback(lambda _: self._ended(key, run))
-        awaiting = asyncio.shield(run.task)
-        run.awaiting.add(awaiting)
-        try:
-            return await awaiting
-        finally:
-            run.awaiting.discard(awaiting)
-
-    def _ended(self, key: K, run: _Run[T]) -> None:
-        del self._runs[key]
-        if run.task.cancelled():
-            return
-        error = run.task.exception()
-        if error is not None and all(awaiting.cancelled() for awaiting in run.awaiting):
-            log.shared_failed(self._name, error)
+            run.add_done_callback(lambda _: self._runs.pop(key))
+        elif run is asyncio.current_task():
+            raise RuntimeError(f"a run of {self._name} joined its own key, and would wait for ever")
+        return await asyncio.shield(run)
 
 
 async def cancel_beside() -> None:
@@ -177,19 +170,31 @@ async def cancel_beside() -> None:
         )
 
 
-def _started[T](work: Coroutine[Any, Any, T], name: str, *, in_a_request: bool) -> asyncio.Task[T]:
+def _started[T](
+    work: Coroutine[Any, Any, T],
+    name: str,
+    *,
+    in_a_request: bool,
+    failed: Callable[[str, BaseException], None],
+    cancelled: Callable[[str], None],
+) -> asyncio.Task[T]:
     context = copy_context()
     _ = context.run(_IN_A_REQUEST.set, in_a_request)
     task = asyncio.get_running_loop().create_task(work, name=name, context=context)
     _STARTED.add(task)
-    task.add_done_callback(_STARTED.discard)
+    task.add_done_callback(lambda _: _ended(task, failed, cancelled))
     return task
 
 
-def _beside_ended(task: asyncio.Task[Any]) -> None:
+def _ended(
+    task: asyncio.Task[Any],
+    failed: Callable[[str, BaseException], None],
+    cancelled: Callable[[str], None],
+) -> None:
+    _STARTED.discard(task)
     if task.cancelled():
-        log.beside_cancelled(task.get_name())
+        cancelled(task.get_name())
         return
     error = task.exception()
     if error is not None:
-        log.beside_failed(task.get_name(), error)
+        failed(task.get_name(), error)

@@ -222,9 +222,15 @@ def beside_cancelled(work: str) -> None:
 
 
 def shared_failed(work: str, error: BaseException) -> None:
-    """The run that `app.waits.SharedWork` named `work` raised `error`, and no caller awaited it.
-    The traceback goes whole into `exception`."""
+    """A run of the shared work `app.waits.SharedWork` named `work` raised `error`. The traceback
+    goes whole into `exception`."""
     _LOG.error("shared work failed", work=work, exc_info=error)
+
+
+def shared_cancelled(work: str) -> None:
+    """A run of the shared work `app.waits.SharedWork` named `work` was cancelled before it ended,
+    as at shutdown."""
+    _LOG.warning("shared work cancelled", work=work)
 
 
 _IDENTITY_OPEN_ON_PURPOSE: Final = (
