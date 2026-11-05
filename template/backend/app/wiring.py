@@ -230,9 +230,9 @@ def build_timeouts() -> Timeouts:
         if seconds >= REQUEST_BUDGET_SECONDS:
             raise TimeoutsMisconfigured(
                 f"{variable}={stated(variable)!r} makes a request wait {seconds} s for {wait}, "
-                f"and a request waits on one system for less than {REQUEST_BUDGET_SECONDS} s. "
-                f"Run long work with app.waits.beside, and raise the bound for it alone with "
-                f"SET LOCAL statement_timeout."
+                f"and each wait in a request has a bound under {REQUEST_BUDGET_SECONDS} s. Run "
+                f"long work with app.waits.beside. Give each of its calls its own timeout=, and "
+                f"its transaction SET LOCAL statement_timeout."
             )
     return timeouts
 

@@ -23,6 +23,7 @@ from app.environment import refuse_development_settings
 from app.identity import principal_for
 from app.identity.shared import resolved_without_a_credential
 from app.loop_watch import LoopWatch
+from app.store import Database
 from app.waits import cancel_beside
 from app.wiring import build, unauthenticated_is_acknowledged
 
@@ -47,12 +48,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         with LoopWatch(None if instruments is None else instruments.loop_delay()):
             yield
     finally:
+        await _stop(app, database)
+
+
+async def _stop(app: FastAPI, database: Database) -> None:
+    """Cancel the work beside the requests, then close `database`, then the instruments. Each step
+    runs when the one before it raises."""
+    try:
         try:
             await cancel_beside()
-            await database.close()
         finally:
-            if app.state.instruments is not None:
-                await asyncio.to_thread(app.state.instruments.shutdown)
+            await database.close()
+    finally:
+        if app.state.instruments is not None:
+            await asyncio.to_thread(app.state.instruments.shutdown)
 
 
 def build_routes(app: FastAPI) -> list[RouteContext]:

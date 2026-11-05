@@ -87,23 +87,28 @@ backend/
   The function is the innermost frame of this project's own code where the loop was, or the
   innermost frame when none is. A wait uses no CPU and is not named. A hold in code that keeps
   the interpreter lock names no function. `docs/deployment.md` says what to alert on.
-- **A request waits on one system for less than the request budget.** Wrap each call to a
-  system outside the process in `async with waiting(seconds, on="sqlserver.login")`, from
+- **Each wait in a request has a bound under the request budget.** Wrap each call to a system
+  outside the process in `async with waiting(seconds, on="sqlserver.login")`, from
   `app/waits.py`. The block is cancelled at `seconds`, and `WaitTimedOut` names `on`. In a
   request, a bound that is not under `REQUEST_BUDGET_SECONDS` raises `WaitOutlastsTheRequest`
   before the call starts. A call in `asyncio.to_thread` stops being awaited at the bound and runs
-  on in its thread, so hand its driver the same constant as its own timeout.
+  on in its thread, so hand its driver the same constant as its own timeout. `waiting` is async,
+  so a call to a system outside the process goes in an `async def` route, never in a `def` route.
+  A WebSocket is not a request, and is not marked.
 - **Wrap the call into the port, not the call inside the adapter.** A route test replaces the
   adapter with a double, so a `waiting` inside the real adapter runs in no route test. Keep the
   bound as a constant beside the port. The adapter hands it to its driver, and the caller hands
   it to `waiting`. The double then runs inside the same block, and the route test fails.
-- **Start a wait past the budget with `beside(work, name=...)`**, and answer `202`. The task runs
-  outside every request, and acts as the actor of the request that started it. Never start it
-  with `asyncio.create_task`: a task copies the request it starts in, so its `waiting` still
-  raises. A task that raises writes the ERROR line `work beside the requests failed`. The lifespan
+- **Start a wait past the budget with `beside(work, name=...)`**, and answer `202`. `work` is a
+  coroutine that returns `None`. The task runs outside every request, and acts as the actor of
+  the code that started it. A task that `asyncio.create_task` or `BackgroundTasks` starts is
+  still in its request, so its `waiting` raises: ruff refuses both, and `asyncio.ensure_future`.
+  A task that raises writes the ERROR line `work beside the requests failed`. The lifespan
   cancels each task that still runs at shutdown, and `work beside the requests cancelled` names
-  it. Postgres is not wrapped: the process refuses to start on a bound that is not under the
-  budget. [adr/template/0021](adr/template/0021-a-request-waits-on-one-system-for-less-than-the-request-budget.md) says why.
+  it. A task that does not end within `CANCELLED_WITHIN_SECONDS` of its cancel fails the
+  shutdown with `BesideOutlivedItsCancel`.
+- **Postgres is not wrapped.** The process refuses to start on a bound that is not under the
+  budget. [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,
   which assembles them as `create_app` does, with no lifespan. Hand `routed` the `database`
   fixture, and `**app_state` when the lifespan puts other values on `app.state`. The template's

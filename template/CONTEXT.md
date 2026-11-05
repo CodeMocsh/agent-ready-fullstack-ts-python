@@ -150,9 +150,15 @@ The most GET requests to the API that a screen's first draw may send, and again 
 _Avoid_: request limit, quota.
 
 **Request budget**:
-How long a request may take before the slow-request alert fires: `REQUEST_BUDGET_SECONDS` in
-`app/waits.py`. One wait in a request on a system outside the process lasts less.
+How long a request may take: `REQUEST_BUDGET_SECONDS` in `app/waits.py`. The deployment's
+slow-request alert uses it as its threshold. Each wait in a request on a system outside the
+process has a bound under it.
 _Avoid_: request timeout, deadline.
+
+**Work beside the requests**:
+A task that `app.waits.beside` started. It runs outside every request, so its waits may last
+past the request budget, and the lifespan cancels it at shutdown.
+_Avoid_: background task, job.
 
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,

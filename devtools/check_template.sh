@@ -914,7 +914,7 @@ need_only f docs/adr/template \
     0018-a-route-test-never-starts-the-app.md \
     0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md \
     0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md \
-    0021-a-request-waits-on-one-system-for-less-than-the-request-budget.md
+    0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

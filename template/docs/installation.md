@@ -232,18 +232,25 @@ What to expect, because it is not all free:
   commit the file. `app/main.py` now imports `app.telemetry` inside `_instrument`, only when
   telemetry is configured. If you merged `assemble` by hand, take the template's.
   [deployment.md](deployment.md#a-cold-start) says why.
-- **From 0.54.0 a request waits on one system for less than the request budget.** If you merged
-  `assemble` in `app/main.py` by hand, take the template's `waits.instrument(app)`: without it no
-  request is marked, and `waiting` refuses nothing. If you merged `app/lifespan.py` by hand, take
-  `await cancel_beside()` before `database.close()`. Replace each `asyncio.create_task` that
-  starts work from a route with `app.waits.beside`, and drop the set that held its tasks. Wrap
-  each call to a system outside the process in `app.waits.waiting`. A deployment that sets
-  `DATABASE_STATEMENT_TIMEOUT` to 9 s or more, or `DATABASE_ACQUIRE_TIMEOUT` to 10 s or more,
-  now refuses to start. `app/waits.py` is one more file in the startup count: record your count
-  again. In `docs/backend.md`, take the template's bullets that start "A request waits on one
-  system", "Wrap the call into the port" and "Start a wait past the budget".
-  [adr/template/0021](adr/template/0021-a-request-waits-on-one-system-for-less-than-the-request-budget.md)
-  says why.
+- **From 0.54.0 each wait in a request has a bound under the request budget.** Before you take
+  the update, check the values your deployments set: a `DATABASE_STATEMENT_TIMEOUT` of 9 s or
+  more, or a `DATABASE_ACQUIRE_TIMEOUT` of 10 s or more, now refuses to start. Then:
+  - If you merged `assemble` in `app/main.py` by hand, take the template's `waits.instrument(app)`.
+    Without it no request is marked, and `waiting` refuses nothing.
+  - If you merged `app/lifespan.py` by hand, take `_stop`, which calls `cancel_beside()` before
+    `database.close()`.
+  - `make lint` now refuses `asyncio.create_task`, `asyncio.ensure_future` and `BackgroundTasks`.
+    Replace each with `app.waits.beside(work, name=...)`, where `work` is a coroutine that returns
+    `None`, and drop the set that held its tasks. Do this first: a `waiting` in a task that one of
+    them started raises, because the task is still in its request.
+  - Then wrap each call to a system outside the process, except Postgres, in `app.waits.waiting`.
+  - Set your slow-request alert's threshold to `REQUEST_BUDGET_SECONDS`. On Cloud Run, run the
+    service with CPU always allocated, or work beside the requests stalls after the `202`.
+  - `app/waits.py` is one more file in the startup count. Record your count again, with the
+    command in the 0.53.0 step.
+  - In `docs/backend.md`, take the template's bullets that start "Each wait in a request", "Wrap
+    the call into the port", "Start a wait past the budget" and "Postgres is not wrapped".
+  [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

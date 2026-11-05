@@ -1,9 +1,9 @@
 """The waits on systems outside the process, and the work that runs beside the requests.
 
-A request waits on one system for less than `REQUEST_BUDGET_SECONDS`. `waiting` bounds each wait,
-and refuses one in a request that may last as long as the budget. Work that waits longer runs
-beside the requests: `beside` starts it outside every request, and the lifespan cancels what is
-still running at shutdown. `docs/adr/template/0021`.
+A wait in a request has a bound under `REQUEST_BUDGET_SECONDS`. `waiting` bounds each wait, and
+refuses one in a request that may last as long as the budget. Work that waits longer runs beside
+the requests: `beside` starts it outside every request, and the lifespan cancels what is still
+running at shutdown. `docs/adr/template/0021`.
 """
 
 import asyncio
@@ -19,8 +19,11 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app import log
 
 REQUEST_BUDGET_SECONDS: Final = 10.0
-"""The request budget: how long a request may take before the slow-request alert fires. One wait
-in a request lasts less."""
+"""The request budget: the time a request may take, and the threshold of the deployment's
+slow-request alert. Each wait in a request has a bound under it."""
+
+CANCELLED_WITHIN_SECONDS: Final = 5.0
+"""How long `cancel_beside` waits for the tasks it cancelled to end."""
 
 _IN_A_REQUEST: ContextVar[bool] = ContextVar("in_a_request", default=False)
 
@@ -35,8 +38,13 @@ class WaitTimedOut(TimeoutError):
     """A wait that `waiting` bounds did not end within its bound."""
 
 
+class BesideOutlivedItsCancel(RuntimeError):
+    """A task beside the requests did not end within `CANCELLED_WITHIN_SECONDS` of its cancel."""
+
+
 def instrument(app: FastAPI) -> None:
-    """Mark every HTTP request `app` serves as a request, for `waiting`."""
+    """Mark every HTTP request `app` serves as a request, for `waiting`. A WebSocket and the
+    lifespan are not marked."""
     app.add_middleware(MarksRequests)
 
 
@@ -71,9 +79,9 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
         raise ValueError(f"{on} is bounded by {seconds} s, which is not a bound")
     if _IN_A_REQUEST.get() and seconds >= REQUEST_BUDGET_SECONDS:
         raise WaitOutlastsTheRequest(
-            f"{on} may wait {seconds} s in a request, and a request waits on one system for less "
-            f"than {REQUEST_BUDGET_SECONDS} s. Start the work with app.waits.beside, answer 202, "
-            f"and tell the browser the result when the work ends."
+            f"{on} may wait {seconds} s in a request, and each wait in a request has a bound under "
+            f"{REQUEST_BUDGET_SECONDS} s. Start the work with app.waits.beside, answer 202, and "
+            f"tell the browser the result when the work ends."
         )
     bound = asyncio.timeout(seconds)
     try:
@@ -104,13 +112,20 @@ def beside(work: Coroutine[Any, Any, None], name: str) -> asyncio.Task[None]:
 
 async def cancel_beside() -> None:
     """Cancel each task that `beside` started on this loop and that still runs, and wait until
-    every one has ended."""
+    every one has ended. Raises `BesideOutlivedItsCancel`, which names each task that did not end
+    within `CANCELLED_WITHIN_SECONDS`."""
     loop = asyncio.get_running_loop()
     running = [task for task in _BESIDE if task.get_loop() is loop]
     for task in running:
         _ = task.cancel()
-    if running:
-        _ = await asyncio.wait(running)
+    if not running:
+        return
+    _, still = await asyncio.wait(running, timeout=CANCELLED_WITHIN_SECONDS)
+    if still:
+        raise BesideOutlivedItsCancel(
+            f"{', '.join(sorted(task.get_name() for task in still))} did not end within "
+            f"{CANCELLED_WITHIN_SECONDS} s of its cancel. Let a cancel end the work."
+        )
 
 
 def _ended(task: asyncio.Task[None]) -> None:
