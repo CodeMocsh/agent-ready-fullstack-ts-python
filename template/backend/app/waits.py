@@ -39,7 +39,7 @@ class WaitTimedOut(TimeoutError):
 
 
 class BesideOutlivedItsCancel(RuntimeError):
-    """A task beside the requests did not end within `CANCELLED_WITHIN_SECONDS` of its cancel."""
+    """Work beside the requests did not end within `CANCELLED_WITHIN_SECONDS` of its cancel."""
 
 
 def instrument(app: FastAPI) -> None:
@@ -124,7 +124,7 @@ async def cancel_beside() -> None:
     if still:
         raise BesideOutlivedItsCancel(
             f"{', '.join(sorted(task.get_name() for task in still))} did not end within "
-            f"{CANCELLED_WITHIN_SECONDS} s of its cancel. Let a cancel end the work."
+            f"{CANCELLED_WITHIN_SECONDS} s of the cancel. Let a cancel end the work."
         )
 
 

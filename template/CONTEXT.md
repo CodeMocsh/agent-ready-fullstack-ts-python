@@ -158,7 +158,7 @@ _Avoid_: request timeout, deadline.
 **Work beside the requests**:
 A task that `app.waits.beside` started. It runs outside every request, so its waits may last
 past the request budget, and the lifespan cancels it at shutdown.
-_Avoid_: background task, job.
+_Avoid_: background task (FastAPI's `BackgroundTasks` run inside the request).
 
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,

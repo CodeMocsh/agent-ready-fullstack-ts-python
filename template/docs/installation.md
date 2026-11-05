@@ -241,7 +241,7 @@ What to expect, because it is not all free:
     `database.close()`.
   - `make lint` now refuses `asyncio.create_task`, `asyncio.ensure_future` and `BackgroundTasks`.
     Replace each with `app.waits.beside(work, name=...)`, where `work` is a coroutine that returns
-    `None`, and drop the set that held its tasks. Do this first: a `waiting` in a task that one of
+    `None`, and drop the set that held its tasks. Do this before you wrap any call: a `waiting` in a task that one of
     them started raises, because the task is still in its request.
   - Then wrap each call to a system outside the process, except Postgres, in `app.waits.waiting`.
   - Set your slow-request alert's threshold to `REQUEST_BUDGET_SECONDS`. On Cloud Run, run the

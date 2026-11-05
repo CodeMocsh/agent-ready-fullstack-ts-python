@@ -40,15 +40,15 @@ told. The project wrote the code that starts that task four times.
   code that started it. The lifespan calls `cancel_beside` before it closes the database.
   `cancel_beside` raises `BesideOutlivedItsCancel` for a task that does not end within
   `CANCELLED_WITHIN_SECONDS`.
-- **ruff refuses each other way to start a task.** `asyncio.create_task`, `asyncio.ensure_future`
-  and FastAPI's `BackgroundTasks` are in `banned-api` in `pyproject.toml`, and each message names
+- **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's
+  `BackgroundTasks`.** Each is in `banned-api` in `pyproject.toml`, and each message names
   `beside`. A task they start is still in its request.
-- **The template ships no job:** no record of the work, no settling and no stream. A project has
-  those, and the template has no slow work to need them.
+- **The template ships no record of the work, no settling and no stream.** A project has those,
+  and the template has no slow work to need them.
 - **Postgres is held at start, not through the seam.** `wiring.build_timeouts` refuses to start
-  when the answer to a statement, or a connection, may take as long as the budget. The bounds are
-  set for the whole pool, and the memory substrate replaces Postgres in a route test, so a
-  `waiting` around asyncpg would never fail.
+  when the answer to a statement, or a connection, may take as long as the budget.
+- **The lifespan closes the database within `CLOSED_WITHIN_SECONDS`**, after the cancel, and also
+  when the cancel raises.
 - `tests/waits/`, `tests/started/test_lifespan.py` and `tests/wiring/` hold each rule.
 
 ## Considered options
@@ -64,13 +64,15 @@ told. The project wrote the code that starts that task four times.
 - **An audit hook on `socket.connect`, to find a wait nobody declared.** It sees a socket that
   Python opens, and not one that a driver opens in C: the SQL Server login is one of those. A
   route test uses a double and opens no socket.
-- **Postgres through the seam.** Each store call would go through `waiting`. A route test runs on
-  the memory substrate, so the check would never fail there.
+- **Postgres through the seam.** Each store call would go through `waiting`. The bounds are set
+  for the whole pool, and a route test runs on the memory substrate, so the check would never
+  fail.
 - **`asyncio.create_task` or `BackgroundTasks` in place of `beside`.** A task copies the context
-  of the request that starts it, and a background task runs inside its request, so each is still
-  in the request. An unreferenced task can be collected before it ends, and an exception nobody
+  of the request that starts it, and FastAPI's `BackgroundTasks` run inside the request, so each
+  is still in the request. An unreferenced task can be collected before it ends, and an exception nobody
   retrieves is a line from asyncio at garbage collection.
-- **A full job in the template, with a record and a stream.** It would have no caller here.
+- **A record of the work, its settling and a stream, in the template.** They would have no
+  caller here.
 
 ## Consequences
 
@@ -85,9 +87,10 @@ told. The project wrote the code that starts that task four times.
   and nothing checks that the two are equal.
 - A `DATABASE_STATEMENT_TIMEOUT` of 9 s or more, or a `DATABASE_ACQUIRE_TIMEOUT` of 10 s or
   more, refuses to start. A long statement beside the requests passes its own `timeout=` to
-  asyncpg, because the pool's bound applies to every call, and sets
-  `SET LOCAL statement_timeout` in its transaction.
-- A task beside the requests ends with its process, and its result is lost. A project records its
+  asyncpg, because the pool's bound applies to every call. Its transaction sets
+  `SET LOCAL statement_timeout`, and `SET LOCAL idle_in_transaction_session_timeout` when it stays
+  open across long work.
+- Work beside the requests ends with its process, and its result is lost. A project records its
   work where a new process can find it.
 - On a platform that gives an instance CPU only while a request is open, a task beside the
   requests stalls after the `202`.

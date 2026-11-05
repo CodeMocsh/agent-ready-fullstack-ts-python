@@ -7,8 +7,8 @@ import pytest
 from fastapi import routing
 from fastapi.testclient import TestClient
 
-from app import main
-from app.waits import beside
+from app import lifespan, main, waits
+from app.waits import BesideOutlivedItsCancel, WaitTimedOut, beside
 
 
 def _refused(**named: object) -> None:
@@ -59,3 +59,48 @@ def test_shutdown_cancels_the_work_beside_the_requests_before_the_database_close
         serving.portal.call(starts_the_work)
 
     assert ended == ["the work", "the database"]
+
+
+def test_a_task_that_outlives_its_cancel_fails_the_shutdown_and_the_database_still_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    closed: list[bool] = []
+
+    async def ends_a_second_after_its_cancel() -> None:
+        try:
+            _ = await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(1)
+
+    async def starts_the_work() -> None:
+        _ = beside(ends_a_second_after_its_cancel(), name="ignores its cancel")
+
+    monkeypatch.setattr(waits, "CANCELLED_WITHIN_SECONDS", 0.01)
+    app = main.create_app()
+    with (
+        pytest.raises(BesideOutlivedItsCancel, match="ignores its cancel"),
+        TestClient(app) as serving,
+    ):
+        closes = app.state.database.close
+
+        async def records_the_close() -> None:
+            closed.append(True)
+            await closes()
+
+        monkeypatch.setattr(app.state.database, "close", records_the_close)
+        assert serving.portal is not None
+        serving.portal.call(starts_the_work)
+
+    assert closed == [True]
+
+
+def test_a_database_that_does_not_close_in_time_fails_the_shutdown_within_its_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def closes_after_a_second() -> None:
+        await asyncio.sleep(1)
+
+    monkeypatch.setattr(lifespan, "CLOSED_WITHIN_SECONDS", 0.01)
+    app = main.create_app()
+    with pytest.raises(WaitTimedOut, match="database.close"), TestClient(app):
+        monkeypatch.setattr(app.state.database, "close", closes_after_a_second)

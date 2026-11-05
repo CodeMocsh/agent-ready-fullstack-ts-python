@@ -78,7 +78,8 @@ backend/
 - **A call that waits without `await` uses no CPU, so the tests do not report it.** ruff's
   `ASYNC2` rules refuse a sleep, a file, a process or an HTTP request called directly in an
   `async def`. Nothing refuses a wait inside a synchronous helper, a database driver or a socket
-  call. Keep each of those in a `def` route or in `asyncio.to_thread`.
+  call. Keep each of those in a `def` route or in `asyncio.to_thread`, and a call to a system
+  outside the process in `asyncio.to_thread` inside `waiting`.
 - **A deployment reports a held event loop too.** While the app serves, the lifespan runs
   `app/loop_watch.py`. A tick every `TICK_SECONDS` adds how late it ran to the
   `asyncio.event_loop.delay` histogram, in seconds, when telemetry is on. When the loop's
@@ -105,7 +106,7 @@ backend/
   still in its request, so its `waiting` raises: ruff refuses both, and `asyncio.ensure_future`.
   A task that raises writes the ERROR line `work beside the requests failed`. The lifespan
   cancels each task that still runs at shutdown, and `work beside the requests cancelled` names
-  it. A task that does not end within `CANCELLED_WITHIN_SECONDS` of its cancel fails the
+  it. A task that does not end within `CANCELLED_WITHIN_SECONDS` of the cancel fails the
   shutdown with `BesideOutlivedItsCancel`.
 - **Postgres is not wrapped.** The process refuses to start on a bound that is not under the
   budget. [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.

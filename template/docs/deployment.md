@@ -229,11 +229,11 @@ Each wait in a request has a bound under the request budget, `REQUEST_BUDGET_SEC
 `app/waits.py`. So the process refuses to start when an answer (`DATABASE_STATEMENT_TIMEOUT` plus
 a second) or a connection (`DATABASE_ACQUIRE_TIMEOUT`) may take as long as the budget. Do not
 raise either for long work. Run that work beside the requests. The pool's answer bound applies to
-every call, so give each long call its own `timeout=` in asyncpg, and its transaction
-`SET LOCAL statement_timeout`. Raise `DATABASE_IDLE_IN_TRANSACTION_TIMEOUT` for a process that
-holds a transaction open across long work, such as a transaction around an advisory lock: it is
-not a wait a request makes. The process also refuses to start on a value that is not a number of
-seconds of at least a millisecond, and on any of them set without `DATABASE_URL`.
+every call, so give each long call its own `timeout=` in asyncpg. In its transaction, set
+`SET LOCAL statement_timeout`, and `SET LOCAL idle_in_transaction_session_timeout` when the
+transaction stays open across long work, such as a transaction around an advisory lock. The
+process also refuses to start on a value that is not a number of seconds of at least a
+millisecond, and on any of them set without `DATABASE_URL`.
 
 ## Work beside the requests
 
@@ -251,10 +251,11 @@ write it.
 - **A platform that throttles CPU between requests starves the work.** Cloud Run with
   request-based billing gives an instance CPU only while a request is open, so work that runs
   after the `202` stalls. Run such a service with CPU always allocated (instance-based billing).
-- **A task beside the requests ends with its process.** At shutdown the lifespan cancels each one
+- **Work beside the requests ends with its process.** At shutdown the lifespan cancels each task
   that still runs, and the WARNING line `work beside the requests cancelled` names it. A task
-  that does not end within `CANCELLED_WITHIN_SECONDS` of its cancel fails the shutdown with
-  `BesideOutlivedItsCancel`, which names it. Its result is lost. Record what the work is doing where a new process can find it, and settle an
+  that does not end within `CANCELLED_WITHIN_SECONDS` of the cancel fails the shutdown with
+  `BesideOutlivedItsCancel`, which names it. The lifespan then closes the database within
+  `CLOSED_WITHIN_SECONDS`. The result of the work is lost. Record what the work is doing where a new process can find it, and settle an
   unfinished record when the work starts again. A task that raises writes the ERROR line
   `work beside the requests failed`, with its traceback.
 

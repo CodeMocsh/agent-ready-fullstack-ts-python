@@ -232,7 +232,8 @@ def build_timeouts() -> Timeouts:
                 f"{variable}={stated(variable)!r} makes a request wait {seconds} s for {wait}, "
                 f"and each wait in a request has a bound under {REQUEST_BUDGET_SECONDS} s. Run "
                 f"long work with app.waits.beside. Give each of its calls its own timeout=, and "
-                f"its transaction SET LOCAL statement_timeout."
+                f"its transaction SET LOCAL statement_timeout and "
+                f"idle_in_transaction_session_timeout."
             )
     return timeouts
 

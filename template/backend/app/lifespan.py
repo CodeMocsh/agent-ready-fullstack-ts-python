@@ -14,6 +14,7 @@ rights to it. A skipped release step is a failed startup rather than a failed re
 import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Final
 
 from fastapi import FastAPI
 from fastapi.routing import RouteContext, iter_route_contexts
@@ -24,8 +25,11 @@ from app.identity import principal_for
 from app.identity.shared import resolved_without_a_credential
 from app.loop_watch import LoopWatch
 from app.store import Database
-from app.waits import cancel_beside
+from app.waits import cancel_beside, waiting
 from app.wiring import build, unauthenticated_is_acknowledged
+
+CLOSED_WITHIN_SECONDS: Final = 5.0
+"""How long the lifespan waits for the database to close at shutdown."""
 
 
 @asynccontextmanager
@@ -52,13 +56,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 async def _stop(app: FastAPI, database: Database) -> None:
-    """Cancel the work beside the requests, then close `database`, then the instruments. Each step
-    runs when the one before it raises."""
+    """Cancel the work beside the requests, then close `database` within `CLOSED_WITHIN_SECONDS`,
+    then the instruments. Each step runs when the one before it raises."""
     try:
         try:
             await cancel_beside()
         finally:
-            await database.close()
+            async with waiting(CLOSED_WITHIN_SECONDS, on="database.close"):
+                await database.close()
     finally:
         if app.state.instruments is not None:
             await asyncio.to_thread(app.state.instruments.shutdown)

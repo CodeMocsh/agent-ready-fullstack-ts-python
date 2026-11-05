@@ -1,5 +1,5 @@
 """Each wait in a request has a bound under the request budget. A wait that may last longer
-runs beside the requests, and a task beside the requests reports how it ended."""
+runs beside the requests, and work beside the requests reports how it ended."""
 
 import asyncio
 import math
@@ -177,7 +177,8 @@ async def test_shutdown_names_a_task_that_outlives_its_cancel(
     await asyncio.sleep(0)
 
     with pytest.raises(BesideOutlivedItsCancel, match=WORK):
-        await cancel_beside()
+        async with asyncio.timeout(1):
+            await cancel_beside()
 
     released.set()
     _ = await asyncio.wait([task])

@@ -234,9 +234,9 @@ ignore = [
 # A task started in a request is still in the request, so app.waits.waiting refuses its long wait.
 "asyncio.create_task".msg = "Start work beside the requests with app.waits.beside, and await concurrent work in an asyncio.TaskGroup."
 "asyncio.ensure_future".msg = "Start work beside the requests with app.waits.beside, and await concurrent work in an asyncio.TaskGroup."
-"fastapi.BackgroundTasks".msg = "A background task runs inside its request. Start work beside the requests with app.waits.beside."
-"fastapi.background".msg = "A background task runs inside its request. Start work beside the requests with app.waits.beside."
-"starlette.background".msg = "A background task runs inside its request. Start work beside the requests with app.waits.beside."
+"fastapi.BackgroundTasks".msg = "FastAPI's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
+"fastapi.background".msg = "FastAPI's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
+"starlette.background".msg = "Starlette's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
 
 [tool.ruff.lint.isort]
 # A package re-exports with `X as X` rather than a second list of names in `__all__`, and without
