@@ -258,6 +258,9 @@ write it.
   `CLOSED_WITHIN_SECONDS`. The result of the work is lost. Record what the work is doing where a new process can find it, and settle an
   unfinished record when the work starts again. A task that raises writes the ERROR line
   `work beside the requests failed`, with its traceback.
+- **Shared work ends with its process too.** At shutdown the lifespan cancels each run still in
+  flight, and each caller that awaits it is cancelled. A run that raises when no caller awaits it
+  writes the ERROR line `shared work failed`, with its traceback.
 
 ## Logs
 

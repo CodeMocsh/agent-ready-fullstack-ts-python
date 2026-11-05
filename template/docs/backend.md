@@ -101,13 +101,27 @@ backend/
   bound as a constant beside the port. The adapter hands it to its driver, and the caller hands
   it to `waiting`. The double then runs inside the same block, and the route test fails.
 - **Start a wait past the budget with `beside(work, name=...)`**, and answer `202`. `work` is a
-  coroutine that returns `None`. The task runs outside every request, and acts as the actor of
-  the code that started it. A task that `asyncio.create_task` or `BackgroundTasks` starts is
-  still in its request, so its `waiting` raises: ruff refuses both, and `asyncio.ensure_future`.
+  coroutine, and the task ends with its result. The task runs outside every request, and acts as
+  the actor of the code that started it. A task that `asyncio.create_task` or `BackgroundTasks`
+  starts is still in its request, so its `waiting` raises: ruff refuses both, and
+  `asyncio.ensure_future`.
   A task that raises writes the ERROR line `work beside the requests failed`. The lifespan
   cancels each task that still runs at shutdown, and `work beside the requests cancelled` names
   it. A task that does not end within `CANCELLED_WITHIN_SECONDS` of the cancel fails the
   shutdown with `BesideOutlivedItsCancel`.
+- **Share work that several callers await at once with `SharedWork`.** Hold one
+  `shared: SharedWork[K, T] = SharedWork(name)` for each kind of work, and
+  `await shared.joined(key, start)`. The first
+  call for `key` starts `start()`, and each call that arrives before it ends awaits the same run.
+  A cancelled caller stops awaiting, and the run goes on for the others. A request may join any
+  run, so each run is in a request, and its `waiting` is held to the budget. The run acts as the
+  actor of the caller that started it: keep it read-only, or put the actor in the key. A failure
+  raises in each caller that awaits the run, and the ERROR line `shared work failed` names one
+  that no caller awaits. The lifespan cancels a run still in flight at shutdown.
+- **Each task has one of four homes.** Work that waits past the budget goes in `beside`. Work a
+  caller awaits together goes in an `asyncio.TaskGroup`. Work several callers await at once goes
+  in `SharedWork`. A loop that the lifespan starts and stops in its own order goes in one module
+  of yours, named in the `per-file-ignores` of `pyproject.toml` with its reason.
 - **Postgres is not wrapped.** The process refuses to start on a bound that is not under the
   budget. [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,

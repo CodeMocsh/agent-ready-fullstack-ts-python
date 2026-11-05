@@ -39,10 +39,16 @@ told. The project wrote the code that starts that task four times.
   `work beside the requests cancelled` when it is cancelled. The task acts as the actor of the
   code that started it. The lifespan calls `cancel_beside` before it closes the database.
   `cancel_beside` raises `BesideOutlivedItsCancel` for a task that does not end within
-  `CANCELLED_WITHIN_SECONDS`.
+  `CANCELLED_WITHIN_SECONDS`. The task ends with the result of the work.
+- **`SharedWork[K, T]` runs work that several callers await at once.** `joined(key, start)`
+  starts one run for each key, and each caller that arrives before it ends awaits the same run.
+  A cancelled caller leaves the run for the others. Each run is in a request, whoever starts it,
+  because a request may join it. A failure that no caller awaits writes `shared work failed`.
+  `cancel_beside` cancels a run still in flight.
 - **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's
   `BackgroundTasks`.** Each is in `banned-api` in `pyproject.toml`, and each message names
-  `beside`. A task they start is still in its request.
+  `beside`. A task they start is still in its request. A loop that the lifespan starts is in a
+  module the project names in `per-file-ignores`, because the lifespan is not in a request.
 - **The template ships no record of the work, no settling and no stream.** A project has those,
   and the template has no slow work to need them.
 - **Postgres is held at start, not through the seam.** `wiring.build_timeouts` refuses to start
@@ -71,6 +77,14 @@ told. The project wrote the code that starts that task four times.
   of the request that starts it, and FastAPI's `BackgroundTasks` run inside the request, so each
   is still in the request. An unreferenced task can be collected before it ends, and an exception nobody
   retrieves is a line from asyncio at garbage collection.
+- **Shared work in a module of the project, named in `per-file-ignores`.** Each such module
+  decides again whether its run is in a request, holds its task, retrieves a failure no caller
+  awaits, and is cancelled at shutdown. Those are the reasons ruff refuses `create_task`.
+- **Shared work outside the request, as `beside` runs it.** A request that joins it waits as long
+  as the work, and no `waiting` in it is checked against the budget.
+- **A primitive for a loop the lifespan owns.** The order in which loops stop, and what a loop
+  that dies does to the process, are the project's. A `TaskGroup` around the lifespan's `yield`
+  cancels the server's lifespan task, not the process, when a loop dies.
 - **A record of the work, its settling and a stream, in the template.** They would have no
   caller here.
 

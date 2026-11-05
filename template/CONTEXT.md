@@ -160,6 +160,11 @@ A task that `app.waits.beside` started. It runs outside every request, so its wa
 past the request budget, and the lifespan cancels it at shutdown.
 _Avoid_: background task (FastAPI's `BackgroundTasks` run inside the request).
 
+**Shared work**:
+Work that several callers await at once, run once for each key by `app.waits.SharedWork`. A
+cancelled caller does not stop it for the others. It is in a request, whoever starts it.
+_Avoid_: single-flight, dedupe.
+
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,
 without telemetry. `backend/.startup-baseline.json` holds it, and the startup gate in

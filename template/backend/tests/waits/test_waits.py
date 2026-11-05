@@ -1,5 +1,6 @@
 """Each wait in a request has a bound under the request budget. A wait that may last longer
-runs beside the requests, and work beside the requests reports how it ended."""
+runs beside the requests, and work beside the requests reports how it ended. Shared work runs
+once for the callers that await it, inside the budget."""
 
 import asyncio
 import math
@@ -15,6 +16,7 @@ from app.store import Database
 from app.waits import (
     REQUEST_BUDGET_SECONDS,
     BesideOutlivedItsCancel,
+    SharedWork,
     WaitOutlastsTheRequest,
     WaitTimedOut,
     beside,
@@ -27,6 +29,7 @@ from tests.routed import routed
 PAST_THE_BUDGET = REQUEST_BUDGET_SECONDS + 5
 UNDER_THE_BUDGET = REQUEST_BUDGET_SECONDS - 0.01
 WORK = "a check on a customer's database"
+SHARED = "a draw of the plan"
 ACTOR = Actor(issuer="a-test", subject="the-checker", name="The checker")
 
 router = APIRouter()
@@ -182,3 +185,123 @@ async def test_shutdown_names_a_task_that_outlives_its_cancel(
 
     released.set()
     _ = await asyncio.wait([task])
+
+
+async def test_a_task_beside_the_requests_ends_with_the_result_of_its_work() -> None:
+    async def answers() -> str:
+        return "the image"
+
+    assert await beside(answers(), name=WORK) == "the image"
+
+
+class Draws:
+    def __init__(self) -> None:
+        self.started: int = 0
+        self.released: asyncio.Event = asyncio.Event()
+
+    async def draw(self) -> str:
+        self.started += 1
+        _ = await self.released.wait()
+        return f"draw {self.started}"
+
+
+async def test_callers_that_arrive_while_a_run_is_in_flight_await_that_run() -> None:
+    shared: SharedWork[str, str] = SharedWork(SHARED)
+    draws = Draws()
+
+    async with asyncio.TaskGroup() as callers:
+        first = callers.create_task(shared.joined("plan", draws.draw))
+        second = callers.create_task(shared.joined("plan", draws.draw))
+        await asyncio.sleep(0)
+        draws.released.set()
+
+    assert (first.result(), second.result(), draws.started) == ("draw 1", "draw 1", 1)
+
+
+async def test_a_call_after_a_run_ends_starts_another() -> None:
+    shared: SharedWork[str, str] = SharedWork(SHARED)
+    draws = Draws()
+    draws.released.set()
+
+    assert await shared.joined("plan", draws.draw) == "draw 1"
+    assert await shared.joined("plan", draws.draw) == "draw 2"
+
+
+async def test_a_run_goes_on_for_the_others_when_one_caller_is_cancelled() -> None:
+    shared: SharedWork[str, str] = SharedWork(SHARED)
+    draws = Draws()
+
+    async with asyncio.TaskGroup() as callers:
+        cancelled = callers.create_task(shared.joined("plan", draws.draw))
+        stays = callers.create_task(shared.joined("plan", draws.draw))
+        await asyncio.sleep(0)
+        _ = cancelled.cancel()
+        await asyncio.sleep(0)
+        draws.released.set()
+
+    assert (cancelled.cancelled(), stays.result()) == (True, "draw 1")
+
+
+async def test_shared_work_started_outside_a_request_is_held_to_the_budget() -> None:
+    shared: SharedWork[str, None] = SharedWork(SHARED)
+
+    with pytest.raises(WaitOutlastsTheRequest):
+        await shared.joined("plan", waits_past_the_budget)
+
+
+async def test_shared_work_acts_as_the_actor_that_started_it() -> None:
+    shared: SharedWork[str, Actor | None] = SharedWork(SHARED)
+
+    async def its_actor() -> Actor | None:
+        return current_actor()
+
+    with acting_as(ACTOR):
+        assert await shared.joined("plan", its_actor) == ACTOR
+
+
+async def test_a_failure_of_shared_work_raises_in_each_caller(logged: Logged) -> None:
+    log.configure(None)
+    shared: SharedWork[str, None] = SharedWork(SHARED)
+
+    failures = await asyncio.gather(
+        shared.joined("plan", fails), shared.joined("plan", fails), return_exceptions=True
+    )
+
+    assert [type(failure) for failure in failures] == [ConnectionRefusedError] * 2
+    assert [one for one in logged() if one["message"] == "shared work failed"] == []
+
+
+async def test_a_failure_of_shared_work_that_no_caller_awaits_writes_its_traceback(
+    logged: Logged,
+) -> None:
+    log.configure(None)
+    shared: SharedWork[str, None] = SharedWork(SHARED)
+    released = asyncio.Event()
+
+    async def fails_when_released() -> None:
+        _ = await released.wait()
+        await fails()
+
+    caller = asyncio.create_task(shared.joined("plan", fails_when_released))
+    await asyncio.sleep(0)
+    [run] = [task for task in asyncio.all_tasks() if task.get_name() == SHARED]
+    _ = caller.cancel()
+    released.set()
+    _ = await asyncio.wait([run])
+
+    [line] = [one for one in logged() if one["message"] == "shared work failed"]
+    assert line["severity"] == "ERROR"
+    assert line["work"] == SHARED
+    assert "ConnectionRefusedError" in line["exception"]
+
+
+async def test_shutdown_cancels_shared_work_still_in_flight() -> None:
+    shared: SharedWork[str, None] = SharedWork(SHARED)
+    caller = asyncio.create_task(shared.joined("plan", waits_for_ever))
+    await asyncio.sleep(0)
+
+    await cancel_beside()
+
+    with pytest.raises(asyncio.CancelledError):
+        async with asyncio.timeout(1):
+            await caller

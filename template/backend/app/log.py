@@ -221,6 +221,12 @@ def beside_cancelled(work: str) -> None:
     _LOG.warning("work beside the requests cancelled", work=work)
 
 
+def shared_failed(work: str, error: BaseException) -> None:
+    """The run that `app.waits.SharedWork` named `work` raised `error`, and no caller awaited it.
+    The traceback goes whole into `exception`."""
+    _LOG.error("shared work failed", work=work, exc_info=error)
+
+
 _IDENTITY_OPEN_ON_PURPOSE: Final = (
     f"identity: none, and {ACKNOWLEDGED_ENV} says that is deliberate -- every request is "
     f"served as one tenant"

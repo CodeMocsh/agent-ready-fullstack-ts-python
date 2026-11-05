@@ -1,7 +1,7 @@
 """What this process runs beside the app: the routes `build_routes` names, built before the first
 request; one `Database`, verified before the first request and closed after the last; a
-`LoopWatch` while it serves; the work `app.waits.beside` started, cancelled before the database
-closes; and the instruments that observe both.
+`LoopWatch` while it serves; the work `app.waits.beside` and `app.waits.SharedWork` started,
+cancelled before the database closes; and the instruments that observe both.
 
 `app/wiring.py` answers *what did this deployment configure*; this answers *what is this process
 running*, and reads no variable. A `build_` function that reads none belongs here.

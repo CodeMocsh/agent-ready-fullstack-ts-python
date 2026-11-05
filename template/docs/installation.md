@@ -239,10 +239,10 @@ What to expect, because it is not all free:
     Without it no request is marked, and `waiting` refuses nothing.
   - If you merged `app/lifespan.py` by hand, take `_stop`, which calls `cancel_beside()` before
     `database.close()`.
-  - `make lint` now refuses `asyncio.create_task`, `asyncio.ensure_future` and `BackgroundTasks`.
-    Replace each with `app.waits.beside(work, name=...)`, where `work` is a coroutine that returns
-    `None`, and drop the set that held its tasks. Do this before you wrap any call: a `waiting` in a task that one of
-    them started raises, because the task is still in its request.
+  - `make lint` now refuses every `asyncio.create_task`, `asyncio.ensure_future` and
+    `BackgroundTasks` in the project. Move each before you wrap any call: a `waiting` in a task
+    that one of them started raises, because the task is still in its request. Take 0.55.0 with
+    this step, and move each to the home that the 0.55.0 step names.
   - Then wrap each call to a system outside the process, except Postgres, in `app.waits.waiting`.
   - Set your slow-request alert's threshold to `REQUEST_BUDGET_SECONDS`. On Cloud Run, run the
     service with CPU always allocated, or work beside the requests stalls after the `202`.
@@ -251,6 +251,24 @@ What to expect, because it is not all free:
   - In `docs/backend.md`, take the template's bullets that start "Each wait in a request", "Wrap
     the call into the port", "Start a wait past the budget" and "Postgres is not wrapped".
   [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
+- **From 0.55.0 `beside` ends with the result of its work, and `SharedWork` runs shared work.**
+  Move each `asyncio.create_task` and `asyncio.ensure_future` to one of four homes:
+  - Work that runs past the request, such as a job or a build that a poll reads later:
+    `app.waits.beside(work, name=...)`. The task ends with the result of `work`. Drop the set that
+    held its tasks.
+  - Work that a caller awaits together, such as `asyncio.gather` over tasks it started: an
+    `asyncio.TaskGroup`. A `gather` over coroutines is not refused, and can stay.
+  - Work that several callers await at once, shielded so that one cancelled caller leaves it
+    running: `shared: SharedWork[K, T] = SharedWork(name)` from `app.waits`, and `await shared.joined(key, start)`. Drop the
+    dict that held the runs, and the `asyncio.shield`. A `waiting` in it is now held to the
+    budget, also when work outside a request starts it.
+  - A loop that the lifespan starts and stops in its own order: one module of yours, named in the
+    `per-file-ignores` of `pyproject.toml` with its reason. The lifespan is not in a request, so
+    the loop is not either.
+  - Do not start a task with `loop.create_task`. ruff cannot see it, and the task is still in its
+    request.
+  - In `docs/backend.md`, take the template's bullets that start "Start a wait past the budget",
+    "Share work" and "Each task has one of four homes".
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
