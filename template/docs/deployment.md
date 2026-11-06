@@ -487,7 +487,8 @@ counts that line, and alert on the metric. Do not alert on a p99 of `asyncio.eve
 a short hold is one sample among hundreds a minute. The delay histogram shows the trend. A
 platform that throttles CPU between requests, such as Cloud Run with request-based billing, runs
 the loop late while nothing holds it. There the delay rises on an idle instance, and the line
-stays silent.
+stays silent. The line also stays silent when CPU work in another thread holds the interpreter
+lock. Only the delay rises then, on an instance that serves requests.
 
 **Probes.** `/health` answers while the process does; point liveness at it. `/ready` answers
 once the substrate does and its schema is current; point readiness at it, so a database outage

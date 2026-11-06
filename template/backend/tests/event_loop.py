@@ -159,7 +159,11 @@ class Reported(logging.Handler):
             raise AssertionError(
                 "asyncio logged while this test ran. A line that says a step used seconds of CPU "
                 "names a step that did CPU work on the event loop, in a route, a fixture or the "
-                "lifespan. Move that work into a `def` route or into `asyncio.to_thread`. The "
+                "lifespan. In a route, do less of that work, or run it in another process. "
+                "`asyncio.to_thread` and a `def` route hide CPU work from this check, and the "
+                "work can still hold the event loop through the interpreter lock. In a fixture or "
+                "the lifespan, run it in `asyncio.to_thread`, as the lifespan does for "
+                "`build_routes`. The "
                 f"limit is {HELD_SECONDS} s of CPU on the reference core, a Google Cloud E2 "
                 "core. The line says what the step uses there.\n" + "\n".join(failures)
             )

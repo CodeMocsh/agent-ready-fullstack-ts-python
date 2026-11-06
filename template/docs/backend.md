@@ -78,6 +78,18 @@ backend/
   workload on the machine and scale the limit to it, so a fast machine allows less CPU. A pass
   on a fast machine is then a pass on the reference core. The error names the CPU a step used
   on this machine and what it comes to on the reference core.
+- **A thread frees the event loop only for code that releases the interpreter lock.** The tests
+  and `app/loop_watch.py` measure the CPU of the loop's own thread. CPU work in
+  `asyncio.to_thread` or in a `def` route runs on another thread, so neither one reports it.
+  That work holds the interpreter lock, unless an extension releases it, and the loop waits for
+  the lock. Pure Python releases the lock every switch interval, 5 ms by
+  default. The loop then runs, but late. Parsing and validation in an extension keep the lock
+  until the call returns, pydantic-core included. In one deployment, pydantic-core validated
+  6,500 rows in 80 ms in `asyncio.to_thread`. A tick on the loop ran 57 to 73 ms late. In a
+  deployment, only the `asyncio.event_loop.delay` histogram shows such a hold. A thread frees the
+  loop for a wait, for I/O, and for an extension that releases the lock, such as `hashlib` on a
+  large input. Bound other CPU work in a request by what the request answers. When it stays too
+  large, do less of it, or run it in another process.
 - **A call that waits without `await` uses no CPU, so the tests do not report it.** ruff's
   `ASYNC2` rules refuse a sleep, a file, a process or an HTTP request called directly in an
   `async def`. Nothing refuses a wait inside a synchronous helper, a database driver or a socket
@@ -156,8 +168,12 @@ backend/
   TestClient(...)` starts nothing, and may stay. [adr/template/0018](adr/template/0018-a-route-test-never-starts-the-app.md)
   says why.
 - **A lifespan step holds the event loop like a route step**, and the tests report it the same
-  way. Startup work that is CPU work, such as compiling or validating a large document, runs in
-  `await asyncio.to_thread(compile_spec)`.
+  way. No request waits for it, because uvicorn serves no request until the lifespan's startup
+  returns. The limit is for a step that a request waits on. So startup CPU work past the limit,
+  such as compiling or validating a large document, runs in
+  `await asyncio.to_thread(compile_spec)`, as the lifespan does for `build_routes`. The thread frees nothing. It
+  only takes the work out of what the tests measure. Do this before the first request, and
+  nowhere else.
 - Nothing degrades from Postgres to memory. A bad `DATABASE_URL` fails at boot, and an unset one
   is refused unless `APP_ENV=development`. The application refuses to start if it can see
   `DATABASE_OWNER_URL`.
