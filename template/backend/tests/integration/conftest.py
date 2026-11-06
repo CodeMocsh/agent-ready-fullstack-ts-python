@@ -31,6 +31,7 @@ import pytest
 from app.identity.shared import Actor
 from app.store import Database
 from app.store.acting import SET_ACTING, acting
+from app.store.budget import Draws
 from app.store.conn import resolve_schema
 from app.store.migrate import apply
 from app.store.roles import app_role, emit_roles_sql, owner_role
@@ -63,6 +64,9 @@ async def connect(dsn: str) -> Any:
 
     return await asyncpg.connect(dsn=dsn)
 
+
+ONE_PROCESS = Draws(instances=1, in_process={}, outside={})
+"""What a test's own database draws: one process, holding nothing beside the pool."""
 
 THE_SUITE = Actor(issuer="a-test", subject="the-suite", name="The suite")
 """Who a connection the suite opens itself acts as, so the audit triggers let it write."""
@@ -170,7 +174,7 @@ async def provisioned() -> AsyncIterator[Provisioned]:
 async def a_postgres_database(where: Provisioned) -> Any:
     from app.store.pg import PostgresDatabase
 
-    database = PostgresDatabase(dsn=where.app_dsn, schema=where.schema)
+    database = PostgresDatabase(dsn=where.app_dsn, schema=where.schema, draws=ONE_PROCESS)
     await database.check()
     return database
 

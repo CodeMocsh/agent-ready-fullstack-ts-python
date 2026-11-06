@@ -55,6 +55,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "No database connection is free. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       },
@@ -78,6 +88,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No database connection is free. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -131,6 +151,16 @@
               }
             }
           },
+          "503": {
+            "description": "No database connection is free. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Task not found",
             "content": {
@@ -170,6 +200,16 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "503": {
+            "description": "No database connection is free. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "404": {
             "description": "Task not found",

@@ -12,6 +12,7 @@ backend/
   app/routes/         the endpoints, a module per what a caller presents
   app/refusal.py      how a route says no: ApiError and responses(...)
   app/request_line.py the fields `request completed` names, beyond tenant_id -- yours
+  app/connection_budget.py  what one process holds open to Postgres beside the pool -- yours
   app/errors.py       every refusal a route can answer, once each -- yours
   app/deps.py         what a route is handed
   app/wiring.py       what this deployment configured, read from the environment

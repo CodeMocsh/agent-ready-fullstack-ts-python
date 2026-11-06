@@ -44,6 +44,17 @@ class TenantUnset(ValueError):
     """
 
 
+class DatabaseBusy(Exception):
+    """No connection came to a request in time: every one in the pool stayed in use, or the
+    server refused a new one. The request answers the `503` of `NoConnectionFree`, whose
+    `Retry-After` is `retry_after`, in seconds: `app/main.py` sends it when a route raises this,
+    and `app/request_events.py` when the request event does. `docs/adr/template/0022`."""
+
+    def __init__(self, message: str, *, retry_after: int) -> None:
+        super().__init__(message)
+        self.retry_after: int = retry_after
+
+
 @runtime_checkable
 class TaskStore(Protocol):
     """Exactly what the routes call, and nothing speculative.

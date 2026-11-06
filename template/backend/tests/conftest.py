@@ -44,6 +44,7 @@ from app.deployment import (
     DATABASE_URL_ENV,
     DEVELOPMENT,
     ENVIRONMENT_ENV,
+    INSTANCES_ENV,
     TELEMETRY_ENV,
     TIMEOUTS_ENV,
 )
@@ -122,10 +123,17 @@ def asyncio_reports(asyncio_logged: Reported) -> Generator[Reported]:
 
 @pytest.fixture(autouse=True)
 def nothing_the_shell_exports(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every test starts with no database, telemetry or timeout variable set, whatever the shell
+    """Every test starts with no database, telemetry, timeout or instances variable set, whatever the shell
     exports, so the app it builds runs on the in-memory substrate. A test that wants Postgres
     sets `DATABASE_URL` and `DB_SCHEMA` itself."""
-    for name in (DATABASE_URL_ENV, OWNER_URL_ENV, SCHEMA_ENV, *TELEMETRY_ENV, *TIMEOUTS_ENV):
+    for name in (
+        DATABASE_URL_ENV,
+        OWNER_URL_ENV,
+        SCHEMA_ENV,
+        INSTANCES_ENV,
+        *TELEMETRY_ENV,
+        *TIMEOUTS_ENV,
+    ):
         monkeypatch.delenv(name, raising=False)
 
 

@@ -18,6 +18,11 @@ reads, from `audit_events.current_actor()` and the request's ids, before it lend
 connection. They are session settings, and the pool sets all of them each time it lends a
 connection. A connection lent again does not carry the actor it had.
 
+**The pool is sized from the connection budget.** Before it opens, the pool reads the server's
+limits on one connection of its own, and takes what remains of the process's share. A pool that
+would get no connection refuses to start. A request that gets no connection raises
+`DatabaseBusy`, which `app/main.py` answers with a `503`. `docs/adr/template/0022`.
+
 **Every wait has a bound.** A statement, an answer, a transaction left idle, and a wait for a
 connection each raise once `Timeouts` says so. `docs/deployment.md` says why a platform's
 request timeout is not one of them. The bounds on the statement and the idle transaction are
@@ -29,6 +34,7 @@ what the contract suite does.
 """
 
 import asyncio
+import math
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -39,8 +45,9 @@ from app import log
 from app.audit_events import RecordedAuditEvent, RequestEvent, current_actor
 from app.identity.shared import Actor
 from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import AuditEvents, Connections, TaskStore, TenantUnset
+from app.store import AuditEvents, Connections, DatabaseBusy, TaskStore, TenantUnset
 from app.store.acting import SET_ACTING, acting
+from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
 from app.store.migrate import check, schema_version
@@ -95,9 +102,14 @@ class Timeouts:
 TIMEOUTS: Final = Timeouts()
 
 
-class AcquireTimedOut(TimeoutError):
+class AcquireTimedOut(DatabaseBusy):
     """No connection came to a request within `Timeouts.acquire`: every one stayed in use, or a
     new one did not open in time."""
+
+
+class ConnectionRefused(DatabaseBusy):
+    """The server refused the new connection a request needed: it holds as many as it allows, or
+    it is starting or stopping."""
 
 
 def _milliseconds(seconds: float) -> str:
@@ -125,6 +137,11 @@ async def _name_who_acts(conn: Any) -> None:
     await conn.execute(
         SET_ACTING, *acting(current_actor(), log.current_request_id(), log.current_trace_id())
     )
+
+
+def _refused_by_the_server() -> tuple[type[BaseException], ...]:
+    """What asyncpg raises when the server refuses a new connection."""
+    return (_driver().TooManyConnectionsError, _driver().CannotConnectNowError)
 
 
 def _ended_but_still_lent(conn: Any) -> bool:
@@ -269,21 +286,62 @@ class PostgresDatabase:
         self,
         *,
         dsn: str,
+        draws: Draws,
         schema: str | None = None,
         min_size: int = 1,
-        max_size: int = 10,
         timeouts: Timeouts = TIMEOUTS,
     ) -> None:
         self._dsn: str = dsn
         self._schema: str = resolve_schema(schema)
+        self._draws: Draws = draws
         self._min_size: int = min_size
-        self._max_size: int = max_size
         self._timeouts: Timeouts = timeouts
+        self._budget: ConnectionBudget | None = None
         self._pool: Any = None
         self._opening: asyncio.Lock = asyncio.Lock()
 
+    def budget(self) -> ConnectionBudget:
+        """The budget the pool opened under. Raises `RuntimeError` before the pool first opens."""
+        if self._budget is None:
+            raise RuntimeError("the pool has not opened, so it has no budget yet")
+        return self._budget
+
+    def _server_settings(self) -> dict[str, str]:
+        return {
+            "search_path": self._schema,
+            "statement_timeout": _milliseconds(self._timeouts.statement),
+            "idle_in_transaction_session_timeout": _milliseconds(
+                self._timeouts.idle_in_transaction
+            ),
+        }
+
+    async def _budgeted(self) -> ConnectionBudget:
+        """The budget under the server's limits, read on one connection that closes before the
+        pool opens. Raises `OverBudget` when the draws do not fit."""
+        conn = await _driver().connect(
+            dsn=self._dsn,
+            timeout=self._timeouts.acquire,
+            command_timeout=self._timeouts.answer,
+            server_settings=self._server_settings(),
+        )
+        try:
+            limits = await server_limits(conn)
+        finally:
+            await conn.close()
+        budget = budgeted(limits, self._draws)
+        log.connections_budgeted(
+            max_connections=limits.max_connections,
+            reserved=limits.reserved,
+            outside=dict(self._draws.outside),
+            instances=self._draws.instances,
+            in_process=dict(self._draws.in_process),
+            pool=budget.pool,
+        )
+        return budget
+
     async def pool(self) -> Any:
-        """One pool, created on first use so construction stays synchronous and cheap.
+        """One pool, created on first use so construction stays synchronous and cheap, and
+        sized from the connection budget. Raises `OverBudget` when the draws do not fit.
 
         Guarded, because two coroutines arriving before it exists would each create one and
         the loser's would be leaked -- holding its connections until the process exits, with
@@ -293,34 +351,37 @@ class PostgresDatabase:
         if self._pool is None:
             async with self._opening:
                 if self._pool is None:
+                    self._budget = await self._budgeted()
                     self._pool = await _driver().create_pool(
                         dsn=self._dsn,
-                        min_size=self._min_size,
-                        max_size=self._max_size,
+                        min_size=min(self._min_size, self._budget.pool),
+                        max_size=self._budget.pool,
                         command_timeout=self._timeouts.answer,
                         setup=_name_who_acts,
-                        server_settings={
-                            "search_path": self._schema,
-                            "statement_timeout": _milliseconds(self._timeouts.statement),
-                            "idle_in_transaction_session_timeout": _milliseconds(
-                                self._timeouts.idle_in_transaction
-                            ),
-                        },
+                        server_settings=self._server_settings(),
                     )
         return self._pool
 
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator[Any]:
         """A connection from the pool, returned to it on exit. Raises `AcquireTimedOut` when none
-        comes within `Timeouts.acquire`."""
+        comes within `Timeouts.acquire`, and `ConnectionRefused` when the server refuses a new
+        one. Each tells the client to ask again after `Timeouts.acquire`."""
         pool = await self.pool()
+        retry_after = math.ceil(self._timeouts.acquire)
         try:
             conn = await pool.acquire(timeout=self._timeouts.acquire)
         except TimeoutError as waited:
             raise AcquireTimedOut(
-                f"no connection within {self._timeouts.acquire}s: all {self._max_size} stayed "
-                f"in use, or a new one did not open in time"
+                f"no connection within {self._timeouts.acquire}s: all {self.budget().pool} "
+                f"stayed in use, or a new one did not open in time",
+                retry_after=retry_after,
             ) from waited
+        except _refused_by_the_server() as refused:
+            raise ConnectionRefused(
+                f"the server refused a new connection: {type(refused).__name__}",
+                retry_after=retry_after,
+            ) from refused
         try:
             yield conn
         finally:
@@ -330,15 +391,16 @@ class PostgresDatabase:
                 await pool.release(conn)
 
     def connections(self) -> Connections:
-        """The pool's connections now. Before the pool opens and after it closes, none. Safe to
-        call from another thread, as a metric reader does."""
+        """The pool's connections now. Before the pool opens and after it closes, none in use.
+        Before it first opens, a size of none. Safe to call from another thread, as a metric
+        reader does."""
         pool = self._pool
+        budget = self._budget
+        most = 0 if budget is None else budget.pool
         if pool is None:
-            return Connections(pool=self._schema, used=0, idle=0, max_size=self._max_size)
+            return Connections(pool=self._schema, used=0, idle=0, max_size=most)
         idle = pool.get_idle_size()
-        return Connections(
-            pool=self._schema, used=pool.get_size() - idle, idle=idle, max_size=self._max_size
-        )
+        return Connections(pool=self._schema, used=pool.get_size() - idle, idle=idle, max_size=most)
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)

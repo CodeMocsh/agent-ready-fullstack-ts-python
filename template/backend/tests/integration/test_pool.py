@@ -1,7 +1,9 @@
-"""The pool: every wait on Postgres has a bound that raises, and its connections can be
+"""The pool: it is sized from the connection budget, every wait on Postgres has a bound that
+raises, a connection the server refuses is a refusal of one request, and its connections can be
 counted."""
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -10,12 +12,13 @@ import pytest
 
 from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
 from app.store import Connections
+from app.store.budget import Draws, OverBudget
 from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
-from app.store.pg import TIMEOUTS, AcquireTimedOut, PostgresDatabase, Timeouts
+from app.store.pg import TIMEOUTS, AcquireTimedOut, ConnectionRefused, PostgresDatabase, Timeouts
 from app.wiring import build
 from tests.event_loop import Reported, hold_the_event_loop
-from tests.integration.conftest import Provisioned
+from tests.integration.conftest import Provisioned, connect
 
 SHORT = 0.2
 
@@ -32,8 +35,7 @@ async def one_connection_under(provisioned: Provisioned) -> AsyncIterator[Bounde
         database = PostgresDatabase(
             dsn=provisioned.app_dsn,
             schema=provisioned.schema,
-            min_size=1,
-            max_size=1,
+            draws=Draws(instances=1, in_process={}, outside={}, pool=1),
             timeouts=timeouts,
         )
         opened.append(database)
@@ -163,3 +165,71 @@ async def test_the_bounds_a_deployment_sets_are_the_ones_postgres_holds(
         await database.close()
 
     assert (statement, idle) == ("2500ms", "7500ms")
+
+
+async def server_allows(provisioned: Provisioned) -> tuple[int, int]:
+    conn = await connect(provisioned.admin_dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT name, setting::int FROM pg_settings WHERE name IN "
+            "('max_connections', 'superuser_reserved_connections', 'reserved_connections')"
+        )
+    finally:
+        await conn.close()
+    settings = {row["name"]: row["setting"] for row in rows}
+    return settings.pop("max_connections"), sum(settings.values())
+
+
+async def test_the_pool_takes_what_remains_of_the_process_s_share_of_the_server(
+    provisioned: Provisioned,
+) -> None:
+    most, reserved = await server_allows(provisioned)
+    database = PostgresDatabase(
+        dsn=provisioned.app_dsn,
+        schema=provisioned.schema,
+        draws=Draws(instances=2, in_process={"a feed": 3}, outside={"the release step": 1}),
+    )
+    try:
+        pool = await database.pool()
+        budget = database.budget()
+    finally:
+        await database.close()
+
+    assert budget.pool == (most - reserved - 1) // 2 - 3
+    assert pool.get_max_size() == budget.pool
+
+
+async def test_draws_the_server_cannot_hold_refuse_to_open(provisioned: Provisioned) -> None:
+    most, _ = await server_allows(provisioned)
+    database = PostgresDatabase(
+        dsn=provisioned.app_dsn,
+        schema=provisioned.schema,
+        draws=Draws(instances=most, in_process={}, outside={}),
+    )
+
+    with pytest.raises(OverBudget, match=f"each of {most} processes"):
+        await database.check()
+
+
+async def test_a_connection_the_server_refuses_is_a_refusal_of_one_request(
+    provisioned: Provisioned,
+) -> None:
+    admin = await connect(provisioned.admin_dsn)
+    try:
+        await admin.execute(f'ALTER ROLE "{provisioned.app}" CONNECTION LIMIT 1')
+    finally:
+        await admin.close()
+    database = PostgresDatabase(
+        dsn=provisioned.app_dsn,
+        schema=provisioned.schema,
+        draws=Draws(instances=1, in_process={}, outside={}, pool=2),
+    )
+    try:
+        async with database.connection():
+            with pytest.raises(ConnectionRefused, match="TooManyConnectionsError") as refused:
+                await database.check()
+        assert await database.check() == known_version()
+    finally:
+        await database.close()
+
+    assert refused.value.retry_after == math.ceil(TIMEOUTS.acquire)

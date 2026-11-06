@@ -23,6 +23,7 @@ from app.main import create_app
 from app.store import Database, ddl
 from app.store.migrate import emit_sql, known_version
 from tests.integration.conftest import (
+    ONE_PROCESS,
     Provisioned,
     a_fresh_schema_name,
     apply_schema,
@@ -43,7 +44,7 @@ database that already had the table -- bites on the first schema change rather t
 def a_database(schema: str) -> Any:
     from app.store.pg import PostgresDatabase
 
-    return PostgresDatabase(dsn=postgres_dsn(), schema=schema)
+    return PostgresDatabase(dsn=postgres_dsn(), schema=schema, draws=ONE_PROCESS)
 
 
 async def test_the_schema_applies_and_reports_its_version(database: Database) -> None:

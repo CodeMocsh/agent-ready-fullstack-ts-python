@@ -107,6 +107,33 @@ def serving(substrate: str, schema: str) -> None:
     _LOG.info("serving", substrate=substrate, schema=schema)
 
 
+def connections_budgeted(
+    *,
+    max_connections: int,
+    reserved: int,
+    outside: dict[str, int],
+    instances: int,
+    in_process: dict[str, int],
+    pool: int,
+) -> None:
+    """The connection budget the pool opened under. `docs/adr/template/0022`."""
+    _LOG.info(
+        "connections budgeted",
+        max_connections=max_connections,
+        reserved=reserved,
+        outside=outside,
+        instances=instances,
+        in_process=in_process,
+        pool=pool,
+    )
+
+
+def database_busy(refusal: str) -> None:
+    """A request got no database connection, and is refused with a `503`. `refusal` names the
+    class of the failure."""
+    _LOG.warning("database busy", refusal=refusal)
+
+
 def identity_verified() -> None:
     _LOG.info("identity: a credential is verified on every request")
 

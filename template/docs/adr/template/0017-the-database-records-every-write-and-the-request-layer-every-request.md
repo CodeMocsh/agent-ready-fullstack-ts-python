@@ -78,6 +78,12 @@ each store method records its own event holds only for the stores that remember 
   `test_a_request_with_no_principal_records_nothing` holds this. A request cancelled before it
   answers, as at shutdown, records none: it sent no response.
   `test_a_cancelled_request_records_nothing` holds this.
+- **A request that got no database connection records no request event.** Its event would wait
+  for a connection too, and find none. Its `request completed` line names it, with a `503`. When
+  the event itself gets no connection, the request answers that `503` in place of its response.
+  `test_a_request_that_got_no_connection_is_refused_with_a_time_to_ask_again` holds this.
+  [0022](0022-the-connections-of-every-process-fit-inside-max-connections.md) says why the
+  request gets a `503`.
 - **`audit_events.serve` refuses to run outside the event loop**, as from a `def` dependency, with
   `ServedOffTheLoop`. An actor set in a worker thread does not reach the route.
   `test_a_principal_served_from_a_worker_thread_is_refused` holds this.

@@ -104,8 +104,8 @@ project replaces it, then records `example_resource: false` in `.copier-answers.
 _Avoid_: demo, sample, worked example.
 
 **Refusal**:
-A way a route answers no. Each one is a class in `app/errors.py` that carries its status and
-its sentence.
+A way a route answers no. Each one is a class that carries its status and its sentence: the
+project's in `app/errors.py`, and the ones the template's own code answers in `app/refusal.py`.
 _Avoid_: error response, exception (an exception is how a refusal is raised, not what it is).
 
 **Identity stub**:
@@ -154,6 +154,12 @@ How long a request may take: `REQUEST_BUDGET_SECONDS` in `app/waits.py`. The dep
 slow-request alert uses it as its threshold. Each wait in a request on a system outside the
 process has a bound under it.
 _Avoid_: request timeout, deadline.
+
+**Connection budget**:
+The share of the server's `max_connections` that each process may hold, and the template's pool
+inside it. `app/store/budget.py` calculates it from `DATABASE_INSTANCES` and
+`app/connection_budget.py`.
+_Avoid_: pool size (the pool is one holder inside the share), connection limit.
 
 **Work beside the requests**:
 A task that `app.waits.beside` started. It runs outside every request, so its waits may last

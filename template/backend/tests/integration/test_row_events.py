@@ -16,6 +16,7 @@ from app.audit_events import RequestEvent, acting_as
 from app.identity.shared import Actor
 from app.store import Database
 from app.store.acting import MIGRATION_ACTOR
+from app.store.budget import Draws
 from app.store.ddl import AUDITED_WRITES, TENANT_GUC, TENANT_TABLES, audit_sql
 from app.store.migrate import apply
 from app.store.roles import APPEND_ONLY_TABLE
@@ -257,7 +258,9 @@ async def one_connection(provisioned: Provisioned) -> AsyncIterator[Database]:
     from app.store.pg import PostgresDatabase
 
     database = PostgresDatabase(
-        dsn=provisioned.app_dsn, schema=provisioned.schema, min_size=1, max_size=1
+        dsn=provisioned.app_dsn,
+        schema=provisioned.schema,
+        draws=Draws(instances=1, in_process={}, outside={}, pool=1),
     )
     await database.check()
     try:
