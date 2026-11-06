@@ -35,7 +35,8 @@ what the contract suite does.
 
 import asyncio
 import math
-from collections.abc import AsyncGenerator
+import time
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Final
@@ -299,6 +300,7 @@ class PostgresDatabase:
         self._budget: ConnectionBudget | None = None
         self._pool: Any = None
         self._opening: asyncio.Lock = asyncio.Lock()
+        self._waited: Callable[[float], None] | None = None
 
     def budget(self) -> ConnectionBudget:
         """The budget the pool opened under. Raises `RuntimeError` before the pool first opens."""
@@ -366,12 +368,19 @@ class PostgresDatabase:
     async def connection(self) -> AsyncGenerator[Any]:
         """A connection from the pool, returned to it on exit. Raises `AcquireTimedOut` when none
         comes within `Timeouts.acquire`, and `ConnectionRefused` when the server refuses a new
-        one. Each tells the client to ask again after `Timeouts.acquire`."""
+        one. Each tells the client to ask again after `Timeouts.acquire`.
+
+        A wait that ends in a connection or in `AcquireTimedOut` goes to the recorder that
+        `time_waits` set, if any. The wait includes the setup that names who acts, one round trip
+        to Postgres. When the pool grows, it also includes opening a new connection. A refusal
+        and a cancelled wait go to no recorder."""
         pool = await self.pool()
         retry_after = math.ceil(self._timeouts.acquire)
+        started = time.monotonic()
         try:
             conn = await pool.acquire(timeout=self._timeouts.acquire)
         except TimeoutError as waited:
+            self._record_wait(started)
             raise AcquireTimedOut(
                 f"no connection within {self._timeouts.acquire}s: all {self.budget().pool} "
                 f"stayed in use, or a new one did not open in time",
@@ -383,6 +392,7 @@ class PostgresDatabase:
                 retry_after=retry_after,
             ) from refused
         try:
+            self._record_wait(started)
             yield conn
         finally:
             if _ended_but_still_lent(conn):
@@ -401,6 +411,13 @@ class PostgresDatabase:
             return Connections(pool=self._schema, used=0, idle=0, max_size=most)
         idle = pool.get_idle_size()
         return Connections(pool=self._schema, used=pool.get_size() - idle, idle=idle, max_size=most)
+
+    def time_waits(self, record: Callable[[float], None]) -> None:
+        self._waited = record
+
+    def _record_wait(self, started: float) -> None:
+        if self._waited is not None:
+            self._waited(time.monotonic() - started)
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)

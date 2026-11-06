@@ -375,6 +375,12 @@ What to expect, because it is not all free:
   starts "A lifespan step holds the event loop". The update needs nothing else. To find a hold
   you hid this way, look for CPU work in a request that you moved into `asyncio.to_thread` or a
   `def` route. Do less of it, or run it in another process.
+- **From 0.61.0 the pool times each wait for a connection.** `db.client.connection.wait_time`
+  is a histogram in seconds. It holds the waits that ended in a connection or in
+  `AcquireTimedOut`. `Pooled`
+  in `app/store/__init__.py` now has `time_waits`. If a substrate of yours counts its
+  connections, give it `time_waits`. Without it, the app refuses to start with telemetry on,
+  and the error names `time_waits`.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

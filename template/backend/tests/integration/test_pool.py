@@ -111,6 +111,8 @@ async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
     one_connection_under: Bounded,
 ) -> None:
     database = one_connection_under(Timeouts(acquire=SHORT))
+    timed: list[float] = []
+    database.time_waits(timed.append)
     pool = await database.pool()
     held = await pool.acquire(timeout=TIMEOUTS.acquire)
 
@@ -123,6 +125,23 @@ async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
         await pool.release(held)
 
     assert waited >= SHORT / 2
+    [timed_out] = timed
+    assert SHORT / 2 <= timed_out <= waited
+
+
+async def test_the_pool_times_each_wait_that_ends_in_a_connection(
+    one_connection: PostgresDatabase,
+) -> None:
+    timed: list[float] = []
+    one_connection.time_waits(timed.append)
+
+    async with one_connection.connection():
+        pass
+    async with one_connection.connection():
+        pass
+
+    assert len(timed) == 2
+    assert all(0 <= seconds < TIMEOUTS.acquire for seconds in timed)
 
 
 async def test_a_connection_lent_out_is_counted_as_used_until_it_comes_back(
@@ -224,12 +243,16 @@ async def test_a_connection_the_server_refuses_is_a_refusal_of_one_request(
         schema=provisioned.schema,
         draws=Draws(instances=1, in_process={}, outside={}, pool=2),
     )
+    timed: list[float] = []
     try:
         async with database.connection():
+            database.time_waits(timed.append)
             with pytest.raises(ConnectionRefused, match="TooManyConnectionsError") as refused:
                 await database.check()
+            assert timed == []
         assert await database.check() == known_version()
     finally:
         await database.close()
 
     assert refused.value.retry_after == math.ceil(TIMEOUTS.acquire)
+    assert len(timed) == 1

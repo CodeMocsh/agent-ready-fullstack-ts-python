@@ -5,8 +5,8 @@ request is a server span named by its route template, every query it makes a dat
 every request adds to `http.server.request.duration`; `/health` and `/ready` are left out. Only a
 request starts a trace. A query exports a span only inside a traced request. A pooled substrate
 reports its connections as `db.client.connection.count`, by state, and as
-`db.client.connection.max`. Each tick of `app.loop_watch` adds how late it ran to
-`LOOP_DELAY`. This module instruments and `app.log` reads the current span; ruff
+`db.client.connection.max`, and each wait for one to `CONNECTION_WAIT`. Each tick of
+`app.loop_watch` adds how late it ran to `LOOP_DELAY`. This module instruments and `app.log` reads the current span; ruff
 refuses `opentelemetry` anywhere else.
 
 **What leaves the process is declared here.** A span keeps only the attributes in
@@ -96,6 +96,13 @@ LOOP_DELAY: Final = "asyncio.event_loop.delay"
 LOOP_DELAY_BUCKETS: Final = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
 """The bucket boundaries of `LOOP_DELAY`, in seconds."""
 
+CONNECTION_WAIT: Final = "db.client.connection.wait_time"
+"""The histogram of how long each wait for a pooled connection took, in seconds: a wait that
+ended in a connection, or in `AcquireTimedOut`."""
+
+CONNECTION_WAIT_BUCKETS: Final = (0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
+"""The bucket boundaries of `CONNECTION_WAIT`, in seconds."""
+
 PROBES: Final = r"^https?://[^/]+(/api)?/(health|ready)$"
 """The URLs never traced or measured: the two probes, bare or under `app.serve`'s prefix."""
 
@@ -111,9 +118,16 @@ class Instruments:
     semconv_before: str | None
 
     def observe(self, database: Database) -> None:
-        """Report the connections of `database` at every collection. A substrate with no pool
-        has no connections to count, and is not observed."""
+        """Report the connections of `database` at every collection, and each wait for one to
+        `CONNECTION_WAIT`. A substrate with no pool has no connections to count, and is not
+        observed. Raises `TypeError` for a substrate that counts its connections and does not
+        time its waits."""
         if not isinstance(database, Pooled):
+            if hasattr(database, "connections"):
+                raise TypeError(
+                    f"{type(database).__name__} counts its connections and has no `time_waits`: "
+                    "give it `time_waits`, or telemetry reports none of its pool"
+                )
             return
 
         def count(_options: CallbackOptions) -> Iterable[Observation]:
@@ -135,6 +149,11 @@ class Instruments:
         meter.create_observable_up_down_counter(
             "db.client.connection.max", callbacks=[most], unit="{connection}"
         )
+        waits = meter.create_histogram(
+            CONNECTION_WAIT, unit="s", explicit_bucket_boundaries_advisory=CONNECTION_WAIT_BUCKETS
+        )
+        named = {"db.client.connection.pool.name": database.connections().pool}
+        database.time_waits(lambda seconds: waits.record(seconds, named))
 
     def loop_delay(self) -> Callable[[float], None]:
         """What adds one delay, in seconds, to `LOOP_DELAY`."""

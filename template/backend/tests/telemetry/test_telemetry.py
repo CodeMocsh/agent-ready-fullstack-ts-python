@@ -22,7 +22,8 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from app import serve, telemetry
 from app.deployment import RESOURCE_ATTRIBUTES_ENV
 from app.main import ROUTERS
-from app.store import Database
+from app.store import Connections, Database
+from app.store.memory import MemoryDatabase
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
 from tests.routed import assembled
@@ -355,6 +356,18 @@ def test_a_loop_delay_is_recorded_in_seconds_in_its_own_buckets(untrusting: Inst
     assert point.sum == 0.3
     assert tuple(point.explicit_bounds) == telemetry.LOOP_DELAY_BUCKETS
     assert dict(point.attributes or {}) == {}
+
+
+class CountsItsConnections(MemoryDatabase):
+    def connections(self) -> Connections:
+        return Connections(pool="counted", used=0, idle=0, max_size=1)
+
+
+def test_a_substrate_that_counts_its_connections_and_times_no_wait_is_refused(
+    untrusting: Instrumented,
+) -> None:
+    with pytest.raises(TypeError, match="time_waits"):
+        untrusting.instruments.observe(CountsItsConnections(seed_tenant="t"))
 
 
 @pytest.mark.usefixtures("untrusting")

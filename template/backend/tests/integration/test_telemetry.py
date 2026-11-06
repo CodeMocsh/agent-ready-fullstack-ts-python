@@ -7,7 +7,12 @@ from collections.abc import Callable
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader, MetricsData, NumberDataPoint
+from opentelemetry.sdk.metrics.export import (
+    HistogramDataPoint,
+    InMemoryMetricReader,
+    MetricsData,
+    NumberDataPoint,
+)
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
@@ -104,7 +109,7 @@ async def outside_any_request(app: FastAPI) -> None:
 
 
 @pytest.mark.usefixtures("on_postgres")
-def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
+def test_the_pool_reports_its_connections_by_state_the_most_it_will_open_and_each_wait(
     provisioned: Provisioned,
 ) -> None:
     app = create_app()
@@ -122,6 +127,9 @@ def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
         with client.portal.wrap_async_context_manager(database.connection()):
             collected = metrics.get_metrics_data()
 
+    [waited] = waits(collected, pool=provisioned.schema)
+    assert waited.count >= 1
+    assert tuple(waited.explicit_bounds) == telemetry.CONNECTION_WAIT_BUCKETS
     reported = by_state(collected, pool=provisioned.schema)
     assert reported.keys() == {
         ("db.client.connection.count", "used"),
@@ -137,8 +145,28 @@ def test_the_pool_reports_its_connections_by_state_and_the_most_it_will_open(
     assert most == opened.get_max_size()
 
 
+def waits(collected: MetricsData | None, *, pool: str) -> list[HistogramDataPoint]:
+    """Each point of the connection wait histogram. Fails on a point that is not a histogram,
+    names another pool or carries another attribute."""
+    assert collected is not None
+    points = [
+        point
+        for resource in collected.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+        if metric.name == telemetry.CONNECTION_WAIT
+        for point in metric.data.data_points
+    ]
+    waited: list[HistogramDataPoint] = []
+    for point in points:
+        assert isinstance(point, HistogramDataPoint)
+        assert dict(point.attributes or {}) == {"db.client.connection.pool.name": pool}
+        waited.append(point)
+    return waited
+
+
 def by_state(collected: MetricsData | None, *, pool: str) -> dict[tuple[str, str | None], float]:
-    """Each connection metric's value by its name and state. Fails on a point that is not a
+    """Each connection count's value by its name and state. Fails on a point that is not a
     number, names another pool or carries another attribute, and on a point reported twice."""
     assert collected is not None
     points = [
@@ -147,6 +175,7 @@ def by_state(collected: MetricsData | None, *, pool: str) -> dict[tuple[str, str
         for scope in resource.scope_metrics
         for metric in scope.metrics
         if metric.name.startswith("db.client.connection.")
+        and metric.name != telemetry.CONNECTION_WAIT
         for point in metric.data.data_points
     ]
     reported: dict[tuple[str, str | None], float] = {}

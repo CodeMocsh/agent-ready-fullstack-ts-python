@@ -476,7 +476,14 @@ under a threshold at p95 or p99. Both come from `http.server.request.duration`, 
 backend spells its own way (`http_server_request_duration_seconds` in Prometheus). On Postgres,
 `db.client.connection.count` reports the pool's connections by state (`used`, `idle`), and
 `db.client.connection.max` reports the most it will open. Used near the maximum means requests
-are waiting for a connection, and `AcquireTimedOut` in the log follows. Alert on
+are waiting for a connection, and `AcquireTimedOut` in the log follows.
+`db.client.connection.wait_time` reports how long each wait for a connection took, in seconds:
+the waits that ended in a connection, and the ones that ended in `AcquireTimedOut`. Each wait
+includes one round trip to Postgres. A p95 near that round trip means requests do not queue for
+a connection. A p95 that rises with load while the CPU and the event-loop delay stay flat
+means requests queue for the pool. Give the pool more of the [connection budget](#the-connection-budget), or hold each
+connection for less time. A p95 near `DATABASE_ACQUIRE_TIMEOUT` means waits end in
+`AcquireTimedOut` and a `503`. The log counts those exactly. Alert on
 burn rate rather than on thresholds: for a 99.9% target, page at 14.4 times the budget over an
 hour and five minutes, page at 6 times over six hours and thirty minutes, and open a ticket at
 once over three days and six hours.
