@@ -6,6 +6,7 @@ const KINDS: ReadonlySet<unknown> = new Set<ClientEvent["kind"]>([
   "caught",
   "query",
   "mutation",
+  "build",
 ]);
 const ROUTE = /^[A-Za-z0-9_$./-]+$/;
 const ERROR_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;

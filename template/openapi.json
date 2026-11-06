@@ -285,7 +285,8 @@
               "uncaught",
               "caught",
               "query",
-              "mutation"
+              "mutation",
+              "build"
             ],
             "title": "Kind"
           },

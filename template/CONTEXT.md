@@ -90,6 +90,19 @@ Any process whose `APP_ENV` is unset or `production`. Unset is production on pur
 deployment that forgets the variable is checked.
 _Avoid_: prod, live, deployed.
 
+**Build identity**:
+The file name of the bundle's entry chunk, such as `assets/index-<hash>.js`. Its hash changes
+with any code or style the bundle carries. `build.json` names the deployed one, and a tab knows
+its own from `import.meta.url`.
+_Avoid_: version, release (a release is a tag of the template), `service.version` (the
+backend's, set by the deployment).
+
+**Build not loaded**:
+A tab that reloaded into the deployed build and still runs another one, because the host served
+an old `index.html`. The tab reports it once as `BuildNotLoaded`, a client event of the kind
+`build`.
+_Avoid_: stale host, failed reload (the reload ran; the host answered with the old build).
+
 ## Routes
 
 **Requirement**:

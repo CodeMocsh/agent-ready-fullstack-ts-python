@@ -75,7 +75,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "uncaught" | "caught" | "query" | "mutation";
+            kind: "uncaught" | "caught" | "query" | "mutation" | "build";
             /** Route */
             route: string | null;
             /** Error */

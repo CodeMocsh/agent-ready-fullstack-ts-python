@@ -38,6 +38,8 @@ SCRIPT = "export const built = 1;\n"
 HASHED = f"{ASSETS}/index-abc123.js"
 NESTED = f"{ASSETS}/fonts/geist-abc123.woff2"
 UNHASHED = "favicon.svg"
+BUILD = "build.json"
+NAMED = f'{{"entry": "{HASHED}"}}\n'
 SECRET = "the private key nobody asked this process for"
 BESIDE = "secret.txt"
 UNROUTED = "/api/no-route-answers-this"
@@ -70,6 +72,7 @@ def bundle(tmp_path: Path) -> Path:
     (built / NESTED).parent.mkdir()
     (built / NESTED).write_text(SCRIPT)
     (built / UNHASHED).write_text("<svg/>")
+    (built / BUILD).write_text(NAMED)
     return built
 
 
@@ -125,11 +128,17 @@ def test_a_file_under_assets_is_kept_for_a_year(client: TestClient, path: str) -
     assert client.get(f"/{path}").headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
-@pytest.mark.parametrize("path", ["/", "/some/client/route", f"/{INDEX}", f"/{UNHASHED}"])
+@pytest.mark.parametrize(
+    "path", ["/", "/some/client/route", f"/{INDEX}", f"/{UNHASHED}", f"/{BUILD}"]
+)
 def test_every_other_file_is_asked_for_again_on_each_load(client: TestClient, path: str) -> None:
     answered = client.get(path)
     assert answered.status_code == 200
     assert answered.headers["cache-control"] == "no-cache"
+
+
+def test_the_build_file_is_served_as_its_own_body(client: TestClient) -> None:
+    assert client.get(f"/{BUILD}").json() == {"entry": HASHED}
 
 
 def test_a_path_cannot_escape_the_bundle(client: TestClient) -> None:

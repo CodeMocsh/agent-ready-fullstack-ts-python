@@ -917,7 +917,8 @@ need_only f docs/adr/template \
     0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md \
     0022-the-connections-of-every-process-fit-inside-max-connections.md \
     0023-the-server-admits-each-actor-s-requests-within-a-bound.md \
-    0024-every-read-has-an-outside-cause.md
+    0024-every-read-has-an-outside-cause.md \
+    0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1586,6 +1587,27 @@ ls frontend/dist/assets/index-*.js >/dev/null
 ls frontend/dist/assets/index-*.css >/dev/null
 ! bundles_msw || fail "msw leaked into the production bundle. In production, the worker would answer the user's requests."
 need_absent frontend/dist/mockServiceWorker.js "public/ is copied into every build, and only vite.config.ts deletes this file again"
+need frontend/dist/build.json "A tab reads it to learn that a new build is deployed. Without it, a tab runs its old build until a chunk goes missing."
+python3 - frontend/dist <<'PY' || fail "build.json does not name the entry that index.html loads. A tab compares the two, so each tab would reload into a build it already runs, or never reload."
+import json, re, sys
+from pathlib import Path
+dist = Path(sys.argv[1])
+named = json.loads((dist / "build.json").read_text())["entry"]
+loaded = re.findall(r'<script type="module"[^>]* src="/?([^"]+)"', (dist / "index.html").read_text())
+sys.exit(0 if loaded == [named] else f"build.json names {named!r}, index.html loads {loaded!r}")
+PY
+cp frontend/src/index.css "$WORK/index.css"
+printf '\n:root {\n  --build-identity-probe: 1px;\n}\n' >>frontend/src/index.css
+restyled=0
+pnpm -C frontend exec vite build --outDir "$WORK/restyled" --emptyOutDir >"$WORK/step.log" 2>&1 || restyled=$?
+cp "$WORK/index.css" frontend/src/index.css
+[ "$restyled" -eq 0 ] || { cat "$WORK/step.log" >&2; fail "vite build failed on a change to one style token"; }
+python3 - frontend/dist "$WORK/restyled" <<'PY' || fail "a change to styles alone left build.json naming the same entry. A deploy that changes only styles would reload no tab."
+import json, sys
+from pathlib import Path
+before, after = (json.loads((Path(one) / "build.json").read_text())["entry"] for one in sys.argv[1:])
+sys.exit(0 if before != after else f"both builds name {before!r}")
+PY
 
 echo "==> the secret scan passes the project and refuses a planted token"
 run "secret scan" sh devtools/secrets.sh

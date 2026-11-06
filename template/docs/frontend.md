@@ -16,6 +16,7 @@ frontend/
   src/query-client.ts the query client
   src/client-events.ts reports a failure the browser saw to the backend's log
   src/missing-chunk.ts reloads the tab once when a deploy removed a chunk it asks for
+  src/build.ts        reloads the tab at the next navigation once a new build is deployed
   tests/              mirrors src/
   tests/read-budgets.ts the reads each screen's first draw may send -- yours
   tests/signed-in.ts  how the read-budget test signs in -- yours
@@ -121,6 +122,13 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   because nothing turns it on. `public/` is copied into every build whatever the mode, so the
   `strip-mock-worker` plugin in `vite.config.ts` covers what no mode can; without it a production
   deploy ships `mockServiceWorker.js` to its own origin.
+- **A tab runs the deployed build.** The `name-the-build` plugin in `vite.config.ts` writes
+  `build.json` into each build. `src/build.ts` reads it on a focus and when a navigation to
+  another path starts, and reloads the tab at the next such navigation when it names another
+  build. The development loop does not read it. Do not reload in the middle of what the person
+  does: a navigation is the safe moment.
+  [adr/template/0025](adr/template/0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md)
+  says why.
 - **Record a failure through the function `startClientEvents` returns**, never through
   `console`, which biome refuses in `src/`. A client event names a kind, a route template and an
   error class, and never carries a message: an error's message is where a user's input ends up.

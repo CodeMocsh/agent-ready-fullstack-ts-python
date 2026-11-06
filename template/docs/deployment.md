@@ -8,8 +8,19 @@ none of what follows is checked by anything.
 `make build` produces `frontend/dist/`, a static bundle. Serve it from any static host with an
 SPA fallback. If it is served from a subpath, pass `--base=/that/path/` to `vite build`.
 Give every file under `assets/` the header `cache-control: public, max-age=31536000, immutable`.
-Give every other file, `index.html` included, the header `cache-control: no-cache`. Then no
-browser uses an `index.html` that names assets a deploy removed. `app.serve` sets both.
+Give every other file, `index.html` and `build.json` included, the header
+`cache-control: no-cache`. Then no browser uses an `index.html` that names assets a deploy
+removed. `app.serve` sets both.
+
+`build.json` names the deployed build. An open tab reads it on a focus and when a navigation
+to another path starts. When it names a build that the tab does not run, the tab reloads at the next navigation
+to another path.
+A host that caches it hides each new build from each open tab, and the tab keeps its old code
+until a chunk goes missing. Do not serve the shell in its place: a tab reports that as a client
+event of the kind `build`, once for each route. A host that still serves an old `index.html`
+after a deploy makes each tab that reloaded report the same kind.
+[adr/template/0025](adr/template/0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md)
+says why.
 
 The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
 

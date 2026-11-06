@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AppProviders } from "@/app-providers";
+import { BUILD_FILE, followTheDeployedBuild } from "@/build";
 import { startClientEvents } from "@/client-events";
 import { reloadOnceOnMissingChunk } from "@/missing-chunk";
 import { createQueryClient, followNavigations } from "@/query-client";
@@ -32,6 +33,18 @@ reloadOnceOnMissingChunk(window, () => sessionStorage, import.meta.url);
 
 const queryClient = createQueryClient(record);
 followNavigations(router, queryClient);
+if (!import.meta.env.DEV) {
+  followTheDeployedBuild({
+    router,
+    tab: window,
+    session: () => sessionStorage,
+    record,
+    build: {
+      running: import.meta.url,
+      file: new URL(`${import.meta.env.BASE_URL}${BUILD_FILE}`, window.location.href),
+    },
+  });
+}
 
 await enableMocking();
 
