@@ -1,15 +1,19 @@
-"""What the environment turns telemetry and the bounds on Postgres into, and every configuration
-it refuses to start on."""
+"""What the environment turns telemetry, the bounds on Postgres and the connection draws into, and
+every configuration it refuses to start on."""
 
 import pytest
 
+from app import connection_budget
 from app.deployment import (
     ACQUIRE_TIMEOUT_ENV,
     DATABASE_URL_ENV,
+    ENVIRONMENT_ENV,
     HEADERS_ENV,
     IDLE_IN_TRANSACTION_TIMEOUT_ENV,
+    INSTANCES_ENV,
     NOT_READ,
     OTLP_ENDPOINT_ENV,
+    PRODUCTION,
     PROTOCOL_ENV,
     RESOURCE_ATTRIBUTES_ENV,
     SAMPLING_RATIO_ENV,
@@ -19,13 +23,16 @@ from app.deployment import (
     TRUST_INBOUND_CONTEXT_ENV,
 )
 from app.migrate import OWNER_URL_ENV
+from app.store.budget import Draws
 from app.store.pg import TIMEOUTS, Timeouts
 from app.wiring import (
+    InstancesMisconfigured,
     OwnerCredentialVisible,
     TelemetryMisconfigured,
     TelemetrySettings,
     TimeoutsMisconfigured,
     build,
+    build_draws,
     build_service_version,
     build_telemetry,
     build_timeouts,
@@ -216,4 +223,44 @@ def test_a_process_that_can_see_the_owner_credential_refuses_to_start(
     monkeypatch.setenv(OWNER_URL_ENV, "postgres://app_owner@db.internal:5432/app")
 
     with pytest.raises(OwnerCredentialVisible, match=OWNER_URL_ENV):
+        build()
+
+
+def test_the_development_loop_is_one_process_holding_what_the_project_declares() -> None:
+    assert build_draws() == Draws(
+        instances=1,
+        in_process=connection_budget.IN_PROCESS,
+        outside=connection_budget.OUTSIDE,
+    )
+
+
+def test_the_instances_a_deployment_sets_are_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(INSTANCES_ENV, " 12 ")
+
+    assert build_draws().instances == 12
+
+
+def test_production_without_the_instances_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(ENVIRONMENT_ENV, PRODUCTION)
+
+    with pytest.raises(InstancesMisconfigured, match=f"{INSTANCES_ENV} is unset"):
+        build_draws()
+
+
+@pytest.mark.parametrize("said", ["0", "-2", "1.5", "six", "2x"])
+def test_instances_that_are_not_a_number_of_processes_refuse_to_start(
+    monkeypatch: pytest.MonkeyPatch, said: str
+) -> None:
+    monkeypatch.setenv(INSTANCES_ENV, said)
+
+    with pytest.raises(InstancesMisconfigured, match=INSTANCES_ENV):
+        build_draws()
+
+
+def test_instances_without_a_database_refuse_to_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(INSTANCES_ENV, "2")
+
+    with pytest.raises(InstancesMisconfigured, match=DATABASE_URL_ENV):
         build()

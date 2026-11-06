@@ -275,6 +275,25 @@ What to expect, because it is not all free:
   - In `docs/backend.md`, take the template's bullets that start "Start a wait past the budget",
     "Share work", "The key names everything", "Shared work reports" and "Each task has one of
     four homes".
+- **From 0.56.0 each pool is sized from the connection budget.**
+  - Set `DATABASE_INSTANCES` in each deployment, or production refuses to start. It is the most
+    processes that hold connections at once. Count the revision that drains during a rollout:
+    on Cloud Run that is twice the most instances when a rollout overlaps them all.
+  - In `app/connection_budget.py`, name each pool or connection that one process opens beside the
+    template's pool in `IN_PROCESS`, and each holder that is not one of the processes in
+    `OUTSIDE`. Size each of your own pools from its entry there.
+  - When one of your own pools gets no connection, raise `DatabaseBusy` from `app.store`, with a
+    `retry_after`. The request then answers the same `503`.
+  - A loop or a worker that opens a connection meets `ConnectionRefused` and `AcquireTimedOut`
+    too. Let it wait and try again. A loop that ends its process on one turns a full server into
+    a restart.
+  - A request that gets no connection answers `503` with `Retry-After`, and records no request
+    event. Every route under `app/routes/tenant/` declares it, so run `make openapi`.
+  - `PostgresDatabase` takes `draws=` and no `max_size=`. A test that wants a pool of one passes
+    `Draws(instances=1, in_process={}, outside={}, pool=1)`.
+  - `app/connection_budget.py` and `app/store/budget.py` are two more files in the startup count.
+    Record your count again, with the command in the 0.53.0 step.
+  [adr/template/0022](adr/template/0022-the-connections-of-every-process-fit-inside-max-connections.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

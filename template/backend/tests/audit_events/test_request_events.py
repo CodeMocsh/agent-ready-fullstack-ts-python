@@ -23,8 +23,9 @@ from app.audit_events import (
 )
 from app.identity.shared import Actor, Principal, Unauthenticated
 from app.main import ROUTERS
+from app.refusal import NoConnectionFree
 from app.request_events import RecordsRequests
-from app.store import Database
+from app.store import Database, DatabaseBusy
 from tests.routed import assembled
 from tests.widgets import router as widgets_router
 
@@ -60,6 +61,10 @@ def an_app(database: Database) -> FastAPI:
     @extra.get("/raises")
     async def raises() -> None:
         raise RuntimeError("the handler failed")
+
+    @extra.get("/busy")
+    async def busy() -> None:
+        raise DatabaseBusy("no connection came", retry_after=3)
 
     @extra.get("/acting")
     async def acting() -> Actor | None:
@@ -121,6 +126,23 @@ def test_a_request_with_no_principal_records_nothing(database: Database) -> None
     assert recorded == []
 
 
+def test_a_request_that_got_no_connection_is_refused_with_a_time_to_ask_again(
+    database: Database,
+) -> None:
+    """Its request event would wait for a connection too, and find none."""
+    app = an_app(database)
+    with TestClient(app) as client:
+        answered = client.get("/busy", headers={TENANT_HEADER: "tenant-a"})
+        recorded = events_in(client, app, "tenant-a")
+
+    assert (answered.status_code, answered.headers["retry-after"], answered.json()) == (
+        503,
+        "3",
+        {"detail": NoConnectionFree.description},
+    )
+    assert recorded == []
+
+
 def test_a_request_acts_as_its_principal(database: Database) -> None:
     with TestClient(an_app(database)) as client:
         answered = client.get("/acting", headers={TENANT_HEADER: "tenant-a"})
@@ -179,8 +201,11 @@ async def test_a_cancelled_request_records_nothing() -> None:
 
 
 class RefusingAuditEvents:
+    def __init__(self, refusal: Exception) -> None:
+        self._refusal: Exception = refusal
+
     async def record(self, _event: RequestEvent) -> None:
-        raise ConnectionError("the audit events are out of reach")
+        raise self._refusal
 
     async def list(self) -> list[RecordedAuditEvent]:
         return []
@@ -189,14 +214,15 @@ class RefusingAuditEvents:
 class RefusingDatabase:
     """The substrate the app serves from, except that no request event can be recorded."""
 
-    def __init__(self, database: Any) -> None:
+    def __init__(self, database: Any, refusal: Exception) -> None:
         self._database: Any = database
+        self._refusal: Exception = refusal
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._database, name)
 
     def audit_events(self, _tenant_id: str) -> RefusingAuditEvents:
-        return RefusingAuditEvents()
+        return RefusingAuditEvents(self._refusal)
 
 
 def test_a_request_whose_event_cannot_be_recorded_fails_and_sends_nothing_it_read(
@@ -204,8 +230,28 @@ def test_a_request_whose_event_cannot_be_recorded_fails_and_sends_nothing_it_rea
 ) -> None:
     app = an_app(database)
     with TestClient(app, raise_server_exceptions=False) as client:
-        app.state.database = RefusingDatabase(app.state.database)
+        app.state.database = RefusingDatabase(
+            app.state.database, ConnectionError("the audit events are out of reach")
+        )
         answered = client.get("/acting", headers={TENANT_HEADER: "tenant-a"})
 
     assert answered.status_code == 500
     assert PERSON.subject not in answered.text
+
+
+@pytest.mark.parametrize("path", ["/acting", "/raises"], ids=["answered", "failed"])
+def test_a_request_whose_event_got_no_connection_is_refused_with_a_time_to_ask_again(
+    database: Database, path: str
+) -> None:
+    app = an_app(database)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        app.state.database = RefusingDatabase(
+            app.state.database, DatabaseBusy("no connection came", retry_after=4)
+        )
+        answered = client.get(path, headers={TENANT_HEADER: "tenant-a"})
+
+    assert (answered.status_code, answered.headers["retry-after"], answered.json()) == (
+        503,
+        "4",
+        {"detail": NoConnectionFree.description},
+    )

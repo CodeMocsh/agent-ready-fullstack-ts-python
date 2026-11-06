@@ -13,6 +13,7 @@ keeps out of the spec.
 from typing import Any, ClassVar, final
 
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from app.models import ErrorBody
 
@@ -40,6 +41,25 @@ class NoSuchAsset(ApiError):
 
     status = 404
     description = "No such bundled asset"
+
+
+@final
+class NoConnectionFree(ApiError):
+    """A request that got no database connection in time. `app/main.py` answers it with a
+    `Retry-After`, and every tenant route declares it. `docs/adr/template/0022`."""
+
+    status = 503
+    description = "No database connection is free. Ask again after the seconds in Retry-After"
+
+
+def no_connection_free(retry_after: int) -> JSONResponse:
+    """The `503` that `NoConnectionFree` declares, asking the client to wait `retry_after`
+    seconds."""
+    return JSONResponse(
+        status_code=NoConnectionFree.status,
+        content=ErrorBody(detail=NoConnectionFree.description).model_dump(),
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 def _joined(descriptions: list[str]) -> str:

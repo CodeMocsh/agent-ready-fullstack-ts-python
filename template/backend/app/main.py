@@ -5,11 +5,13 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import Lifespan
 
-from app import log, request_events, waits
+from app import audit_events, log, request_events, waits
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
+from app.refusal import no_connection_free
 from app.routes import public, tenant
+from app.store import DatabaseBusy
 from app.wiring import TelemetrySettings, build_service_version, build_telemetry
 
 if TYPE_CHECKING:
@@ -29,8 +31,8 @@ def create_app() -> FastAPI:
 
 
 def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
-    """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant,
-    the mark `app.waits.waiting` reads, the request event, the request line and the telemetry
+    """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant
+    and of a request that got no database connection, the mark `app.waits.waiting` reads, the request event, the request line and the telemetry
     around each route. `create_app` and `tests.routed.routed` build with it. Configures the
     logging of the whole process."""
     log.configure(build_service_version())
@@ -44,6 +46,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     for router in routers:
         app.include_router(router)
     app.add_exception_handler(Unauthenticated, _refuse)
+    app.add_exception_handler(DatabaseBusy, _busy)
     waits.instrument(app)
     request_events.instrument(app)
     log.instrument(app)
@@ -76,6 +79,16 @@ async def _refuse(_request: Request, refusal: Exception) -> JSONResponse:
         content=ErrorBody(detail=str(refusal)).model_dump(),
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def _busy(request: Request, busy: Exception) -> JSONResponse:
+    """A request that got no database connection: `503`, with the `Retry-After` the substrate
+    gave. It records no request event. `docs/adr/template/0022`."""
+    if not isinstance(busy, DatabaseBusy):
+        raise TypeError(f"{type(busy).__name__} reached the handler of DatabaseBusy") from busy
+    log.database_busy(type(busy).__name__)
+    audit_events.unrecorded(request)
+    return no_connection_free(busy.retry_after)
 
 
 @cache

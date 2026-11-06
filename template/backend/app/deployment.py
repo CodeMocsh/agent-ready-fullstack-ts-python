@@ -69,6 +69,11 @@ TIMEOUTS_ENV: Final = (STATEMENT_TIMEOUT_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, A
 """Every variable `wiring.build_timeouts` reads, each in seconds, and each meaningful only beside
 `DATABASE_URL`."""
 
+INSTANCES_ENV: Final = "DATABASE_INSTANCES"
+"""The most processes that hold connections to the database at once, the processes of a revision
+that drains during a rollout included. Meaningful only beside `DATABASE_URL`, and required there in
+production. `docs/adr/template/0022`."""
+
 ENVIRONMENT_ENV: Final = "APP_ENV"
 DEVELOPMENT: Final = "development"
 PRODUCTION: Final = "production"

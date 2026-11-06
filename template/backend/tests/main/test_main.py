@@ -4,6 +4,8 @@ assembles what the app serves."""
 from fastapi import FastAPI
 
 from app import main
+from app.refusal import NoConnectionFree
+from app.routes import public
 from app.store import Database
 from tests.routed import routed
 from tests.routes.walk import routes_of
@@ -39,4 +41,20 @@ def test_a_route_test_assembles_what_the_app_serves(database: Database) -> None:
         "create_app serves something that routed(*ROUTERS) does not, so a route test answers "
         "differently from the app. Put each requirement's router in ROUTERS, and everything "
         "around a route in assemble."
+    )
+
+
+def test_every_route_that_requires_a_tenant_declares_that_no_connection_may_be_free() -> None:
+    public_paths = {getattr(route, "path", None) for route in public.router.routes}
+    undeclared = [
+        f"{method.upper()} {path}"
+        for path, operations in main.create_app().openapi()["paths"].items()
+        if path not in public_paths
+        for method, operation in operations.items()
+        if str(NoConnectionFree.status) not in operation["responses"]
+    ]
+
+    assert undeclared == [], (
+        f"{undeclared} do not declare {NoConnectionFree.status}. Include the route in "
+        f"app/routes/tenant/, whose router declares NoConnectionFree."
     )

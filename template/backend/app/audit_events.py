@@ -125,6 +125,14 @@ def acting_as(actor: Actor) -> Generator[Actor]:
         _ACTING.reset(token)
 
 
+UNRECORDED: Final = "unrecorded"
+
+
+def unrecorded(request: Request) -> None:
+    """Record no request event for `request`, whatever it answers."""
+    setattr(request.state, UNRECORDED, True)
+
+
 def serve(request: Request, principal: Principal) -> Principal:
     """Make `principal` who this request is: named on its `request completed` line, the actor of
     every row it writes, and the actor of its request event.

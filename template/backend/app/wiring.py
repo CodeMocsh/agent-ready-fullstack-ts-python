@@ -21,12 +21,14 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import unquote
 
+from app import connection_budget
 from app.deployment import (
     ACKNOWLEDGED_ENV,
     ACQUIRE_TIMEOUT_ENV,
     BUNDLE_ENV,
     DATABASE_URL_ENV,
     IDLE_IN_TRANSACTION_TIMEOUT_ENV,
+    INSTANCES_ENV,
     NEEDS_THE_ENDPOINT,
     NOT_READ,
     OTLP_ENDPOINT_ENV,
@@ -39,11 +41,13 @@ from app.deployment import (
     STATEMENT_TIMEOUT_ENV,
     TIMEOUTS_ENV,
     TRUST_INBOUND_CONTEXT_ENV,
+    in_development,
     stated,
 )
 from app.identity.shared import SENTINEL_TENANT
 from app.migrate import OWNER_URL_ENV
 from app.store import Database
+from app.store.budget import Draws
 from app.store.conn import SCHEMA_ENV
 from app.store.memory import MemoryDatabase
 from app.store.pg import SMALLEST_BOUND, TIMEOUTS, PostgresDatabase, Timeouts
@@ -87,6 +91,11 @@ class TelemetryMisconfigured(RuntimeError):
 class TimeoutsMisconfigured(RuntimeError):
     """A bound on a wait on Postgres is set to something this process will not run with, so it
     refuses to start."""
+
+
+class InstancesMisconfigured(RuntimeError):
+    """`DATABASE_INSTANCES` is missing in production, or is not a number of processes, so the
+    process refuses to start."""
 
 
 class OwnerCredentialVisible(RuntimeError):
@@ -255,6 +264,34 @@ def _seconds(variable: str, shipped: float) -> float:
     return seconds
 
 
+def build_draws() -> Draws:
+    """Everything that holds connections to the database: `DATABASE_INSTANCES` processes, each
+    holding `connection_budget.IN_PROCESS` beside the pool, and `connection_budget.OUTSIDE`.
+
+    The development loop is one process, so there an unset `DATABASE_INSTANCES` is one. Raises
+    `InstancesMisconfigured` when production leaves it unset, and on a value that is not a
+    whole number of at least one.
+    """
+    said = stated(INSTANCES_ENV)
+    if said == "" and not in_development():
+        raise InstancesMisconfigured(
+            f"{INSTANCES_ENV} is unset, and production sizes each pool from it. Set it to the "
+            f"most processes that hold connections at once, the processes of a revision that "
+            f"drains during a rollout included: twice the most instances, when a rollout "
+            f"overlaps them all."
+        )
+    if said != "" and not (said.isdecimal() and int(said) >= 1):
+        raise InstancesMisconfigured(
+            f"{INSTANCES_ENV}={said!r} is not a number of processes. Give a whole number of at "
+            f"least 1."
+        )
+    return Draws(
+        instances=1 if said == "" else int(said),
+        in_process=connection_budget.IN_PROCESS,
+        outside=connection_budget.OUTSIDE,
+    )
+
+
 def build() -> Database:
     """The substrate this deployment gets, from the environment."""
     if os.environ.get(OWNER_URL_ENV):
@@ -272,5 +309,15 @@ def build() -> Database:
                 f"{', '.join(said)} set and {DATABASE_URL_ENV} unset: the in-memory substrate "
                 f"has no wait to bound. Unset it, or set {DATABASE_URL_ENV}."
             )
+        if stated(INSTANCES_ENV):
+            raise InstancesMisconfigured(
+                f"{INSTANCES_ENV} set and {DATABASE_URL_ENV} unset: the in-memory substrate "
+                f"holds no connection. Unset it, or set {DATABASE_URL_ENV}."
+            )
         return MemoryDatabase(seed_tenant=SENTINEL_TENANT)
-    return PostgresDatabase(dsn=dsn, schema=os.environ.get(SCHEMA_ENV), timeouts=build_timeouts())
+    return PostgresDatabase(
+        dsn=dsn,
+        schema=os.environ.get(SCHEMA_ENV),
+        draws=build_draws(),
+        timeouts=build_timeouts(),
+    )

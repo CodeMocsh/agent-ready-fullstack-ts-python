@@ -212,7 +212,9 @@ Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets eac
 - **A request that waits for a connection** raises `AcquireTimedOut`: every connection stayed
   in use, or a new one did not open in time.
 
-Each one answers `500` and writes its traceback to the log. Your platform's request timeout does
+The first three answer `500` and write a traceback to the log. A request that gets no connection
+answers `503` with `Retry-After`, and writes the line `database busy`; the
+[connection budget](#the-connection-budget) says why. Your platform's request timeout does
 not replace them. It closes the client's connection and leaves the handler running with a
 connection in hand, so a database that stops answering fills the pool.
 
@@ -234,6 +236,46 @@ every call, so give each long call its own `timeout=` in asyncpg. In its transac
 transaction stays open across long work, such as a transaction around an advisory lock. The
 process also refuses to start on a value that is not a number of seconds of at least a
 millisecond, and on any of them set without `DATABASE_URL`.
+
+## The connection budget
+
+Postgres refuses a connection past `max_connections`. Every process of every instance holds
+connections, so instances added under load can take the server past it. Then a process that
+cannot open a connection fails in ways it did not plan for.
+
+So each process gets an equal share, and the template's pool takes what remains of it:
+
+```
+share = (max_connections - reserved - OUTSIDE) / DATABASE_INSTANCES
+pool  = share - IN_PROCESS
+```
+
+- `reserved` is what the server keeps for other roles: `superuser_reserved_connections`, and
+  `reserved_connections` from Postgres 16. The pool reads both, and `max_connections`, from the
+  server before it opens.
+- `DATABASE_INSTANCES` is the most processes that hold connections at once. It is not your
+  platform's most instances. During a rollout, the old revision serves its open requests while
+  the new one starts, so a rollout that overlaps every instance doubles it. Cloud Run with
+  `--max-instances=6`, one process in each instance, therefore sets `DATABASE_INSTANCES=12`.
+  Nothing can check this number against your platform. Production refuses to start without it, and the development loop is
+  one process.
+- `IN_PROCESS` in `app/connection_budget.py` names each pool or connection one process holds
+  beside the template's pool, such as a second pool or a `LISTEN` connection. Size each from its
+  entry there.
+- `OUTSIDE` names each holder that is not one of the processes: the release step, a worker that
+  runs as its own service, an operator's session.
+
+The line `connections budgeted` names each number. A pool that would get no connection refuses
+to start, and the message names what to lower.
+
+When the pool has no free connection within `DATABASE_ACQUIRE_TIMEOUT`, or the server refuses a
+new one, that one request answers `503` with `Retry-After`. That includes the connection that
+records its request event. Every route under
+`app/routes/tenant/` declares it. The request records no
+[request event](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md),
+because recording it would wait for a connection too.
+[adr/template/0022](adr/template/0022-the-connections-of-every-process-fit-inside-max-connections.md)
+says why.
 
 ## Work beside the requests
 

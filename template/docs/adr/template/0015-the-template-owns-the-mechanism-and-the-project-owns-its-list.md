@@ -27,6 +27,7 @@ and the bullet on `identity_stub` below says why.
 |---|---|
 | `app/errors.py`: its refusals | `app/refusal.py`: `ApiError`, `responses` |
 | `app/environment.py`: what its production refuses | `app/deployment.py`: the variables, `refuse_in_production` |
+| `app/connection_budget.py`: what it holds open to Postgres beside the template's pool | `app/store/budget.py`: `Draws`, `budgeted` |
 | `app/request_line.py`: its fields on `request completed`, beyond the tenant and the actor | `app/log.py`: `name_on_request_line`, `request_completed` |
 | `tests/tiers.py`: its tiers | `tests/tier.py`: what a tier is |
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |
