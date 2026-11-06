@@ -28,6 +28,7 @@ in-memory substrate and every hermetic test run without one. Reach for it as
 is the only module that does.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -101,9 +102,14 @@ class Connections:
 
 @runtime_checkable
 class Pooled(Protocol):
-    """A substrate that holds a pool, and so has connections to count."""
+    """A substrate that holds a pool, and so has connections to count and waits to time."""
 
     def connections(self) -> Connections: ...
+
+    def time_waits(self, record: Callable[[float], None]) -> None:
+        """From now on, hand `record` how long each wait for a connection took, in seconds: a
+        wait that ended in a connection, or in no connection within the bound."""
+        ...
 
 
 @runtime_checkable
