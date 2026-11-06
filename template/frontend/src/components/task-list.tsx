@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { type Task, tasksApi } from "@/api/tasks";
@@ -21,29 +21,26 @@ const SERVED_BY =
     : "Live mode — the backend is answering.";
 
 export function TaskList() {
-  const queryClient = useQueryClient();
   const [title, setTitle] = useState("");
 
   const tasks = useQuery({ queryKey: TASKS_KEY, queryFn: tasksApi.list });
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+  const changesTasks = { invalidates: [TASKS_KEY] };
 
   const create = useMutation({
     mutationFn: tasksApi.create,
-    onSuccess: async () => {
-      setTitle("");
-      await invalidate();
-    },
+    meta: changesTasks,
+    onSuccess: () => setTitle(""),
   });
 
   const toggle = useMutation({
     mutationFn: ({ id, done }: Pick<Task, "id" | "done">) => tasksApi.update(id, { done }),
-    onSuccess: invalidate,
+    meta: changesTasks,
   });
 
   const remove = useMutation({
     mutationFn: tasksApi.remove,
-    onSuccess: invalidate,
+    meta: changesTasks,
   });
 
   const submit = (event: FormEvent<HTMLFormElement>) => {

@@ -149,6 +149,24 @@ The most GET requests to the API that a screen's first draw may send, and again 
 `tests/read-budgets.ts` holds one for each screen.
 _Avoid_: request limit, quota.
 
+**Outside cause**:
+What may start a read in the browser: a navigation, a focus, a reconnect, a person's input, a
+person's mutation, a server event or a backstop. A navigation, a focus, a reconnect and an input
+each permit one read of each query key. A person's mutation and a server event permit one read of
+the keys they name. A backstop permits a read at its spacing. `src/query-client.ts` checks each
+read against them.
+_Avoid_: trigger, reason.
+
+**Cycle**:
+A query key that reads again with no outside cause since its last read: the browser answering
+its own cache. `src/query-client.ts` stops it with `CycleStopped`.
+_Avoid_: loop, storm, refetch loop.
+
+**Server event**:
+A message from the server that says which data changed. A stream under `src/streams/` passes its
+query keys to `invalidateForServerEvent`.
+_Avoid_: push, notification.
+
 **Request budget**:
 How long a request may take: `REQUEST_BUDGET_SECONDS` in `app/waits.py`. The deployment's
 slow-request alert uses it as its threshold. Each wait in a request on a system outside the

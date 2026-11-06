@@ -40,7 +40,8 @@ and passed when the machine was idle.
   `refetchOnMount` throws, and names `followNavigations`. A client that already follows a router
   refuses a second one.
 - **The rest is unchanged.** The `staleTime` stays 0. A focus reads again every mounted query.
-  A write invalidates the keys it made stale. A `refetchInterval` is still a backstop.
+  A mutation invalidates the keys it made stale. A `refetchInterval` is still a backstop.
+  [0024](0024-every-read-has-an-outside-cause.md) says what may start a read.
 - **The time of a read is when its answer arrives.** A read that starts before a navigation and
   ends after it is current. A read in the same millisecond as the navigation is current too:
   `Date.now()` has a resolution of 1 ms, and a mocked answer can arrive in that millisecond.
@@ -67,7 +68,7 @@ and passed when the machine was idle.
 - `followNavigations` needs a router that a `RouterProvider` renders. Without one, some versions of
   the router never close the first load, and no navigation after it records the time.
 - A `useQuery` call that turns `enabled`, or changes its key, reads again in the same draw.
-- `renderWithQuery` in `tests/render.tsx` creates its own `QueryClient`, so a component test
-  runs TanStack's default.
+- `renderWithQuery` in `tests/render.tsx` builds its client with `createQueryClient`, and
+  follows a router that it never renders. No navigation records the time there.
 - A route that preloads its data reads it again when the person navigates there, because the
   preload's answer arrived before that navigation.

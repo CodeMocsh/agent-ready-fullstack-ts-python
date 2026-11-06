@@ -65,8 +65,20 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   backend at the same moment. An instance serves the ones it takes in turn.
   [deployment.md](deployment.md#a-burst-of-requests) says what that costs on a host that adds
   instances.
-- **This project has no stream yet.** A write invalidates the keys it made stale, in the tab that
-  wrote it. Another tab sees the change when it mounts the screen or regains focus. A screen that
+- **A read has an outside cause.** `src/query-client.ts` checks each read against the outside
+  causes. A navigation, a focus, a reconnect and a person's input each permit one read of each
+  key. A person's mutation and a server event permit one read of the keys they name. A key that
+  reads again with no cause fails with `CycleStopped`, which names the key. The screen draws it, a
+  client event reports it, and nothing retries it. `TaskList` names its key in each mutation's
+  `meta.invalidates`, and the mutation cache invalidates it. A stream under `src/streams/` calls
+  `invalidateForServerEvent`. `pnpm conformance` refuses an invalidation anywhere else, and a
+  mutation that an effect starts.
+  [adr/template/0024](adr/template/0024-every-read-has-an-outside-cause.md) says why.
+- **A refusal that names a wait holds every request.** `request` in `src/api/client.ts` reads
+  `Retry-After` and refuses every request to the API itself with `Held` until the wait ends. A
+  client event still goes out. Only a read that never reached the server is retried.
+- **This project has no stream yet.** A mutation invalidates the keys it made stale, in the tab
+  that wrote it. Another tab sees the change when it mounts the screen or regains focus. A screen that
   must show another writer's change sooner needs a stream. A `refetchInterval` under 30 s is not a
   substitute.
 - **A backstop is a timed read again.** It catches what a stream did not say. It is never the

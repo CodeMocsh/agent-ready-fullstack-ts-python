@@ -313,6 +313,34 @@ What to expect, because it is not all free:
   - `app/admission.py` and `app/admission_limits.py` are two more files in the startup count.
     Record your count again, with the command in the 0.53.0 step.
   [adr/template/0023](adr/template/0023-the-server-admits-each-actor-s-requests-within-a-bound.md) says why.
+- **From 0.58.0 a read has an outside cause.** `pnpm conformance` refuses `invalidateQueries`,
+  `refetchQueries` and `resetQueries` outside `src/query-client.ts`, `invalidateForServerEvent`
+  outside `src/streams/`, and `mutate` or `mutateAsync` in a `useEffect`. It names each call.
+  - A mutation that invalidates names the keys in `meta: { invalidates: [key] }`, and drops the
+    call from its `onSuccess` or `onSettled`. The mutation cache invalidates them when it
+    settles, and the mutation stays pending until the reads end, as an awaited call did.
+  - A stream that invalidates moves under `src/streams/`, and calls
+    `invalidateForServerEvent(queryClient, [key])`.
+  - A mutation that an effect starts moves to the person's action, or to a listener the effect
+    registers for that action. A mutation that starts after a read answered permits no read, so
+    its invalidation stops with `CycleStopped`. That includes a write awaited after another write,
+    and a write in a route's loader after it reads: send the writes in one `mutationFn`, or
+    start them with no `await` between.
+  - An effect that calls `.click()`, `requestSubmit()` or `dispatchEvent()` fails
+    `pnpm conformance`. Do the work the input would start, from a real outside cause.
+  - Any other invalidation reads in answer to the client's own cache. Remove it. If a screen
+    then shows old data, find the outside cause it misses: a mutation, a server event or a
+    backstop.
+  - Run `make test`. A read with no outside cause fails `tests/first-draw.test.tsx` or a component
+    test with `CycleStopped`, which names the key.
+  - `ApiError` takes a fourth argument, `retryAfterSeconds`. Pass `null` where you build one.
+  - A query retries only `Unreached`: a request that never reached the server. A test that waited
+    for a retry of a `5xx` now sees the error at once.
+  - A `429` or `503` with `Retry-After` holds every request to the API until the wait ends. Each
+    one fails with `Held`, and sends nothing. Any other refusal holds nothing.
+  - If you merged `frontend/src/query-client.ts` or `frontend/tests/render.tsx` by hand, take the
+    template's copy. `renderWithQuery` now builds the app's client.
+  [adr/template/0024](adr/template/0024-every-read-has-an-outside-cause.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
