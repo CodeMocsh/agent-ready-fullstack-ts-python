@@ -74,6 +74,22 @@ INSTANCES_ENV: Final = "DATABASE_INSTANCES"
 that drains during a rollout included. Meaningful only beside `DATABASE_URL`, and required there in
 production. `docs/adr/template/0022`."""
 
+ADMISSION_IN_FLIGHT_ENV: Final = "ADMISSION_IN_FLIGHT"
+ADMISSION_PER_SECOND_ENV: Final = "ADMISSION_PER_SECOND"
+ADMISSION_BURST_ENV: Final = "ADMISSION_BURST"
+ADMISSION_STREAMS_ENV: Final = "ADMISSION_STREAMS"
+ADMISSION_MODE_ENV: Final = "ADMISSION_MODE"
+"""`enforce`, the default, refuses a request over a bound. `evaluate` reports it and admits it."""
+ADMISSION_ENV: Final = (
+    ADMISSION_IN_FLIGHT_ENV,
+    ADMISSION_PER_SECOND_ENV,
+    ADMISSION_BURST_ENV,
+    ADMISSION_STREAMS_ENV,
+    ADMISSION_MODE_ENV,
+)
+"""Every variable `wiring.build_admission` reads. Each number replaces the field of
+`app/admission_limits.py` it names. `docs/adr/template/0023`."""
+
 ENVIRONMENT_ENV: Final = "APP_ENV"
 DEVELOPMENT: Final = "development"
 PRODUCTION: Final = "production"

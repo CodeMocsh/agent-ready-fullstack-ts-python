@@ -11,14 +11,16 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from starlette.types import Message
 
-from app import admission
-from app.admission import Admission, Limits
+from app import admission, log
+from app.admission import Admission, Limits, Policy
 from app.admission_limits import LIMITS
 from app.audit_events import RecordedAuditEvent, RequestEvent
+from app.deployment import ADMISSION_IN_FLIGHT_ENV, ADMISSION_MODE_ENV, ADMISSION_STREAMS_ENV
 from app.deps import admitted
 from app.identity.shared import Actor, Principal
-from app.refusal import TooManyRequests
+from app.refusal import SAID_OF_EACH_BOUND, TooManyRequests
 from app.store import AuditEvents, Database
+from tests.conftest import Logged
 from tests.routed import assembled
 
 WHO: str = "x-test-actor"
@@ -33,6 +35,10 @@ def a_principal(subject: str) -> Principal:
     return Principal(tenant_id=TENANT, actor=an_actor(subject))
 
 
+def enforcing(limits: Limits) -> Policy:
+    return Policy(limits=limits, enforced=True)
+
+
 class Clock:
     def __init__(self) -> None:
         self.now: float = 100.0
@@ -42,7 +48,7 @@ class Clock:
 
 
 def test_an_actor_at_its_requests_in_flight_is_refused_until_one_ends() -> None:
-    places = Admission(Limits(in_flight=2, per_second=100, burst=100, streams=1))
+    places = Admission(enforcing(Limits(in_flight=2, per_second=100, burst=100, streams=1)))
     alice = an_actor("alice")
     first = places.admit(alice)
     _ = places.admit(alice)
@@ -57,7 +63,7 @@ def test_an_actor_at_its_requests_in_flight_is_refused_until_one_ends() -> None:
 
 def test_an_actor_that_spent_its_burst_waits_for_its_rate() -> None:
     clock = Clock()
-    places = Admission(Limits(in_flight=10, per_second=0.5, burst=3, streams=1), clock)
+    places = Admission(enforcing(Limits(in_flight=10, per_second=0.5, burst=3, streams=1)), clock)
     alice = an_actor("alice")
     for _ in range(3):
         places.admit(alice)()
@@ -74,7 +80,7 @@ def test_an_actor_that_spent_its_burst_waits_for_its_rate() -> None:
 
 
 def test_one_actor_over_its_bound_leaves_every_other_actor_admitted() -> None:
-    places = Admission(Limits(in_flight=1, per_second=100, burst=100, streams=1))
+    places = Admission(enforcing(Limits(in_flight=1, per_second=100, burst=100, streams=1)))
     _ = places.admit(an_actor("alice"))
 
     with pytest.raises(TooManyRequests):
@@ -83,7 +89,7 @@ def test_one_actor_over_its_bound_leaves_every_other_actor_admitted() -> None:
 
 
 def test_streams_have_their_own_bound_beside_the_requests() -> None:
-    places = Admission(Limits(in_flight=1, per_second=100, burst=100, streams=1))
+    places = Admission(enforcing(Limits(in_flight=1, per_second=100, burst=100, streams=1)))
     alice = an_actor("alice")
     _ = places.admit(alice)
     stream = places.stream(alice)
@@ -96,7 +102,7 @@ def test_streams_have_their_own_bound_beside_the_requests() -> None:
 
 
 def test_a_place_given_back_twice_is_given_back_once() -> None:
-    places = Admission(Limits(in_flight=1, per_second=100, burst=100, streams=1))
+    places = Admission(enforcing(Limits(in_flight=1, per_second=100, burst=100, streams=1)))
     alice = an_actor("alice")
     release = places.admit(alice)
     release()
@@ -109,7 +115,7 @@ def test_a_place_given_back_twice_is_given_back_once() -> None:
 
 def test_an_actor_that_holds_nothing_and_has_its_burst_back_is_forgotten() -> None:
     clock = Clock()
-    places = Admission(Limits(in_flight=1, per_second=1, burst=2, streams=1), clock)
+    places = Admission(enforcing(Limits(in_flight=1, per_second=1, burst=2, streams=1)), clock)
     places.admit(an_actor("alice"))()
     clock.now += 2.0
 
@@ -346,3 +352,123 @@ async def test_a_request_admitted_twice_holds_one_place(database: Database) -> N
     answered = [await called(app, "/twice", "alice") for _ in range(LIMITS.in_flight + 1)]
 
     assert [status_of(sent) for sent in answered] == [200] * (LIMITS.in_flight + 1)
+
+
+@pytest.mark.parametrize(
+    ("limits", "bound"),
+    [
+        (Limits(in_flight=1, per_second=100, burst=100, streams=1), "in_flight"),
+        (Limits(in_flight=10, per_second=0.5, burst=1, streams=1), "rate"),
+        (Limits(in_flight=10, per_second=100, burst=100, streams=1), "streams"),
+    ],
+    ids=["in-flight", "rate", "streams"],
+)
+def test_a_refusal_names_the_bound_that_refused_it(
+    logged: Logged, limits: Limits, bound: str
+) -> None:
+    log.configure(None)
+    places = Admission(enforcing(limits), Clock())
+    take = places.stream if bound == "streams" else places.admit
+    _ = take(an_actor("alice"))
+
+    with pytest.raises(TooManyRequests) as refused:
+        take(an_actor("alice"))
+
+    assert refused.value.bound == bound
+    assert SAID_OF_EACH_BOUND[refused.value.bound] in refused.value.detail
+    assert [(one["message"], one["bound"]) for one in logged() if "bound" in one] == [
+        ("admission refused", bound)
+    ]
+
+
+def test_a_policy_that_evaluates_reports_what_an_enforced_policy_refuses(logged: Logged) -> None:
+    log.configure(None)
+    limits = Limits(in_flight=10, per_second=1, burst=3, streams=1)
+    clock = Clock()
+    enforced = Admission(enforcing(limits), clock)
+    evaluated = Admission(Policy(limits=limits, enforced=False), clock)
+    refused: list[bool] = []
+    for step in range(30):
+        clock.now += 0.2 if step < 20 else 1.5
+        try:
+            enforced.admit(an_actor("alice"))()
+            refused.append(False)
+        except TooManyRequests:
+            refused.append(True)
+        evaluated.admit(an_actor("alice"))()
+
+    reported = [one for one in logged() if one["message"] == "admission would refuse"]
+
+    assert len(reported) == sum(refused)
+    assert refused[-10:] == [False] * 10
+
+
+def test_a_policy_that_evaluates_admits_over_a_bound_and_names_it(logged: Logged) -> None:
+    log.configure(None)
+    limits = Limits(in_flight=1, per_second=100, burst=100, streams=1)
+    places = Admission(Policy(limits=limits, enforced=False))
+    alice = an_actor("alice")
+    _ = places.admit(alice)
+    _ = places.admit(alice)
+    _ = places.stream(alice)
+    _ = places.stream(alice)
+
+    assert [(one["message"], one["bound"]) for one in logged() if "bound" in one] == [
+        ("admission would refuse", "in_flight"),
+        ("admission would refuse", "streams"),
+    ]
+
+
+def test_a_policy_that_evaluates_counts_places_as_an_enforced_policy_does(logged: Logged) -> None:
+    log.configure(None)
+    limits = Limits(in_flight=2, per_second=100, burst=100, streams=1)
+    enforced = Admission(enforcing(limits))
+    evaluated = Admission(Policy(limits=limits, enforced=False))
+
+    def steps(places: Admission) -> list[str]:
+        alice = an_actor("alice")
+        held: list[Callable[[], None]] = []
+        outcomes: list[str] = []
+        for _ in range(3):
+            try:
+                held.append(places.admit(alice))
+                outcomes.append("admitted")
+            except TooManyRequests:
+                outcomes.append("refused")
+        held[0]()
+        try:
+            held.append(places.admit(alice))
+            outcomes.append("admitted")
+        except TooManyRequests:
+            outcomes.append("refused")
+        return outcomes
+
+    refused = steps(enforced)
+    _ = logged()
+    _ = steps(evaluated)
+    reported = [one["bound"] for one in logged() if one["message"] == "admission would refuse"]
+
+    assert refused == ["admitted", "admitted", "refused", "admitted"]
+    assert reported == ["in_flight"]
+
+
+async def test_a_stream_of_a_request_admitted_outside_the_count_is_outside_it_too(
+    database: Database, monkeypatch: pytest.MonkeyPatch, logged: Logged
+) -> None:
+    monkeypatch.setenv(ADMISSION_MODE_ENV, "evaluate")
+    monkeypatch.setenv(ADMISSION_IN_FLIGHT_ENV, "1")
+    monkeypatch.setenv(ADMISSION_STREAMS_ENV, "1")
+    held = Held()
+    app = an_app(database, held)
+    async with asyncio.TaskGroup() as group:
+        _ = group.create_task(called(app, "/held", "alice"))
+        await held.entered(1)
+        _ = group.create_task(called(app, "/stream", "alice"))
+        await held.entered(2)
+        _ = group.create_task(called(app, "/stream", "alice"))
+        await held.entered(3)
+        held.go.set()
+
+    reported = [one["bound"] for one in logged() if one["message"] == "admission would refuse"]
+
+    assert reported == ["in_flight", "in_flight"]

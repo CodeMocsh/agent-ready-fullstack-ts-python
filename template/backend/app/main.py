@@ -5,14 +5,19 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import Lifespan
 
-from app import admission, admission_limits, audit_events, log, request_events, waits
+from app import admission, audit_events, log, request_events, waits
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
 from app.refusal import no_connection_free
 from app.routes import public, tenant
 from app.store import DatabaseBusy
-from app.wiring import TelemetrySettings, build_service_version, build_telemetry
+from app.wiring import (
+    TelemetrySettings,
+    build_admission,
+    build_service_version,
+    build_telemetry,
+)
 
 if TYPE_CHECKING:
     from app.telemetry import Instruments
@@ -50,7 +55,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     app.add_exception_handler(DatabaseBusy, _busy)
     waits.instrument(app)
     request_events.instrument(app)
-    admission.instrument(app, admission_limits.LIMITS)
+    admission.instrument(app, build_admission())
     log.instrument(app)
     settings = build_telemetry()
     app.state.instruments = None if settings is None else _instrument(app, settings)

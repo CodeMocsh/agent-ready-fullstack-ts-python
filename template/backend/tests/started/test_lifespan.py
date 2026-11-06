@@ -8,7 +8,9 @@ from fastapi import routing
 from fastapi.testclient import TestClient
 
 from app import lifespan, main, waits
+from app.deployment import ADMISSION_MODE_ENV
 from app.waits import BesideOutlivedItsCancel, WaitTimedOut, beside
+from tests.conftest import Logged
 
 
 def _refused(**named: object) -> None:
@@ -104,3 +106,14 @@ def test_a_database_that_does_not_close_in_time_fails_the_shutdown_within_its_bo
     app = main.create_app()
     with pytest.raises(WaitTimedOut, match="database.close"), TestClient(app):
         monkeypatch.setattr(app.state.database, "close", closes_after_a_second)
+
+
+def test_the_process_says_what_it_admits_and_warns_when_it_only_reports(
+    monkeypatch: pytest.MonkeyPatch, logged: Logged
+) -> None:
+    monkeypatch.setenv(ADMISSION_MODE_ENV, "evaluate")
+
+    with TestClient(main.create_app()):
+        said = [one for one in logged() if one["message"] == "admission"]
+
+    assert [(one["severity"], one["enforced"]) for one in said] == [("WARNING", False)]

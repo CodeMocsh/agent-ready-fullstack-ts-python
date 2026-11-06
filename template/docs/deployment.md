@@ -72,7 +72,8 @@ Two limits, on two keys, in two places:
   subject that a credential names. `LIMITS` in `app/admission_limits.py` sets how many requests
   of one actor a process serves at once, how fast it takes them after a burst, and how many
   streams it holds open for one. A request over a bound answers `429` with `Retry-After`, and
-  records no request event. Every route that verifies a credential declares the `429`. A
+  records no request event. Its `detail`, and the line `admission refused`, name the bound.
+  Every route that verifies a credential declares the `429`. A
   request holds its place until its response starts, after its request event. A stream holds a
   place of its own, which a route takes with `app.admission.stream`, until its response ends.
 - **The edge limits each address.** Your platform, a CDN, a WAF or the proxy in front of this
@@ -81,19 +82,38 @@ Two limits, on two keys, in two places:
   limits those. `GET /ready` takes a connection, so keep it off the public origin, or let the
   edge bound it.
 
-Set the numbers from three rules:
+`LIMITS` is the default. A deployment replaces any field with `ADMISSION_IN_FLIGHT`,
+`ADMISSION_PER_SECOND`, `ADMISSION_BURST` or `ADMISSION_STREAMS`, and the line `admission` names
+the numbers in force. Set them from three rules:
 
 - `in_flight` and `burst` are each at least the largest read budget in
   `frontend/tests/read-budgets.ts`, plus the streams that screen opens. A first draw sends its
   reads at once, and admission refuses rather than queues.
-- `in_flight` stays under the template's pool, which the line `connections budgeted` names. Then
-  one actor leaves connections for the others. When the first rule asks for more than the pool,
-  raise `max_connections`, or make the draw smaller.
+- `in_flight` under the template's pool, which the line `connections budgeted` names, leaves
+  connections for other actors. Over it, other actors wait for a connection, up to
+  `DATABASE_ACQUIRE_TIMEOUT`. With `max_connections=100`, `DATABASE_INSTANCES=12` and the shipped
+  reserves the pool is 8, so the shipped `in_flight` of 8 fills it. When the first rule asks for more than the pool,
+  raise `max_connections`, make the draw smaller, or accept the wait.
 - The count is per process. A deployment of `DATABASE_INSTANCES` processes admits up to that
   many times each limit for one actor, and the [connection budget](#the-connection-budget)
   bounds that number. So choose `per_second` as the rate one actor may have across the
   deployment, divided by the processes that serve it. A shared count needs a service such as
   Redis, and this project has none.
+
+**Measure before you enforce.** `ADMISSION_MODE=evaluate` admits each request over a bound and
+writes `admission would refuse`, with the bound, for each request an enforced process would
+refuse. Run a client against it, count the lines by bound, and raise the numbers until there are
+none. The line `admission` is at `WARNING` while the process only evaluates. The same mode turns
+refusals off when the numbers are wrong.
+
+**A harness is a client like any other.** The contract suite sends every request as one actor.
+`devtools/contract-test.sh` reads the numbers of its backend from `devtools/contract-test.env`,
+which is yours. `ADMISSION_MODE=evaluate make test-contract` ends with the count by bound; set
+the numbers there from it. A `429` in the suite names the bound it met.
+
+Admission bounds one actor. The platform's concurrency for each instance (`--concurrency` on
+Cloud Run) bounds the load on an instance, its most instances bound the deployment, and the
+pool's wait ends at `DATABASE_ACQUIRE_TIMEOUT` with a `503`.
 
 **Under the identity stub, every request is one actor**, so `LIMITS` holds for everybody at
 once, in each process. Raise it, or replace the stub, before more than one person uses the

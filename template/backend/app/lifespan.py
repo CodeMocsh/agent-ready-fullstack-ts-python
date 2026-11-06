@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.routing import RouteContext, iter_route_contexts
 
 from app import log
+from app.admission import Policy
 from app.environment import refuse_development_settings
 from app.identity import principal_for
 from app.identity.shared import resolved_without_a_credential
@@ -35,14 +36,15 @@ CLOSED_WITHIN_SECONDS: Final = 5.0
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Refuse a production process carrying development settings, build the routes, then hold
-    the `Database` on `app.state` for the life of the process. Watches the event loop while it
-    serves. Cancels the work beside the requests and the shared work, then closes the database,
-    then the instruments."""
+    the `Database` on `app.state` for the life of the process. Logs what the process admits.
+    Watches the event loop while it serves. Cancels the work beside the requests and the shared
+    work, then closes the database, then the instruments."""
     refuse_development_settings()
     _ = await asyncio.to_thread(build_routes, app)
     database = build()
     version = await database.check()
     log.serving(database.name, version)
+    _say_what_this_process_admits(app.state.admission_policy)
     await _say_what_this_deployment_authenticates(app, database.name)
     app.state.database = database
     instruments = app.state.instruments
@@ -74,6 +76,18 @@ def build_routes(app: FastAPI) -> list[RouteContext]:
     one. A route that `frontend()` adds to an included router is not among them: the first request
     that no other route matches builds it. Blocks: call it off the event loop."""
     return list(iter_route_contexts(app.routes))
+
+
+def _say_what_this_process_admits(policy: Policy) -> None:
+    """Log the admission `policy`: its numbers, and whether it refuses or only reports."""
+    limits = policy.limits
+    log.admission(
+        in_flight=limits.in_flight,
+        per_second=limits.per_second,
+        burst=limits.burst,
+        streams=limits.streams,
+        enforced=policy.enforced,
+    )
 
 
 async def _say_what_this_deployment_authenticates(app: FastAPI, substrate: str) -> None:

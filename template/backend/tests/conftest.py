@@ -41,6 +41,7 @@ import pytest
 from fastapi import FastAPI
 
 from app.deployment import (
+    ADMISSION_ENV,
     DATABASE_URL_ENV,
     DEVELOPMENT,
     ENVIRONMENT_ENV,
@@ -131,6 +132,7 @@ def nothing_the_shell_exports(monkeypatch: pytest.MonkeyPatch) -> None:
         OWNER_URL_ENV,
         SCHEMA_ENV,
         INSTANCES_ENV,
+        *ADMISSION_ENV,
         *TELEMETRY_ENV,
         *TIMEOUTS_ENV,
     ):

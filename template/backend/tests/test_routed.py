@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from starlette.datastructures import State
 from starlette.middleware.gzip import GZipMiddleware
 
-from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
+from app.deployment import ADMISSION_BURST_ENV, OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.identity.shared import SENTINEL_TENANT
 from app.main import ROUTERS
 from app.store import Database
@@ -20,6 +20,7 @@ from tests.routed import (
     SharedAppChanged,
     SharedPastItsTest,
     SharedTwiceInOneTest,
+    SharedWithAdmission,
     SharedWithTelemetry,
     assembled,
     routed,
@@ -158,6 +159,15 @@ def test_an_environment_that_configures_telemetry_gets_no_shared_app(
     monkeypatch.setenv(SERVICE_NAME_ENV, "tasks")
 
     with pytest.raises(SharedWithTelemetry, match="tests.routed.assembled"):
+        routed(SHARED, database=database)
+
+
+def test_an_environment_that_sets_admission_gets_no_shared_app(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(ADMISSION_BURST_ENV, "90")
+
+    with pytest.raises(SharedWithAdmission, match=ADMISSION_BURST_ENV):
         routed(SHARED, database=database)
 
 

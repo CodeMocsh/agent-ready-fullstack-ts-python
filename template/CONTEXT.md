@@ -194,8 +194,9 @@ _Avoid_: pool size (the pool is one holder inside the share), connection limit.
 
 **Admission**:
 What a process admits for one actor: requests at once, requests at a rate after a burst, and
-streams open at once. `app/admission.py` refuses a request over a bound with a `429`, and
-`app/admission_limits.py` holds the numbers.
+streams open at once. It enforces, or with `ADMISSION_MODE=evaluate` it only reports.
+`app/admission.py` refuses a request over a bound with a `429`, and `app/admission_limits.py`
+holds the numbers.
 _Avoid_: rate limit (the edge's limit is per address), throttle, quota.
 
 **Work beside the requests**:

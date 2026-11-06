@@ -21,10 +21,16 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import unquote
 
-from app import connection_budget
+from app import admission_limits, connection_budget
+from app.admission import Limits, Policy
 from app.deployment import (
     ACKNOWLEDGED_ENV,
     ACQUIRE_TIMEOUT_ENV,
+    ADMISSION_BURST_ENV,
+    ADMISSION_IN_FLIGHT_ENV,
+    ADMISSION_MODE_ENV,
+    ADMISSION_PER_SECOND_ENV,
+    ADMISSION_STREAMS_ENV,
     BUNDLE_ENV,
     DATABASE_URL_ENV,
     IDLE_IN_TRANSACTION_TIMEOUT_ENV,
@@ -90,6 +96,11 @@ class TelemetryMisconfigured(RuntimeError):
 
 class TimeoutsMisconfigured(RuntimeError):
     """A bound on a wait on Postgres is set to something this process will not run with, so it
+    refuses to start."""
+
+
+class AdmissionMisconfigured(RuntimeError):
+    """A variable of admission is set to something this process will not run with, so it
     refuses to start."""
 
 
@@ -262,6 +273,62 @@ def _seconds(variable: str, shipped: float) -> float:
     if not (math.isfinite(seconds) and seconds >= SMALLEST_BOUND):
         raise refusal
     return seconds
+
+
+ENFORCE: Final = "enforce"
+EVALUATE: Final = "evaluate"
+
+
+def build_admission() -> Policy:
+    """What this process admits for one actor: `admission_limits.LIMITS`, with each field a
+    deployment set replaced, and whether it refuses a request over a bound. Raises
+    `AdmissionMisconfigured` on a count that is not a whole number of at least 1, a rate that is
+    not a finite number above 0, and a mode other than `enforce` or `evaluate`."""
+    shipped = admission_limits.LIMITS
+    mode = stated(ADMISSION_MODE_ENV) or ENFORCE
+    if mode not in (ENFORCE, EVALUATE):
+        raise AdmissionMisconfigured(
+            f"{ADMISSION_MODE_ENV}={mode!r}: say {ENFORCE!r} to refuse a request over a bound, or "
+            f"{EVALUATE!r} to report it and admit it."
+        )
+    return Policy(
+        limits=Limits(
+            in_flight=_count(ADMISSION_IN_FLIGHT_ENV, shipped.in_flight),
+            per_second=_rate(ADMISSION_PER_SECOND_ENV, shipped.per_second),
+            burst=_count(ADMISSION_BURST_ENV, shipped.burst),
+            streams=_count(ADMISSION_STREAMS_ENV, shipped.streams),
+        ),
+        enforced=mode == ENFORCE,
+    )
+
+
+def _count(variable: str, shipped: int) -> int:
+    said = stated(variable)
+    if said == "":
+        return shipped
+    if not (said.isdecimal() and int(said) >= 1):
+        raise AdmissionMisconfigured(
+            f"{variable}={said!r} is not a count. Give a whole number of at least 1, or unset it "
+            f"for {shipped}."
+        )
+    return int(said)
+
+
+def _rate(variable: str, shipped: float) -> float:
+    said = stated(variable)
+    if said == "":
+        return shipped
+    refusal = AdmissionMisconfigured(
+        f"{variable}={said!r} is not a rate. Give a number of requests a second above 0, or "
+        f"unset it for {shipped}."
+    )
+    try:
+        rate = float(said)
+    except ValueError as error:
+        raise refusal from error
+    if not (math.isfinite(rate) and rate > 0):
+        raise refusal
+    return rate
 
 
 def build_draws() -> Draws:

@@ -33,21 +33,37 @@ or a tab that runs old code, is a client that the server cannot trust.
   resolves a tenant, and a resolver that reads the database resolves the tenant after it. So a
   project admits at the point where it verifies a credential, before any store work. It also
   admits a route that never gets a principal.
-- **The numbers are the project's.** `LIMITS` in `app/admission_limits.py` is the project's list,
-  as [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says. The
-  template ships 8 requests at once, 5 a second after a burst of 40, and 4 streams. A screen's
-  first draw is one request, and a focus draws each open screen again, so a person with several
-  tabs open stays inside them. A tab that reads in a loop does not.
+- **The project sets the defaults, and a deployment may replace each one.** `LIMITS` in
+  `app/admission_limits.py` is the project's list, as
+  [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says. The template
+  ships 8 requests at once, 5 a second after a burst of 40, and 4 streams. A screen's first draw
+  is one request, and a focus draws each open screen again, so a person with several tabs open
+  stays inside them. A tab that reads in a loop does not. `ADMISSION_IN_FLIGHT`,
+  `ADMISSION_PER_SECOND`, `ADMISSION_BURST` and `ADMISSION_STREAMS` each replace one field.
+  `wiring.build_admission` reads them, as `build_timeouts` reads the bounds on Postgres, and
+  refuses to start on a count that is not a whole number of at least 1 or a rate that is not a
+  finite number above 0. The line `admission` names the numbers in force.
+  `tests/wiring/test_wiring.py` holds this.
+- **A deployment can evaluate admission instead of enforcing it.** `ADMISSION_MODE=evaluate`
+  admits a request over a bound outside the count, and writes `admission would refuse` with the
+  bound. It reports what an enforced policy would refuse, request for request. The line
+  `admission` is then at `WARNING`, on every start. A deployment measures its clients this way
+  before it enforces new numbers, and an operator turns refusals off this way when they are
+  wrong. `test_a_policy_that_evaluates_reports_what_an_enforced_policy_refuses`,
+  `test_a_policy_that_evaluates_admits_over_a_bound_and_names_it` and
+  `test_the_process_says_what_it_admits_and_warns_when_it_only_reports` hold this.
 - **`in_flight` and `burst` hold the largest first draw.** Admission refuses a request over a
   bound, and does not queue it. A screen's first draw sends its reads at once, and a stream's
   request holds a request place until its response starts. So `in_flight` and `burst` are each at
   least the largest read budget in `frontend/tests/read-budgets.ts`, plus the streams that screen
   opens. A screen over them gets a `429` on its own first draw. Nothing checks this across the
   two halves.
-- **`in_flight` stays under the template's pool.** One actor can then hold every request place it
-  has and still leave connections for other actors. `PostgresDatabase.budget()` gives the pool.
-  Nothing checks this either. When the largest first draw is larger than the pool, raise
-  `max_connections`, or make the draw smaller.
+- **`in_flight` under the template's pool leaves connections for other actors, and nothing
+  enforces it.** A request holds a connection only while it queries, and a wait for one ends at
+  `DATABASE_ACQUIRE_TIMEOUT` with a `503`. So an actor over the pool makes other actors wait, and
+  the wait is bounded. A deployment with a small pool and a large first draw trades this for the
+  draw. The line `admission` names `in_flight`, and the line `connections budgeted` names the
+  pool.
 - **The template admits in its identity dependency.** `resolved_principal` in `app/deps.py` calls
   `admitted`, which names the principal on the request line, then calls
   `admission.admit(request, principal.actor)`, then `audit_events.serve`. A project whose
@@ -56,7 +72,10 @@ or a tab that runs old code, is a client that the server cannot trust.
   `test_a_request_admitted_twice_holds_one_place` holds this.
 - **A request over a bound is refused with `TooManyRequests`, and records no request event.** It
   is a `429` with a `Retry-After`: the seconds until the actor's next request fits the rate, or
-  the spacing of the rate when one already fits. It is at least 1.
+  the spacing of the rate when one already fits. It is at least 1. Over `in_flight` or
+  `streams`, nothing knows when a place comes back, so the value is a hint. Its `detail` names
+  the bound that refused it, and so does the line `admission refused`.
+  `test_a_refusal_names_the_bound_that_refused_it` holds this.
   `admit` and `stream` mark the request so that `RecordsRequests` records no event for it. The
   router in `app/routes/tenant/` declares the `429`, so each route under it carries it in
   `openapi.json`.
@@ -81,6 +100,14 @@ or a tab that runs old code, is a client that the server cannot trust.
 - **Each build of the middleware stack holds one `Admission`.** `tests.routed.routed` builds a
   new stack for each test it shares an app with, so no count passes from one test to the next.
 
+- **A harness is a client with its own numbers, not an exemption.** The contract suite sends
+  every request as one actor under the identity stub. `devtools/contract-test.sh` reads the
+  numbers of its backend from `devtools/contract-test.env`, which the project owns. The template
+  ships it empty, because its own suite fits `LIMITS`: about 20 requests, one at a time. A
+  project measures its suite with `ADMISSION_MODE=evaluate make test-contract`, which ends with
+  the count of `admission would refuse` by bound, and sets the numbers there. The suite does not
+  retry on a `429`. `tests/admission/` tests the bounds.
+
 ## Considered options
 
 - **Limit at the edge only.** The deployment in the incident had no edge but the process. An edge
@@ -101,6 +128,28 @@ or a tab that runs old code, is a client that the server cannot trust.
   waits behind it. That wait is what took the requests of the incident to 50 s.
 - **Hold the place until the response ends.** A stream then holds a place for as long as it is
   open, and a few streams use every place an actor has.
+- **A switch that gives a test harness unbounded admission.** It names a mode, not a quantity. It
+  exists only for tests, and it needs a refusal in production to keep it there. The numbers
+  already describe any client, and production can use them too. An exemption that a caller can
+  claim is what fair-queuing systems warn against.
+- **The contract suite waits out each `Retry-After`.** It slows the suite, and a retry in a suite
+  hides the cycle that admission exists to find.
+- **Refuse to start when `in_flight` is not under the pool.** It stops a deployment whose
+  largest first draw is larger than its pool, although every wait for a connection is bounded.
+  It enforces fairness between actors with a refusal of the whole process.
+- **Derive `per_second` from `DATABASE_INSTANCES`.** That number counts the processes of a
+  revision that drains during a rollout. In steady state the share would be up to half of what
+  the deployment meant.
+- **A library for the rate.** None of `limits`, `throttled-py`, `pyrate-limiter` or `slowapi`
+  counts requests at once or streams for each key, so those stay here anyway. `limits` has no
+  token bucket and reads the wall clock. `throttled-py` drops an active key once it holds 1,024
+  keys by default, which gives that actor a whole burst again. `pyrate-limiter` waits by default and gives no
+  time to ask again.
+- **An adaptive limit on the process, or uvicorn's `--limit-concurrency`.** An adaptive limit
+  needs a latency signal, and Python has no mature library for one. `--limit-concurrency` counts
+  open connections, keep-alive included, and answers `503` with no `Retry-After`. The platform's
+  concurrency for each instance and its most instances bound the whole load, with the pool and
+  `DATABASE_ACQUIRE_TIMEOUT` behind them.
 - **Retry and back off in the client instead.** It hides a cycle and does not bound a client that
   runs old code. This decision holds whatever the client does.
 
@@ -115,9 +164,16 @@ or a tab that runs old code, is a client that the server cannot trust.
   change. Two tabs of one actor that draw at once on one process share its places.
 - An actor whose requests are slow uses its places sooner. That is the case that the in-flight
   bound is for.
-- A refused request still writes its `request completed` line, with the principal when it has
-  one. A flood costs log volume and no database work.
+- A refused request writes its `request completed` line, with the principal when it has one, and
+  the line `admission refused`. A flood costs log volume and no database work.
 - A route test that sends more requests at once than `LIMITS` admits gets a `429`.
+- A process left in `evaluate` refuses nothing. Its line `admission` says so at `WARNING` on every
+  start.
+- Admission bounds one actor in each process. At 5 a second, 15 of each 20 requests of a loop of
+  20 a second are refused while one process serves it, and all are admitted once four or more
+  serve it. The connection
+  budget, `DATABASE_ACQUIRE_TIMEOUT` and the request budget keep the process alive and its
+  requests short in that case, and the edge is the place for a bound across the deployment.
 - A route whose response stays open and that does not call `admission.stream` holds no stream
   place. Nothing detects that.
 - An unauthenticated request that the identity seam refuses is not counted. Only the edge limits
