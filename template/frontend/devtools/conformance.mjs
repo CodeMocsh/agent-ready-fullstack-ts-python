@@ -178,10 +178,29 @@ const EXPORTED_NAME = /^export\s+(?:default\s+)?function\s+([A-Z]\w*)|^export\s*
 const FILENAME_HINT =
   "the file name is how anything finds a component without reading it; name the file for what it exports, in kebab-case";
 
-const EFFECT = /\buseEffect\s*\(/g;
+const EFFECT = /\buse(?:Layout)?Effect\s*\(/g;
 const DATA_WORK = /\bawait\b|\.then\s*\(|\bfetch\s*\(/;
 const EFFECT_HINT =
   "data belongs in a TanStack Query hook; an effect that fetches misses the cache, the loading and error states, and the handlers the tests run against";
+
+const MUTATION_START = /\b(?:mutate|mutateAsync)\s*\(/;
+const LISTENS = /\baddEventListener\s*\(/;
+const EFFECT_MUTATION_HINT =
+  "an effect that writes is the client answering its own render; start the mutation from the person's action, or register a listener for that action in the effect";
+
+const SYNTHETIC_INPUT = /\.click\s*\(|\brequestSubmit\s*\(|\bdispatchEvent\s*\(/;
+const EFFECT_INPUT_HINT =
+  "an effect that clicks, submits or dispatches an event fakes a person's input, which src/query-client.ts counts as an outside cause; do the work the input would start, from a real outside cause";
+
+const INVALIDATION = /\.(?:invalidateQueries|refetchQueries|resetQueries)\s*\(/g;
+const INVALIDATOR = /(?:^|\/)src\/query-client\.ts$/;
+const INVALIDATION_HINT =
+  "a read starts from an outside cause, and a call here can be the client answering its own cache; name the keys in a mutation's meta.invalidates";
+
+const SERVER_EVENT = /\binvalidateForServerEvent\b/g;
+const STREAM = /(?:^|\/)src\/(?:streams\/|query-client\.ts$)/;
+const SERVER_EVENT_HINT =
+  "only a stream hears a server event; put the code that receives the stream under src/streams/, and call invalidateForServerEvent there";
 
 const STYLE_ATTRIBUTE = /\bstyle\s*=\s*\{/g;
 const INLINE_TYPE = /(?<![\w-])(?:fontFamily|fontSize|lineHeight|letterSpacing)\s*:/g;
@@ -206,20 +225,64 @@ function balanced(text, open, close) {
   return text.slice(open);
 }
 
+function effectsWhoseBody(code, work) {
+  return [...code.matchAll(EFFECT)].filter((match) =>
+    work.test(balanced(code, match.index + match[0].length - 1, ")")),
+  );
+}
+
 function effectViolations(file, code) {
-  const found = [];
-  for (const match of code.matchAll(EFFECT)) {
-    const open = match.index + match[0].length - 1;
-    if (!DATA_WORK.test(balanced(code, open, ")"))) continue;
-    found.push({
+  return effectsWhoseBody(code, DATA_WORK).map((match) => ({
+    file,
+    line: lineOf(code, match.index),
+    rule: "effect-data",
+    text: "useEffect",
+    hint: EFFECT_HINT,
+  }));
+}
+
+function effectMutationViolations(file, code) {
+  return effectsWhoseBody(code, MUTATION_START)
+    .filter((match) => !LISTENS.test(balanced(code, match.index + match[0].length - 1, ")")))
+    .map((match) => ({
       file,
       line: lineOf(code, match.index),
-      rule: "effect-data",
-      text: "useEffect",
-      hint: EFFECT_HINT,
-    });
-  }
-  return found;
+      rule: "effect-mutation",
+      text: match[0].replace(/\s*\($/, ""),
+      hint: EFFECT_MUTATION_HINT,
+    }));
+}
+
+function effectInputViolations(file, code) {
+  return effectsWhoseBody(code, SYNTHETIC_INPUT).map((match) => ({
+    file,
+    line: lineOf(code, match.index),
+    rule: "effect-input",
+    text: match[0].replace(/\s*\($/, ""),
+    hint: EFFECT_INPUT_HINT,
+  }));
+}
+
+function invalidationViolations(file, code) {
+  if (INVALIDATOR.test(file)) return [];
+  return [...code.matchAll(INVALIDATION)].map((match) => ({
+    file,
+    line: lineOf(code, match.index),
+    rule: "query-invalidation",
+    text: match[0].slice(1).replace(/\s*\($/, ""),
+    hint: INVALIDATION_HINT,
+  }));
+}
+
+function serverEventViolations(file, code) {
+  if (STREAM.test(file)) return [];
+  return [...code.matchAll(SERVER_EVENT)].map((match) => ({
+    file,
+    line: lineOf(code, match.index),
+    rule: "server-event-outside-a-stream",
+    text: match[0],
+    hint: SERVER_EVENT_HINT,
+  }));
 }
 
 function inlineTypeViolations(file, code, allow) {
@@ -291,6 +354,10 @@ function exportedArrowViolations(file, code) {
 
 const CODE_CHECKS = [
   effectViolations,
+  effectMutationViolations,
+  effectInputViolations,
+  invalidationViolations,
+  serverEventViolations,
   inlineTypeViolations,
   filenameExportViolations,
   exportedArrowViolations,
@@ -371,10 +438,12 @@ function report(violations) {
     process.stderr.write(`${rule}: ${hint}\n`);
   }
   process.stderr.write(
-    `\nFAIL: ${count(ordered.length, "place")} above step outside the theme or fetch\n` +
-      "inside an effect. Both look correct in the code you are reading: a literal\n" +
-      "colour renders fine until the theme switches, and an effect that fetches works\n" +
-      "until something else needs the same data. Fix the code rather than the check.\n" +
+    `\nFAIL: ${count(ordered.length, "place")} above step outside the theme, read\n` +
+      "outside a query, or start a read or a write with no outside cause. Each looks\n" +
+      "correct in the code you are reading: a literal colour renders fine until the\n" +
+      "theme switches, an effect that fetches works until something else needs the\n" +
+      "same data, and an invalidation works until it answers its own read. Fix the\n" +
+      "code rather than the check.\n" +
       "A value that genuinely belongs outside the theme goes in conformance.allow in\n" +
       "package.json, where the exception lands in the diff and gets reviewed.\n",
   );

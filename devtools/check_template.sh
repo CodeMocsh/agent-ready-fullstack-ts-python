@@ -916,7 +916,8 @@ need_only f docs/adr/template \
     0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md \
     0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md \
     0022-the-connections-of-every-process-fit-inside-max-connections.md \
-    0023-the-server-admits-each-actor-s-requests-within-a-bound.md
+    0023-the-server-admits-each-actor-s-requests-within-a-bound.md \
+    0024-every-read-has-an-outside-cause.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1142,6 +1143,20 @@ export function Stroke({ lit }: { lit: boolean }) {
 }
 BAD
 
+cat >"$CONF/bad/invalidating.tsx" <<'BAD'
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+
+export function Invalidating({ read }: { read: () => Promise<string[]> }) {
+  const client = useQueryClient();
+  const rows = useQuery({ queryKey: ["rows"], queryFn: read });
+  useEffect(() => {
+    void client.invalidateQueries({ queryKey: ["rows"] });
+  }, [client, rows.dataUpdatedAt]);
+  return <p>{rows.data?.length}</p>;
+}
+BAD
+
 cat >"$CONF/bad/bad.css" <<'BAD'
 .thing {
   color: #fff;
@@ -1190,7 +1205,7 @@ conformance_output="$(conformance "$CONF/bad" 2>&1 || true)"
 for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
             arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
             magic-presentation-prop effect-data exported-function-expression \
-            filename-export; do
+            filename-export query-invalidation; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
         echo "conformance check $rule did not fire. A rule that stops matching looks exactly like a clean codebase." >&2
         printf '%s\n' "$conformance_output" >&2
@@ -1213,7 +1228,8 @@ for expected in 'arbitrary.tsx:4.*raw-colour' 'arbitrary.tsx:5.*raw-colour' \
                 'stroke.tsx:6.*magic-presentation-prop' 'stroke.tsx:7.*raw-stroke' \
                 'stroke.tsx:8.*magic-presentation-prop' 'stroke.tsx:9.*raw-stroke' \
                 'bad.css:5.*raw-stroke' \
-                'regex.tsx:7.*effect-data' 'regex.tsx:10.*inline-type-declaration'; do
+                'regex.tsx:7.*effect-data' 'regex.tsx:10.*inline-type-declaration' \
+                'invalidating.tsx:8.*query-invalidation'; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$expected"; then
         echo "conformance let an arbitrary value through: $expected. The table of rules above stays green while one value passes." >&2
         printf '%s\n' "$conformance_output" >&2
@@ -1530,6 +1546,32 @@ pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&
 cp "$WORK/task-list.tsx" "$TASK_LIST"
 [ "$budget_refused" -ne 0 ] || fail "tests/first-draw.test.tsx passed a first draw that reads again after its first response, against a budget of one"
 grep -q 'the first draw read:' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a first draw that reads twice, but not on its count"; }
+refuses_the_cycle() {
+    shape=$1
+    cycle=$2
+    cp "$TASK_LIST" "$WORK/task-list.tsx"
+    python3 - "$TASK_LIST" "$ONE_READ" "$cycle" <<'PY'
+import pathlib
+import sys
+
+file, line, cycle = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+react = 'import { type FormEvent, useState } from "react";'
+text = file.read_text(encoding="utf-8")
+if react not in text:
+    sys.exit(f"{file} no longer imports {react!r}, so the cycle mutation cannot add an effect")
+text = text.replace(react, react.replace("useState", "useEffect, useState"))
+file.write_text(text.replace(line, f"{line}\n{cycle}"), encoding="utf-8")
+PY
+    cycle_refused=0
+    pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || cycle_refused=$?
+    cp "$WORK/task-list.tsx" "$TASK_LIST"
+    [ "$cycle_refused" -ne 0 ] || fail "tests/first-draw.test.tsx passed a screen that $shape"
+    grep -q 'CycleStopped: The read of \["tasks"\] stopped' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a screen that $shape, but src/query-client.ts did not stop the read and name its key"; }
+}
+refuses_the_cycle "reads again each time its own answer arrives" \
+    "  useEffect(() => void tasks.refetch(), [tasks.dataUpdatedAt, tasks.refetch]);"
+refuses_the_cycle "writes each time its answer arrives, and the write invalidates the answer" \
+    "  useEffect(() => { if (tasks.isSuccess) create.mutate({ title: \"again\" }); }, [tasks.dataUpdatedAt]);"
 echo "==> assert the mock build is still a mock build"
 bundles_msw() { grep -rl 'setupWorker' frontend/dist/assets/*.js >/dev/null 2>&1; }
 run "vite build --mode mock" pnpm -C frontend build:mock

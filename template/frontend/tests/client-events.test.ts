@@ -44,7 +44,7 @@ describe("client events", () => {
   it("reports a failed request by its route template, its status and the id it answered with", async () => {
     const posted = capturePosts();
 
-    record("query", new ApiError("Not found", 404, REQUEST_ID));
+    record("query", new ApiError("Not found", 404, REQUEST_ID, null));
 
     await settled(posted, 1);
     expect(posted[0]).toEqual({ events: [A_FAILED_QUERY] });
@@ -73,9 +73,9 @@ describe("client events", () => {
   it("sends the same failure once per page", async () => {
     const posted = capturePosts();
 
-    record("mutation", new ApiError("Task not found", 404, REQUEST_ID));
-    record("mutation", new ApiError("Task not found", 404, REQUEST_ID));
-    record("query", new ApiError("Task not found", 404, REQUEST_ID));
+    record("mutation", new ApiError("Task not found", 404, REQUEST_ID, null));
+    record("mutation", new ApiError("Task not found", 404, REQUEST_ID, null));
+    record("query", new ApiError("Task not found", 404, REQUEST_ID, null));
 
     await settled(posted, 2);
   });
@@ -84,7 +84,7 @@ describe("client events", () => {
     const posted = capturePosts();
 
     for (let status = 400; status < 430; status += 1) {
-      record("query", new ApiError("refused", status, REQUEST_ID));
+      record("query", new ApiError("refused", status, REQUEST_ID, null));
     }
 
     await settled(posted, 20);

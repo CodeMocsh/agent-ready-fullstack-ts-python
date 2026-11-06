@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export type Run = {
   status: number | null;
@@ -22,6 +22,7 @@ export function gate(script: string, prefix: string) {
     },
     run(name: string, source: string[]): Run {
       const path = join(directory, name);
+      mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, `${source.join("\n")}\n`);
       const finished = spawnSync("node", [`devtools/${script}`, directory], {
         encoding: "utf8",

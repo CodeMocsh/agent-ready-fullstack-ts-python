@@ -9,6 +9,10 @@ const OFFENDING_MARKUP = [
   "  useEffect(() => {",
   "    fetch('/api/items').then(async (response) => setItems(await response.json()));",
   "  }, []);",
+  "  useEffect(() => void client.invalidateQueries({ queryKey: ['items'] }), [items]);",
+  "  useLayoutEffect(() => save.mutate(items), [items]);",
+  "  useEffect(() => void form.current?.requestSubmit(), [items]);",
+  "  useEffect(() => void invalidateForServerEvent(client, [['items']]), [items]);",
   "  return (",
   "    <div className='bg-blue-500 border-[#1a1a1a] text-[13px] p-[7px] bg-primary/80'>",
   "      <span className='bg-[rebeccapurple] stroke-2' strokeWidth={1.5} />",
@@ -22,14 +26,18 @@ const OFFENDING_RULES = [
   "arbitrary-spacing",
   "arbitrary-type",
   "effect-data",
+  "effect-input",
+  "effect-mutation",
   "exported-function-expression",
   "filename-export",
   "inline-type-declaration",
   "magic-presentation-prop",
   "named-colour",
   "palette-utility",
+  "query-invalidation",
   "raw-colour",
   "raw-stroke",
+  "server-event-outside-a-stream",
   "token-alpha",
 ];
 
@@ -159,5 +167,54 @@ describe("the conformance gate", () => {
     const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES]);
     const { stdout } = scan("good.tsx", CLEAN);
     expect(stdout).toContain(`${demonstrated.size} checks`);
+  });
+});
+
+describe("the conformance gate on what starts a read or a write", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it.each([
+    ["a click", "button.current?.click()"],
+    ["a submit", "form.current?.requestSubmit()"],
+    ["an event", "window.dispatchEvent(new Event('keydown'))"],
+  ])("refuses an effect that fakes %s", (_input, faked) => {
+    const { status, rules } = scan("faked.tsx", [
+      "import { useEffect } from 'react';",
+      "export function Faked() {",
+      `  useEffect(() => void ${faked}, [items]);`,
+      "  return null;",
+      "}",
+    ]);
+    expect(rules).toEqual(["effect-input"]);
+    expect(status).toBe(1);
+  });
+
+  it("lets an effect register a listener whose handler starts a mutation", () => {
+    const { status, rules } = scan("shortcut.tsx", [
+      "import { useEffect } from 'react';",
+      "export function Shortcut() {",
+      "  useEffect(() => {",
+      "    const onKey = (event: KeyboardEvent) => event.key === 's' && save.mutate(draft);",
+      "    window.addEventListener('keydown', onKey);",
+      "    return () => window.removeEventListener('keydown', onKey);",
+      "  }, []);",
+      "  return null;",
+      "}",
+    ]);
+    expect(rules).toEqual([]);
+    expect(status).toBe(0);
+  });
+
+  it("lets a stream under src/streams/ report a server event", () => {
+    const { status, rules } = scan("src/streams/tasks.ts", [
+      "import { invalidateForServerEvent } from '@/query-client';",
+      "export function heard(client: QueryClient): Promise<void> {",
+      "  return invalidateForServerEvent(client, [['tasks']]);",
+      "}",
+    ]);
+    expect(rules).toEqual([]);
+    expect(status).toBe(0);
   });
 });
