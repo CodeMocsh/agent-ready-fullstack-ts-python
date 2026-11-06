@@ -78,6 +78,10 @@ each store method records its own event holds only for the stores that remember 
   `test_a_request_with_no_principal_records_nothing` holds this. A request cancelled before it
   answers, as at shutdown, records none: it sent no response.
   `test_a_cancelled_request_records_nothing` holds this.
+- **A request that admission refuses records no request event.** `admission.admit` and
+  `admission.stream` mark it before they raise, so `RecordsRequests` records nothing for it.
+  `test_an_open_stream_holds_a_stream_place_and_no_request_place` holds this.
+  [0023](0023-the-server-admits-each-actor-s-requests-within-a-bound.md) says why.
 - **A request that got no database connection records no request event.** Its event would wait
   for a connection too, and find none. Its `request completed` line names it, with a `503`. When
   the event itself gets no connection, the request answers that `503` in place of its response.

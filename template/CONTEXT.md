@@ -42,8 +42,8 @@ _Avoid_: user, caller, identity, session.
 
 **Actor**:
 Who acted: a person, or an app acting for itself or for a person. Named by an issuer and a
-subject together, because a subject alone is unique only within its issuer. It records; it
-decides nothing.
+subject together, because a subject alone is unique only within its issuer. It records, and it
+is the key of admission. It decides nothing about what a request may see.
 _Avoid_: user (an actor may be an app), author, owner.
 
 **Audit event**:
@@ -160,6 +160,12 @@ The share of the server's `max_connections` that each process may hold, and the 
 inside it. `app/store/budget.py` calculates it from `DATABASE_INSTANCES` and
 `app/connection_budget.py`.
 _Avoid_: pool size (the pool is one holder inside the share), connection limit.
+
+**Admission**:
+What a process admits for one actor: requests at once, requests at a rate after a burst, and
+streams open at once. `app/admission.py` refuses a request over a bound with a `429`, and
+`app/admission_limits.py` holds the numbers.
+_Avoid_: rate limit (the edge's limit is per address), throttle, quota.
 
 **Work beside the requests**:
 A task that `app.waits.beside` started. It runs outside every request, so its waits may last

@@ -70,7 +70,7 @@ covered a full pool, not a server that refuses.
   holds this.
 - **Every route that requires a tenant declares the `503`.** The router in `app/routes/tenant/`
   declares `NoConnectionFree`, so each route under it carries the `503` in `openapi.json`.
-  `test_every_route_that_requires_a_tenant_declares_that_no_connection_may_be_free` holds this.
+  `test_every_route_that_requires_a_tenant_declares_what_the_template_refuses_it` holds this.
 
 ## Considered options
 

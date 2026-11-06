@@ -5,7 +5,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import Lifespan
 
-from app import audit_events, log, request_events, waits
+from app import admission, admission_limits, audit_events, log, request_events, waits
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
@@ -32,9 +32,10 @@ def create_app() -> FastAPI:
 
 def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
     """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant
-    and of a request that got no database connection, the mark `app.waits.waiting` reads, the request event, the request line and the telemetry
-    around each route. `create_app` and `tests.routed.routed` build with it. Configures the
-    logging of the whole process."""
+    and of a request that got no database connection, the admission of each actor's
+    requests, the mark `app.waits.waiting` reads, the request event, the request line and the
+    telemetry around each route. `create_app` and `tests.routed.routed` build with it. Configures
+    the logging of the whole process."""
     log.configure(build_service_version())
     app = FastAPI(
         title="Tasks API",
@@ -49,6 +50,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     app.add_exception_handler(DatabaseBusy, _busy)
     waits.instrument(app)
     request_events.instrument(app)
+    admission.instrument(app, admission_limits.LIMITS)
     log.instrument(app)
     settings = build_telemetry()
     app.state.instruments = None if settings is None else _instrument(app, settings)

@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app import audit_events
+from app import admission, audit_events, log
 from app.identity import principal_for
 from app.identity.shared import Principal
 from app.store import Database, TaskStore
@@ -30,18 +30,27 @@ def database_of(request: Request) -> Database:
     return database
 
 
+def admitted(request: Request, principal: Principal) -> Principal:
+    """`principal`, named on this request's `request completed` line, admitted by
+    `admission.admit`, then served by `audit_events.serve`: the actor of every row the request
+    writes, and the actor of its request event. A request over what the process admits is refused
+    with `TooManyRequests`, and records no request event. Call it on the event loop.
+    `docs/adr/template/0023`."""
+    log.name_principal(request, principal)
+    admission.admit(request, principal.actor)
+    return audit_events.serve(request, principal)
+
+
 async def resolved_principal(
     request: Request, principal: Annotated[Principal, Depends(principal_for)]
 ) -> Principal:
-    """The principal `principal_for` resolved, served by `audit_events.serve`: named on this
-    request's `request completed` line, the actor of every row the request writes, and the actor of
-    its request event.
+    """The principal `principal_for` resolved, `admitted`.
 
     The tenant requirement's router carries this, so every route under it names who it served,
     and an override of `principal_for` reaches every route under it. `docs/adr/template/0011` and
     `0017`.
     """
-    return audit_events.serve(request, principal)
+    return admitted(request, principal)
 
 
 PrincipalDep = Annotated[Principal, Depends(resolved_principal)]

@@ -53,19 +53,51 @@ With nothing in front, this process is the edge: read `SECURITY_HEADERS` and `MA
 in `app/serve.py` first, and [adr/template/0009](adr/template/0009-the-one-origin-entrypoint-is-the-edge.md) for
 why `app.main` sets neither.
 
-## Rate limiting
+## Admission and the edge
 
-Nothing here limits how often a client may call. Limit at the edge, per address and per
-credential: your platform, a CDN, a WAF or the proxy in front of this process. A limit inside
-the process counts one instance only. Each instance you add raises it. A shared count needs a
-service such as Redis, and this project has none.
+Two limits, on two keys, in two places:
+
+- **The process admits each actor's requests within a bound.** An actor is the issuer and the
+  subject that a credential names. `LIMITS` in `app/admission_limits.py` sets how many requests
+  of one actor a process serves at once, how fast it takes them after a burst, and how many
+  streams it holds open for one. A request over a bound answers `429` with `Retry-After`, and
+  records no request event. Every route that verifies a credential declares the `429`. A
+  request holds its place until its response starts, after its request event. A stream holds a
+  place of its own, which a route takes with `app.admission.stream`, until its response ends.
+- **The edge limits each address.** Your platform, a CDN, a WAF or the proxy in front of this
+  process. It sees a request before authentication, which the process cannot. A request with no
+  credential reaches the public routes or is refused at the identity seam, and only the edge
+  limits those. `GET /ready` takes a connection, so keep it off the public origin, or let the
+  edge bound it.
+
+Set the numbers from three rules:
+
+- `in_flight` and `burst` are each at least the largest read budget in
+  `frontend/tests/read-budgets.ts`, plus the streams that screen opens. A first draw sends its
+  reads at once, and admission refuses rather than queues.
+- `in_flight` stays under the template's pool, which the line `connections budgeted` names. Then
+  one actor leaves connections for the others. When the first rule asks for more than the pool,
+  raise `max_connections`, or make the draw smaller.
+- The count is per process. A deployment of `DATABASE_INSTANCES` processes admits up to that
+  many times each limit for one actor, and the [connection budget](#the-connection-budget)
+  bounds that number. So choose `per_second` as the rate one actor may have across the
+  deployment, divided by the processes that serve it. A shared count needs a service such as
+  Redis, and this project has none.
+
+**Under the identity stub, every request is one actor**, so `LIMITS` holds for everybody at
+once, in each process. Raise it, or replace the stub, before more than one person uses the
+deployment.
+
+A project whose resolver reads the database calls `app.admission.admit(request, actor)` where it
+verifies the credential, before that read.
 
 A request the identity seam refuses records no audit event, and neither does a public route.
 Each one still writes its `request completed` line, and `POST /client-events` writes a line for
 each client event it takes, so a flood costs log volume. Every request a principal makes records
 one request event
 ([adr/template/0017](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md)).
-The edge limit is therefore also the limit on how fast `audit_events` grows.
+Admission and the edge limit together are therefore the limit on how fast `audit_events`
+grows.
 
 Nothing here deletes an audit event, and the application role cannot. Retention is yours.
 [Removing a tenant's audit events](#removing-a-tenants-audit-events) says how an operator
@@ -270,9 +302,8 @@ to start, and the message names what to lower.
 
 When the pool has no free connection within `DATABASE_ACQUIRE_TIMEOUT`, or the server refuses a
 new one, that one request answers `503` with `Retry-After`. That includes the connection that
-records its request event. Every route under
-`app/routes/tenant/` declares it. The request records no
-[request event](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md),
+records its request event. Every route that verifies a credential declares it. The request
+records no [request event](adr/template/0017-the-database-records-every-write-and-the-request-layer-every-request.md),
 because recording it would wait for a connection too.
 [adr/template/0022](adr/template/0022-the-connections-of-every-process-fit-inside-max-connections.md)
 says why.
@@ -451,7 +482,8 @@ and writes everything it holds. This one does complain — find the line whose `
 real thing to do for a while, behind an authenticating proxy or on an internal tool; set
 `UNAUTHENTICATED_IS_INTENTIONAL=1` and the same line is reported at `INFO`. That changes a log
 level and nothing else. Under the stub every request to a tenant route resolves to a principal, so
-anybody who reaches the process writes one audit event for each such request. Put a [rate limit](#rate-limiting) at the edge
-before anybody else can reach it.
+anybody who reaches the process writes one audit event for each such request, and everybody
+shares one actor's [admission](#admission-and-the-edge). Put a limit at the edge before anybody else
+can reach it.
 [adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says what a
 replacement owes.

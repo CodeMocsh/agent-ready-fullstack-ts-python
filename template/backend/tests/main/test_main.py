@@ -1,10 +1,11 @@
 """`app.main`: the module-level `app` is built when asked for, and not before, and a route test
 assembles what the app serves."""
 
+import pytest
 from fastapi import FastAPI
 
 from app import main
-from app.refusal import NoConnectionFree
+from app.refusal import ApiError, NoConnectionFree, TooManyRequests
 from app.routes import public
 from app.store import Database
 from tests.routed import routed
@@ -44,17 +45,20 @@ def test_a_route_test_assembles_what_the_app_serves(database: Database) -> None:
     )
 
 
-def test_every_route_that_requires_a_tenant_declares_that_no_connection_may_be_free() -> None:
+@pytest.mark.parametrize("refusal", [NoConnectionFree, TooManyRequests])
+def test_every_route_that_requires_a_tenant_declares_what_the_template_refuses_it(
+    refusal: type[ApiError],
+) -> None:
     public_paths = {getattr(route, "path", None) for route in public.router.routes}
     undeclared = [
         f"{method.upper()} {path}"
         for path, operations in main.create_app().openapi()["paths"].items()
         if path not in public_paths
         for method, operation in operations.items()
-        if str(NoConnectionFree.status) not in operation["responses"]
+        if str(refusal.status) not in operation["responses"]
     ]
 
     assert undeclared == [], (
-        f"{undeclared} do not declare {NoConnectionFree.status}. Include the route in "
-        f"app/routes/tenant/, whose router declares NoConnectionFree."
+        f"{undeclared} do not declare {refusal.status}. Declare {refusal.__name__} on the "
+        f"router of the route's requirement, where every route under it inherits it."
     )

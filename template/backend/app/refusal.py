@@ -62,6 +62,19 @@ def no_connection_free(retry_after: int) -> JSONResponse:
     )
 
 
+@final
+class TooManyRequests(ApiError):
+    """A request over what this process admits for one actor. `app/admission.py` raises it with a
+    `Retry-After`, and every tenant route declares it. `docs/adr/template/0023`."""
+
+    status = 429
+    description = "Too many requests from this actor. Ask again after the seconds in Retry-After"
+
+    def __init__(self, *, retry_after: int) -> None:
+        super().__init__()
+        self.headers = {"Retry-After": str(retry_after)}
+
+
 def _joined(descriptions: list[str]) -> str:
     """The descriptions of refusals that share a status, as one sentence joined by ", or"."""
     first, *rest = descriptions
