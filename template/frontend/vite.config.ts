@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { type Plugin, type ResolvedConfig, defineConfig } from "vite";
+import { defineConfig, type Plugin, type ResolvedConfig } from "vite";
 
 // The backend half serves bare paths (/tasks). The /api prefix is deployment
 // topology rather than contract, so it is added by the client and stripped here;
@@ -65,8 +65,29 @@ function stripMockWorker(): Plugin {
   };
 }
 
+function nameTheBuild(): Plugin {
+  return {
+    name: "name-the-build",
+    apply: "build",
+    generateBundle(_options, bundle) {
+      const entries = Object.values(bundle).flatMap((output) =>
+        output.type === "chunk" && output.isEntry ? [output.fileName] : [],
+      );
+      const [entry, ...others] = entries;
+      if (entry === undefined || others.length > 0) {
+        this.error(`the bundle has ${entries.length} entry chunks, and build.json names one`);
+      }
+      this.emitFile({
+        type: "asset",
+        fileName: "build.json",
+        source: `${JSON.stringify({ entry })}\n`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), stripMockWorker()],
+  plugins: [react(), tailwindcss(), stripMockWorker(), nameTheBuild()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },

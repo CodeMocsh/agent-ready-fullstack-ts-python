@@ -341,6 +341,17 @@ What to expect, because it is not all free:
   - If you merged `frontend/src/query-client.ts` or `frontend/tests/render.tsx` by hand, take the
     template's copy. `renderWithQuery` now builds the app's client.
   [adr/template/0024](adr/template/0024-every-read-has-an-outside-cause.md) says why.
+- **From 0.59.0 a tab reloads into the deployed build at the next navigation.** Each build
+  writes `frontend/dist/build.json`. Then:
+  - Serve `build.json` with `cache-control: no-cache` from every host that serves the bundle.
+    `app.serve` does. A host that caches it hides each new build from each open tab.
+  - If you merged `src/main.tsx` or `vite.config.ts` by hand, take the template's
+    `followTheDeployedBuild` call and its `name-the-build` plugin.
+  - A client event can now have the kind `build`. If you filter client events by kind, add it.
+  - In `docs/frontend.md`, take the template's line for `src/build.ts` and the bullet that starts
+    "A tab runs the deployed build".
+  [adr/template/0025](adr/template/0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md)
+  says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

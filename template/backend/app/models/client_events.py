@@ -16,7 +16,7 @@ class ClientEvent(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
-    kind: Literal["uncaught", "caught", "query", "mutation"]
+    kind: Literal["uncaught", "caught", "query", "mutation", "build"]
     route: RouteId | None
     error: ErrorName
     status: Status | None
