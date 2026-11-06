@@ -176,10 +176,11 @@ What to expect, because it is not all free:
   `cd backend && uv lock` and commit the result before you push the update.
 - **From 0.46.0 the event-loop limit is in seconds on the reference core.** On a machine faster
   than a Google Cloud E2 core, a step may use less CPU than before, so a test that passed can
-  now fail. The error names the step, and the CPU it uses here and on the reference core. Move
-  that work into a `def` route or into `asyncio.to_thread`. `measure_every_step` now takes the
-  limit: if you merged `backend/tests/conftest.py` by hand, keep the template's call. A test of
-  yours that holds the event loop past the limit holds `step_limit.seconds` and a margin.
+  now fail. The error names the step, and the CPU it uses here and on the reference core.
+  Outside the lifespan, do less of that work, or run it in another process. The 0.60.1 step says
+  why a thread does not help. `measure_every_step` now takes the limit: if you merged
+  `backend/tests/conftest.py` by hand, keep the template's call. A test of yours that holds the
+  event loop past the limit holds `step_limit.seconds` and a margin.
 - **From 0.47.0 only a test in `tests/started/` or in a tier may start the app.** Any other test
   that enters `with TestClient(create_app())` fails with `StartedOutsideItsFolder`, which names
   it. For a route test, mount its routers with `tests.routed.routed` and the `database` fixture:
@@ -367,6 +368,13 @@ What to expect, because it is not all free:
     `contract-test.sh` for it.
   [adr/template/0023](adr/template/0023-the-server-admits-each-actor-s-requests-within-a-bound.md)
   says why.
+- **From 0.60.1 the rules no longer send CPU work in a request to a thread.** A thread frees
+  the event loop only for code that releases the interpreter lock. A thread also hides CPU work
+  from the event-loop limit and from `event loop held`. In `docs/backend.md`, take the
+  template's bullet that starts "A thread frees the event loop only", and the bullet that
+  starts "A lifespan step holds the event loop". The update needs nothing else. To find a hold
+  you hid this way, look for CPU work in a request that you moved into `asyncio.to_thread` or a
+  `def` route. Do less of it, or run it in another process.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
