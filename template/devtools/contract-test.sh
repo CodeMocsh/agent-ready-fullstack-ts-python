@@ -31,6 +31,9 @@ BACKEND_PORT="${BACKEND_PORT:-${PORTS%% *}}"
 FRONTEND_PORT="${FRONTEND_PORT:-${PORTS##* }}"
 export BACKEND_PORT FRONTEND_PORT
 export APP_ENV=development
+set -a
+. "$here/devtools/contract-test.env"
+set +a
 base_url="${CONTRACT_BASE_URL:-http://localhost:$FRONTEND_PORT/api}"
 backend_pid=""
 frontend_pid=""
@@ -42,7 +45,29 @@ signal_halves() {
     done
 }
 
+say_what_admission_would_refuse() {
+    [ "${ADMISSION_MODE:-}" = evaluate ] || return 0
+    python3 - "$log" <<'PY'
+import collections
+import json
+import sys
+
+counted = collections.Counter()
+with open(sys.argv[1]) as lines:
+    for line in lines:
+        if line.startswith("{"):
+            record = json.loads(line)
+            if record.get("message") == "admission would refuse":
+                counted[record["bound"]] += 1
+said = ", ".join(f"{bound} {count}" for bound, count in sorted(counted.items()))
+if not counted:
+    said = "nothing"
+print(f"contract: admission would refuse: {said}")
+PY
+}
+
 cleanup() {
+    say_what_admission_would_refuse || true
     signal_halves TERM
     sleep 1
     signal_halves KILL

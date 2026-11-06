@@ -10,7 +10,7 @@ principal raises `Unauthenticated` from `app/identity/shared.py`, which `docs/ad
 keeps out of the spec.
 """
 
-from typing import Any, ClassVar, final
+from typing import Any, ClassVar, Final, Literal, final
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -62,6 +62,16 @@ def no_connection_free(retry_after: int) -> JSONResponse:
     )
 
 
+Bound = Literal["in_flight", "rate", "streams"]
+"""Which bound of `app/admission.py` refused a request."""
+
+SAID_OF_EACH_BOUND: Final[dict[Bound, str]] = {
+    "in_flight": "too many requests at once",
+    "rate": "too many requests in a short time",
+    "streams": "too many streams open",
+}
+
+
 @final
 class TooManyRequests(ApiError):
     """A request over what this process admits for one actor. `app/admission.py` raises it with a
@@ -70,9 +80,13 @@ class TooManyRequests(ApiError):
     status = 429
     description = "Too many requests from this actor. Ask again after the seconds in Retry-After"
 
-    def __init__(self, *, retry_after: int) -> None:
-        super().__init__()
+    def __init__(self, *, retry_after: int, bound: Bound) -> None:
+        super().__init__(
+            f"Too many requests from this actor: {SAID_OF_EACH_BOUND[bound]}. Ask again after the "
+            f"seconds in Retry-After"
+        )
         self.headers = {"Retry-After": str(retry_after)}
+        self.bound: Bound = bound
 
 
 def _joined(descriptions: list[str]) -> str:

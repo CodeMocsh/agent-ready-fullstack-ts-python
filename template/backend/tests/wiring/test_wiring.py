@@ -3,9 +3,15 @@ every configuration it refuses to start on."""
 
 import pytest
 
-from app import connection_budget
+from app import admission_limits, connection_budget
+from app.admission import Limits, Policy
 from app.deployment import (
     ACQUIRE_TIMEOUT_ENV,
+    ADMISSION_BURST_ENV,
+    ADMISSION_IN_FLIGHT_ENV,
+    ADMISSION_MODE_ENV,
+    ADMISSION_PER_SECOND_ENV,
+    ADMISSION_STREAMS_ENV,
     DATABASE_URL_ENV,
     ENVIRONMENT_ENV,
     HEADERS_ENV,
@@ -26,12 +32,14 @@ from app.migrate import OWNER_URL_ENV
 from app.store.budget import Draws
 from app.store.pg import TIMEOUTS, Timeouts
 from app.wiring import (
+    AdmissionMisconfigured,
     InstancesMisconfigured,
     OwnerCredentialVisible,
     TelemetryMisconfigured,
     TelemetrySettings,
     TimeoutsMisconfigured,
     build,
+    build_admission,
     build_draws,
     build_service_version,
     build_telemetry,
@@ -264,3 +272,43 @@ def test_instances_without_a_database_refuse_to_start(monkeypatch: pytest.Monkey
 
     with pytest.raises(InstancesMisconfigured, match=DATABASE_URL_ENV):
         build()
+
+
+def test_no_admission_variable_is_the_project_s_limits_enforced() -> None:
+    assert build_admission() == Policy(limits=admission_limits.LIMITS, enforced=True)
+
+
+def test_each_admission_number_a_deployment_sets_replaces_its_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(ADMISSION_IN_FLIGHT_ENV, "12")
+    monkeypatch.setenv(ADMISSION_PER_SECOND_ENV, " 0.5 ")
+    monkeypatch.setenv(ADMISSION_BURST_ENV, "90")
+    monkeypatch.setenv(ADMISSION_STREAMS_ENV, "2")
+    monkeypatch.setenv(ADMISSION_MODE_ENV, "evaluate")
+
+    assert build_admission() == Policy(
+        limits=Limits(in_flight=12, per_second=0.5, burst=90, streams=2), enforced=False
+    )
+
+
+@pytest.mark.parametrize(
+    ("variable", "said"),
+    [
+        (ADMISSION_IN_FLIGHT_ENV, "0"),
+        (ADMISSION_IN_FLIGHT_ENV, "2.5"),
+        (ADMISSION_BURST_ENV, "-1"),
+        (ADMISSION_STREAMS_ENV, "many"),
+        (ADMISSION_PER_SECOND_ENV, "0"),
+        (ADMISSION_PER_SECOND_ENV, "inf"),
+        (ADMISSION_PER_SECOND_ENV, "fast"),
+        (ADMISSION_MODE_ENV, "off"),
+    ],
+)
+def test_an_admission_value_that_is_not_one_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, variable: str, said: str
+) -> None:
+    monkeypatch.setenv(variable, said)
+
+    with pytest.raises(AdmissionMisconfigured, match=variable):
+        build_admission()

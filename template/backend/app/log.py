@@ -31,6 +31,7 @@ from structlog.typing import EventDict, Processor, WrappedLogger
 from app.deployment import ACKNOWLEDGED_ENV
 from app.identity.shared import Principal
 from app.models import ClientEvent
+from app.refusal import Bound
 from app.request_line import FIELDS as PROJECT_FIELDS
 
 _LOG: Final = structlog.stdlib.get_logger("app")
@@ -126,6 +127,34 @@ def connections_budgeted(
         in_process=in_process,
         pool=pool,
     )
+
+
+def admission(
+    *, in_flight: int, per_second: float, burst: int, streams: int, enforced: bool
+) -> None:
+    """What this process admits for one actor, and whether it refuses a request over a bound. At
+    `WARNING` when it only reports one. `docs/adr/template/0023`."""
+    fields = {
+        "in_flight": in_flight,
+        "per_second": per_second,
+        "burst": burst,
+        "streams": streams,
+        "enforced": enforced,
+    }
+    if enforced:
+        _LOG.info("admission", **fields)
+    else:
+        _LOG.warning("admission", **fields)
+
+
+def admission_refused(bound: Bound) -> None:
+    """A request over `bound` was refused with a `429`."""
+    _LOG.info("admission refused", bound=bound)
+
+
+def admission_would_refuse(bound: Bound) -> None:
+    """A request over `bound` was admitted outside the count, because admission only reports."""
+    _LOG.info("admission would refuse", bound=bound)
 
 
 def database_busy(refusal: str) -> None:

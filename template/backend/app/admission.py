@@ -4,7 +4,12 @@ names. A request over a bound is refused with `TooManyRequests`, a `429` with `R
 records no request event.
 
 The template owns this module and updates it. The numbers are the project's, in
-`app/admission_limits.py`. `docs/adr/template/0023`.
+`app/admission_limits.py`, and a deployment may replace each one: `wiring.build_admission`.
+`docs/adr/template/0023`.
+
+**A policy enforces or evaluates.** Enforced, a request over a bound is refused, and the line
+`admission refused` names the bound. Evaluated, it is admitted, and the line
+`admission would refuse` names the bound.
 
 **The count is per process.** A deployment of N processes admits up to N times each limit for
 one actor. `DATABASE_INSTANCES` is that N, and `docs/adr/template/0022` bounds it.
@@ -23,9 +28,9 @@ from typing import Final
 from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app import audit_events
+from app import audit_events, log
 from app.identity.shared import Actor
-from app.refusal import TooManyRequests
+from app.refusal import Bound, TooManyRequests
 
 Release = Callable[[], None]
 Key = tuple[str, str]
@@ -54,6 +59,14 @@ class Limits:
             )
 
 
+@dataclass(frozen=True)
+class Policy:
+    """`limits`, and whether a request over one is refused (`enforced`) or only reported."""
+
+    limits: Limits
+    enforced: bool
+
+
 @dataclass
 class _Account:
     tokens: float
@@ -63,11 +76,12 @@ class _Account:
 
 
 class Admission:
-    """The places of every actor in this process. Not safe across threads: call it on the
-    event loop."""
+    """The places of every actor in this process, under one `Policy`. Not safe across threads:
+    call it on the event loop."""
 
-    def __init__(self, limits: Limits, clock: Callable[[], float] = time.monotonic) -> None:
-        self.limits: Final = limits
+    def __init__(self, policy: Policy, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limits: Final = policy.limits
+        self._enforced: Final = policy.enforced
         self._clock: Final = clock
         self._accounts: Final[dict[Key, _Account]] = {}
         self._swept_at: float = clock()
@@ -76,10 +90,14 @@ class Admission:
         """Take a place for one request of `actor`, and return what gives it back. Raises
         `TooManyRequests` when `actor` has `in_flight` requests here, or has spent its burst
         faster than `per_second`. Its `Retry-After` is the seconds until the next request fits
-        the rate, or the spacing of the rate when one already fits, and at least 1."""
+        the rate, or the spacing of the rate when one already fits, and at least 1. Under a
+        policy that evaluates, admits the request outside the count and reports the bound
+        instead, so the reports match what an enforced policy would refuse."""
         account = self._account(actor)
-        if account.in_flight >= self.limits.in_flight or account.tokens < 1:
-            raise TooManyRequests(retry_after=self._wait(account))
+        if account.in_flight >= self.limits.in_flight:
+            return self._over("in_flight", account)
+        if account.tokens < 1:
+            return self._over("rate", account)
         account.tokens -= 1
         account.in_flight += 1
 
@@ -91,10 +109,11 @@ class Admission:
     def stream(self, actor: Actor) -> Release:
         """Take a place for one stream of `actor`, and return what gives it back. Raises
         `TooManyRequests` when `actor` has `streams` streams open here, with the `Retry-After`
-        that `admit` gives."""
+        that `admit` gives. Under a policy that evaluates, admits the stream outside the count and
+        reports the bound instead."""
         account = self._account(actor)
         if account.streams >= self.limits.streams:
-            raise TooManyRequests(retry_after=self._wait(account))
+            return self._over("streams", account)
         account.streams += 1
 
         def release() -> None:
@@ -127,9 +146,20 @@ class Admission:
             if account.in_flight == 0 and account.streams == 0 and now - account.at >= refill:
                 del self._accounts[key]
 
+    def _over(self, bound: Bound, account: _Account) -> Release:
+        if not self._enforced:
+            log.admission_would_refuse(bound)
+            return _nothing_held
+        log.admission_refused(bound)
+        raise TooManyRequests(retry_after=self._wait(account), bound=bound)
+
     def _wait(self, account: _Account) -> int:
         short = 1 - account.tokens if account.tokens < 1 else 1
         return max(1, math.ceil(short / self.limits.per_second))
+
+
+def _nothing_held() -> None:
+    """The release of a request or a stream admitted outside the count."""
 
 
 def _once(release: Release) -> Release:
@@ -144,11 +174,13 @@ def _once(release: Release) -> Release:
     return once
 
 
-def instrument(app: FastAPI, limits: Limits) -> None:
-    """Admit the requests `app` serves under `limits`. Each build of the middleware stack holds
-    one `Admission`. Call it after `request_events.instrument`, so a place comes back only once
-    the request event is recorded."""
-    app.add_middleware(AdmitsRequests, limits=limits)
+def instrument(app: FastAPI, policy: Policy) -> None:
+    """Admit the requests `app` serves under `policy`, and keep it on
+    `app.state.admission_policy` for the lifespan. Each build of the middleware stack holds one
+    `Admission`. Call it after `request_events.instrument`, so a place comes back only once the
+    request event is recorded."""
+    app.state.admission_policy = policy
+    app.add_middleware(AdmitsRequests, policy=policy)
 
 
 def admit(request: Request, actor: Actor) -> None:
@@ -169,7 +201,11 @@ def admit(request: Request, actor: Actor) -> None:
 def stream(request: Request, actor: Actor) -> None:
     """Take a place for the stream `request` opens, which `AdmitsRequests` gives back when the
     response ends. Call it in a route whose response stays open. Raises `TooManyRequests` over a
-    bound, and the request records no request event."""
+    bound, and the request records no request event. A request admitted outside the count, under
+    a policy that evaluates, opens its stream outside the count too."""
+    if getattr(request.state, _REQUEST, None) is _nothing_held:
+        setattr(request.state, _STREAM, _nothing_held)
+        return
     try:
         release = _admission_of(request).stream(actor)
     except TooManyRequests:
@@ -188,9 +224,9 @@ def _admission_of(request: Request) -> Admission:
 class AdmitsRequests:
     """The middleware `instrument` adds."""
 
-    def __init__(self, app: ASGIApp, limits: Limits) -> None:
+    def __init__(self, app: ASGIApp, policy: Policy) -> None:
         self._app: ASGIApp = app
-        self._admission: Admission = Admission(limits)
+        self._admission: Admission = Admission(policy)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":

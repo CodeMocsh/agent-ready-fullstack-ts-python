@@ -27,6 +27,7 @@ from starlette.middleware import Middleware
 from starlette.routing import BaseRoute
 
 from app import log
+from app.deployment import ADMISSION_ENV, stated
 from app.lifespan import build_routes
 from app.main import assemble
 from app.store import Database
@@ -43,6 +44,10 @@ class SharedTwiceInOneTest(RuntimeError):
 
 class SharedPastItsTest(RuntimeError):
     """Something read the state of a shared app after the test it was shared with ended."""
+
+
+class SharedWithAdmission(RuntimeError):
+    """A test asked `routed` for an app while the environment sets a variable of admission."""
 
 
 class SharedWithTelemetry(RuntimeError):
@@ -154,12 +159,19 @@ def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
 
     Shares by the identity of `routers`: a router built in each test builds a new app each time,
     and the process keeps it. Raises `SharedTwiceInOneTest` when this test asked for it already,
-    and `SharedWithTelemetry` when the environment configures telemetry. Starts nothing. Blocks
-    the first time it builds the app for `routers`: call it off the event loop."""
+    `SharedWithTelemetry` when the environment configures telemetry, and `SharedWithAdmission`
+    when it sets a variable of admission. Starts nothing. Blocks the first time it builds the app
+    for `routers`: call it off the event loop."""
     if build_telemetry() is not None:
         raise SharedWithTelemetry(
             "The environment configures telemetry, and an instrumented app cannot be shared. "
             "Build this app with tests.routed.assembled."
+        )
+    set_here = [name for name in ADMISSION_ENV if stated(name)]
+    if set_here:
+        raise SharedWithAdmission(
+            f"The environment sets {', '.join(set_here)}, and a shared app keeps the admission it "
+            f"was built with. Build this app with tests.routed.assembled."
         )
     key = tuple(id(router) for router in routers)
     if key in _SHARED_WITH_THIS_TEST:

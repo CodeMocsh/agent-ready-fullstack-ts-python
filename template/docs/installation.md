@@ -352,6 +352,21 @@ What to expect, because it is not all free:
     "A tab runs the deployed build".
   [adr/template/0025](adr/template/0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md)
   says why.
+- **From 0.60.0 a deployment can replace each number of admission, and evaluate it.**
+  - `ADMISSION_IN_FLIGHT`, `ADMISSION_PER_SECOND`, `ADMISSION_BURST` and `ADMISSION_STREAMS` each
+    replace one field of `LIMITS`. With `ADMISSION_MODE=evaluate` the process admits a request
+    over a bound and writes `admission would refuse`. The process refuses to start on a value
+    that is not one.
+  - A `429`'s `detail` now names the bound that refused it. A test that compared the whole
+    sentence must compare its start instead.
+  - `devtools/contract-test.sh` reads `devtools/contract-test.env`, which is yours, for the
+    admission numbers of its backend. If your suite gets a `429`, run
+    `ADMISSION_MODE=evaluate make test-contract`, read the count by bound at its end, and set
+    `ADMISSION_BURST`, `ADMISSION_PER_SECOND` or `ADMISSION_IN_FLIGHT` in that file. Drop any
+    switch you added to give the suite unbounded admission, and any edit you made to
+    `contract-test.sh` for it.
+  [adr/template/0023](adr/template/0023-the-server-admits-each-actor-s-requests-within-a-bound.md)
+  says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

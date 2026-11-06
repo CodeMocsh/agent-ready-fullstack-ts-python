@@ -1452,7 +1452,7 @@ run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
 echo "==> assert the startup gate refuses telemetry imported in every process"
 MAIN=backend/app/main.py
-LAZY='from app import admission, admission_limits, audit_events, log, request_events, waits'
+LAZY='from app import admission, audit_events, log, request_events, waits'
 grep -qxF "$LAZY" "$MAIN" || fail "$MAIN no longer says '$LAZY', so the startup gate mutation tests nothing"
 cp "$MAIN" "$WORK/main.py"
 sed -i.bak "s/^$LAZY\$/$LAZY, telemetry/" "$MAIN" && rm -f "$MAIN.bak"
