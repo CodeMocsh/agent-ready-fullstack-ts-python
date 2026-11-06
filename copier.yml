@@ -139,6 +139,7 @@ _skip_if_exists:
   - backend/app/request_line.py
   - backend/app/log_lines.py
   - backend/app/connection_budget.py
+  - backend/app/admission_limits.py
   - backend/tests/tiers.py
   - backend/tests/models/layers.py
   - frontend/e2e/signed-in.ts

@@ -288,12 +288,31 @@ What to expect, because it is not all free:
     too. Let it wait and try again. A loop that ends its process on one turns a full server into
     a restart.
   - A request that gets no connection answers `503` with `Retry-After`, and records no request
-    event. Every route under `app/routes/tenant/` declares it, so run `make openapi`.
+    event. Every route that verifies a credential declares it, so run `make openapi`.
   - `PostgresDatabase` takes `draws=` and no `max_size=`. A test that wants a pool of one passes
     `Draws(instances=1, in_process={}, outside={}, pool=1)`.
   - `app/connection_budget.py` and `app/store/budget.py` are two more files in the startup count.
     Record your count again, with the command in the 0.53.0 step.
   [adr/template/0022](adr/template/0022-the-connections-of-every-process-fit-inside-max-connections.md) says why.
+- **From 0.57.0 each process admits each actor's requests within a bound.** An actor is the
+  issuer and the subject that a credential names.
+  - Set the numbers in `app/admission_limits.py`. Under the identity stub every request is one
+    actor, so the numbers hold for everybody at once, in each process.
+  - Keep `in_flight` under the template's pool, which the line `connections budgeted` names.
+  - If your resolver reads the database, call `app.admission.admit(request, actor)` where it
+    verifies the credential, before that read. `resolved_principal` admits the rest.
+  - Make `in_flight` and `burst` each at least the largest read budget in
+    `frontend/tests/read-budgets.ts`, plus the streams that screen opens. A draw sends its reads at
+    once, and admission refuses rather than queues, so a screen over them gets a `429` on its own
+    first draw.
+  - A request over a bound answers `429` with `Retry-After`, and records no request event. Every
+    route that verifies a credential declares it, so run `make openapi`.
+  - A route whose response stays open, such as a stream, calls
+    `app.admission.stream(request, principal.actor)` before it answers.
+  - A route test that sends more requests at once than `LIMITS` admits gets a `429`.
+  - `app/admission.py` and `app/admission_limits.py` are two more files in the startup count.
+    Record your count again, with the command in the 0.53.0 step.
+  [adr/template/0023](adr/template/0023-the-server-admits-each-actor-s-requests-within-a-bound.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

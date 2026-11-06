@@ -59,6 +59,12 @@ for every deployment that does not run `app.serve`.
   result. Redirect flows are not affected, and they are the flows to use. A project that needs
   the popup removes this header and loses the cross-window isolation.
 
+- **A limit on how often a client calls is not the edge's alone.** The edge limits each
+  address, before authentication. The process admits each actor, after it, in every
+  topology: `app.main` carries it, and `app.serve` carries it because it mounts `app.main`. The
+  two limits have different keys, so neither narrows the other.
+  [0023](0023-the-server-admits-each-actor-s-requests-within-a-bound.md) holds that decision.
+
 ## Considered options
 
 - **Headers in `app.main`, so that every topology gets them.** Two policies intersect, and the

@@ -190,6 +190,15 @@ export interface operations {
                     "application/json": components["schemas"]["Task"][];
                 };
             };
+            /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
             /** @description No database connection is free. Ask again after the seconds in Retry-After */
             503: {
                 headers: {
@@ -230,6 +239,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             /** @description No database connection is free. Ask again after the seconds in Retry-After */
@@ -277,6 +295,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             /** @description No database connection is free. Ask again after the seconds in Retry-After */
@@ -330,6 +357,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             /** @description No database connection is free. Ask again after the seconds in Retry-After */

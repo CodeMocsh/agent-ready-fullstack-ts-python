@@ -65,6 +65,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too many requests from this actor. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           }
         }
       },
@@ -94,6 +104,16 @@
           },
           "503": {
             "description": "No database connection is free. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this actor. Ask again after the seconds in Retry-After",
             "content": {
               "application/json": {
                 "schema": {
@@ -161,6 +181,16 @@
               }
             }
           },
+          "429": {
+            "description": "Too many requests from this actor. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Task not found",
             "content": {
@@ -203,6 +233,16 @@
           },
           "503": {
             "description": "No database connection is free. Ask again after the seconds in Retry-After",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests from this actor. Ask again after the seconds in Retry-After",
             "content": {
               "application/json": {
                 "schema": {

@@ -7,7 +7,8 @@ lifespan grows with the project. Outside `tests/started/` and the tiers, `tests/
 refuses a test that enters it. `docs/adr/template/0018`.
 
 **`routed` builds one shared app for each set of routers in the process.** It shares that app with
-one test at a time, with a new `app.state` and no `dependency_overrides`. The test may not change
+one test at a time, with a new `app.state`, no `dependency_overrides` and a new middleware stack,
+so no count a middleware holds passes from one test to the next. The test may not change
 what the app serves. `take_back` ends the share after the teardown of the test, and raises
 `SharedAppChanged` when the test changed it. A test that changes its app builds it with
 `assembled`.
@@ -147,8 +148,9 @@ class _Ended(State):
 def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
     """The shared app that serves `routers`, with everything `assemble` puts around a route, and
     each of its routes built, as the lifespan builds them. Its `app.state` holds what `assemble`
-    put there, `database`, and each of `state` under its name. It has no `dependency_overrides`
-    and no OpenAPI schema yet, and its log lines name the `service.version` the environment names.
+    put there, `database`, and each of `state` under its name. It has no `dependency_overrides`,
+    no OpenAPI schema and no middleware stack yet, and its log lines name the `service.version`
+    the environment names.
 
     Shares by the identity of `routers`: a router built in each test builds a new app each time,
     and the process keeps it. Raises `SharedTwiceInOneTest` when this test asked for it already,
@@ -173,6 +175,7 @@ def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
     log.configure(build_service_version())
     shared.app.dependency_overrides.clear()
     shared.app.openapi_schema = None
+    shared.app.middleware_stack = None
     shared.app.state = State({**shared.assembled_state, "database": database, **state})
     _SHARED_WITH_THIS_TEST.append(key)
     return shared.app

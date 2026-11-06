@@ -13,6 +13,8 @@ backend/
   app/refusal.py      how a route says no: ApiError and responses(...)
   app/request_line.py the fields `request completed` names, beyond tenant_id -- yours
   app/connection_budget.py  what one process holds open to Postgres beside the pool -- yours
+  app/admission.py    how many requests of one actor a process admits, and the 429
+  app/admission_limits.py  the numbers admission holds each actor to -- yours
   app/errors.py       every refusal a route can answer, once each -- yours
   app/deps.py         what a route is handed
   app/wiring.py       what this deployment configured, read from the environment
