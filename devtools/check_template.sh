@@ -609,7 +609,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
-              log main models observe routes serve started store telemetry waits wiring worker"
+              log main models observe pacing routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -1499,6 +1499,29 @@ printf '%s\n' "$out" | grep -q 'reportCallIssue' || {
     printf '%s\n' "$out" >&2
     exit 1
 }
+
+echo "==> assert the lint refuses work beside the requests with no bound, and a loop of sleeps"
+cat >backend/app/planted_waits.py <<'PY'
+import asyncio
+
+from app.waits import beside
+
+
+async def polls_its_own_rows() -> None:
+    while True:
+        await asyncio.sleep(1)
+
+
+def starts_long_work() -> None:
+    _ = beside(polls_its_own_rows(), name="a poll")
+PY
+slept="$(cd backend && uv run --no-sync ruff check app/planted_waits.py 2>&1)" && sleep_refused=no || sleep_refused=yes
+unbounded="$(cd backend && uv run --no-sync basedpyright app/planted_waits.py 2>&1)" && bound_refused=no || bound_refused=yes
+rm backend/app/planted_waits.py
+[ "$sleep_refused" = yes ] || fail "ruff passed a bare asyncio.sleep in app/. A loop of sleeps on rows this system writes is the poll that docs/adr/template/0027 replaces with a wake."
+printf '%s\n' "$slept" | grep -q 'app.pacing' || { printf '%s\n' "$slept" >&2; fail "ruff refused the sleep, but its message does not name app.pacing"; }
+[ "$bound_refused" = yes ] || fail "basedpyright passed app.waits.beside with no within=. Without a bound, beside is the home of long work again."
+printf '%s\n' "$unbounded" | grep -q 'within' || { printf '%s\n' "$unbounded" >&2; fail "basedpyright refused the planted module, but not for the missing within="; }
 
 echo "==> frontend: lint, test, build"
 

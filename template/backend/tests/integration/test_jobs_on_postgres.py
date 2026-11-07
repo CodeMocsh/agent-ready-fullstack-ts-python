@@ -20,6 +20,7 @@ from app.store.jobs import LEASE_LOST, MAX_ATTEMPTS, Handler, LeaseLost, Leases,
 from app.store.pg import PostgresDatabase
 from app.store.pg_jobs import JobClaims
 from app.worker import run, work
+from tests.clock import elapse
 from tests.integration.conftest import ONE_PROCESS, Provisioned
 from tests.jobs_contract import ASKER
 from tests.pages import every_task
@@ -91,13 +92,13 @@ async def ended(database: PostgresDatabase, id: str) -> Job:
             assert job is not None
             if job.state != "pending":
                 return job
-            await asyncio.sleep(0.05)
+            await elapse(0.05)
 
 
 async def until(condition: Callable[[], Awaitable[bool]]) -> None:
     async with asyncio.timeout(WITHIN):
         while not await condition():
-            await asyncio.sleep(0.02)
+            await elapse(0.02)
 
 
 async def test_an_attempt_whose_lease_ended_writes_nothing_after_another_worker_claims_the_job(
@@ -108,7 +109,7 @@ async def test_an_attempt_whose_lease_ended_writes_nothing_after_another_worker_
     _ = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
     slow = await claims.claim([A_KIND])
     assert slow is not None
-    await asyncio.sleep(SHORT.lease + 0.2)
+    await elapse(SHORT.lease + 0.2)
 
     fast = await claims.claim([A_KIND])
 
@@ -130,7 +131,7 @@ async def test_a_job_whose_transaction_is_open_is_not_claimed_when_its_lease_end
 
     with fenced(held):
         async with database.scoped(SENTINEL_TENANT):
-            await asyncio.sleep(SHORT.lease + 0.2)
+            await elapse(SHORT.lease + 0.2)
             assert await claims.claim([A_KIND]) is None
 
     after = await claims.claim([A_KIND])
@@ -176,7 +177,7 @@ async def test_a_job_wakes_a_worker_that_waits_for_one(
         work(JobClaims(database, SHORT), kinds(ends_at_once), at_once=1, sweep=3600.0)
     )
     try:
-        await asyncio.sleep(0.5)
+        await elapse(0.5)
         asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
         job = await ended(database, asked.id)
     finally:
@@ -194,7 +195,7 @@ async def test_a_job_whose_lease_ended_on_each_attempt_is_dead(
     asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
     for _ in range(MAX_ATTEMPTS):
         assert await claims.claim([A_KIND]) is not None
-        await asyncio.sleep(0.1)
+        await elapse(0.1)
 
     last = await claims.claim([A_KIND])
     assert last is not None

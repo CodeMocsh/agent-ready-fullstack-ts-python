@@ -18,6 +18,7 @@ from app.audit_events import AuditEventPage, RequestEvent
 from app.deployment import ADMISSION_IN_FLIGHT_ENV, ADMISSION_MODE_ENV, ADMISSION_STREAMS_ENV
 from app.deps import admitted
 from app.identity.shared import Actor, Principal
+from app.pacing import yield_now
 from app.refusal import SAID_OF_EACH_BOUND, TooManyRequests
 from app.store import AuditEvents, Database
 from tests.conftest import Logged
@@ -177,7 +178,7 @@ class Held:
     async def entered(self, count: int) -> None:
         async with asyncio.timeout(5):
             while self.count < count:
-                await asyncio.sleep(0)
+                await yield_now()
 
 
 def an_app(database: Database, held: Held) -> FastAPI:
@@ -300,7 +301,7 @@ async def test_a_request_holds_its_place_until_its_request_event_is_recorded(
         ]
         async with asyncio.timeout(5):
             while recording.waiting < LIMITS.in_flight:
-                await asyncio.sleep(0)
+                await yield_now()
         refused = await refused_within(app, "/held", "alice")
         recording.go.set()
 

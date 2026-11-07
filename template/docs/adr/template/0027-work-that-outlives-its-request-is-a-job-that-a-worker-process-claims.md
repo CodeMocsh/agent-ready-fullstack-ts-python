@@ -121,16 +121,19 @@ More CPU for the same process does not help. One event loop uses one core.
   refuses a statement bound of 9 s or more, which is a rule of the web process.
 - **`beside(work, name=..., within=...)` takes a bound under `REQUEST_BUDGET_SECONDS`.** `beside`
   is for work that the caller does not wait for, not for work that is long. Work that may take
-  longer is a job. A bound past the budget raises, and its message names jobs. The message of
+  longer is a job. A bound that is not under the budget raises `BesideOutlastsTheBudget`, whose
+  message names `app/jobs.py`. Past its bound, the work is cancelled and fails with
+  `WaitTimedOut`. The message of
   `WaitOutlastsTheRequest` names jobs too.
 - **ruff refuses a bare sleep.** `asyncio.sleep`, `anyio.sleep` and `time.sleep` are in
-  `banned-api`, and each message names the helpers in `app/pacing.py`. Each helper names why it
+  `banned-api`, and each message names the helpers in `app/pacing.py`. A test waits on time
+  through `tests/clock.py`: `elapse` and `hold_the_thread`. Each helper names why it
   waits:
   - `every(period)` for a periodic loop;
   - `backoff(...)` for a retry inside one call, with a bound;
   - `yield_now()` to give the event loop a turn;
-  - `poll_outside(check, every=..., within=...)` for a system outside the process that has no
-    push, with a deadline.
+  - `poll_outside(check, period=..., within=..., on=...)` for a system outside the process that
+    has no push, inside `waiting`, so its bound is under the budget in a request.
   No helper waits on rows that this system writes. That wait is a wake.
 - **`check_template.sh` plants a `beside` with no bound and a loop of sleeps**, and expects the
   lint to fail on each.

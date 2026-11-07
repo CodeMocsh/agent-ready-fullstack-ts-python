@@ -3,10 +3,9 @@ an error at teardown of its test, from either event loop a test runs on. A step 
 is not. A garbage collection that runs during a step does not count. The limit on this machine
 is `HELD_SECONDS` scaled by how fast it runs a fixed workload."""
 
-import asyncio
-
 import pytest
 
+from app.pacing import yield_now
 from tests.event_loop import (
     HELD_SECONDS,
     REFERENCE_WORKLOAD_SECONDS,
@@ -111,7 +110,7 @@ async def test_a_test_that_uses_the_cpu_past_the_limit_on_its_event_loop_is_repo
     asyncio_reports: Reported, step_limit: StepLimit
 ) -> None:
     hold_the_event_loop(step_limit.seconds + 0.05)
-    await asyncio.sleep(0)
+    await yield_now()
 
     assert len(asyncio_reports.failures()) == 1
     asyncio_reports.held_on_purpose()

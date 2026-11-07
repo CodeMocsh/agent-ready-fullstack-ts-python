@@ -20,6 +20,7 @@ from app import jobs, log
 from app.audit_events import acting_as
 from app.environment import refuse_development_settings
 from app.loop_watch import LoopWatch
+from app.pacing import backoff, every
 from app.store import DatabaseBusy
 from app.store.jobs import (
     LEASE_LOST,
@@ -70,7 +71,7 @@ async def _slot(claims: JobClaims, kinds: Kinds, wake: asyncio.Event, sweep: flo
                 await run(claims, kinds, claim)
         except DatabaseBusy as busy:
             log.database_busy(type(busy).__name__)
-            await asyncio.sleep(busy.retry_after)
+            await backoff(busy.retry_after)
 
 
 async def _woken(wake: asyncio.Event, within: float) -> None:
@@ -129,8 +130,7 @@ async def _renewing[T](claims: JobClaims, claim: Claim, attempt: Coroutine[Any, 
 
 
 async def _renew(claims: JobClaims, claim: Claim) -> None:
-    while True:
-        await asyncio.sleep(claims.leases.renewal)
+    async for _ in every(claims.leases.renewal):
         try:
             await claims.renew(claim)
         except DatabaseBusy as busy:

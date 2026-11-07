@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from tests.clock import hold_the_thread
 from tests.integration.conftest import Provisioned
 
 BACKEND: Final = Path(__file__).resolve().parents[2]
@@ -90,5 +91,5 @@ def _ended(client: TestClient, id: str) -> dict[str, Any]:
         job: dict[str, Any] = client.get(f"/jobs/{id}").json()
         if job["state"] != "pending":
             return job
-        time.sleep(0.05)
+        hold_the_thread(0.05)
     raise AssertionError(f"the job {id} was still pending after {WITHIN} s")

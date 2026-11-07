@@ -4,7 +4,6 @@
 that has not ended. The memory half is `tests/store/test_jobs_contract.py`.
 """
 
-import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -13,6 +12,7 @@ from app.store.jobs import Leases
 from app.store.pg import PostgresDatabase
 from app.store.pg_jobs import JobClaims
 from app.worker import run
+from tests.clock import elapse
 from tests.integration.conftest import ONE_PROCESS, Provisioned
 from tests.jobs_contract import CONTRACT_KINDS, Finish, JobsContract
 
@@ -50,6 +50,6 @@ class TestThePostgresSubstrate(JobsContract):
                 async with database.connection() as conn:
                     if await conn.fetchval(_LEFT) == 0:
                         return
-                await asyncio.sleep(QUICK.retry)
+                await elapse(QUICK.retry)
 
         return finished

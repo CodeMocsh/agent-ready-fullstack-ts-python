@@ -31,7 +31,10 @@ backend/
   app/log_lines.py    every other line the application logs -- yours
   app/telemetry.py    traces and metrics over OTLP; nothing else instruments the app
   app/loop_watch.py   reports a held event loop, in every deployment
-  app/waits.py        bounds each wait outside the process; beside runs the long ones
+  app/waits.py        bounds each wait outside the process; beside runs short work nobody awaits
+  app/pacing.py       every wait on time, named for why it waits
+  app/jobs.py         each kind of job, and its handler -- yours
+  app/worker.py       the worker process, `python -m app.worker`: claims and runs the jobs
   app/migrate.py      the entrypoint `make migrate` runs
   app/store/          the data layer; ddl.py is the schema, as data
   tests/              mirrors app/, except tests/started/ and each tier
@@ -115,9 +118,18 @@ backend/
   adapter with a double, so a `waiting` inside the real adapter runs in no route test. Keep the
   bound as a constant beside the port. The adapter hands it to its driver, and the caller hands
   it to `waiting`. The double then runs inside the same block, and the route test fails.
-- **Start a wait past the budget with `beside(work, name=...)`**, and answer `202`. `work` is a
-  coroutine, and the task ends with its result. The task runs outside every request, and acts as
-  the actor of the code that started it. A task that `asyncio.create_task` or `BackgroundTasks`
+- **Make a wait past the budget a job.** Name its kind in `app/jobs.py`, with a handler that takes
+  the store of the job's tenant and the job's input, and returns the outcome. A route asks for it
+  with `Database.jobs(tenant_id).ask(kind, input)`, through `JobsDep`, and answers `202` with the
+  job. The browser reads `GET /jobs/{id}` again until the job is `done` or `dead`. On Postgres the
+  worker process, `python -m app.worker`, runs it as the actor that asked. A job runs at least
+  once, so a handler does on a second run what it did on the first. A handler that raises is
+  tried again, and after `MAX_ATTEMPTS` attempts the job is `dead`.
+  [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
+- **Start short work the caller does not wait for with `beside(work, name=..., within=...)`.**
+  `within` is under `REQUEST_BUDGET_SECONDS`, and past it the work fails with `WaitTimedOut`.
+  `work` is a coroutine, and the task ends with its result. The task runs outside every request,
+  and acts as the actor of the code that started it. It ends with its process. A task that `asyncio.create_task` or `BackgroundTasks`
   starts is still in its request, so its `waiting` raises: ruff refuses both, and
   `asyncio.ensure_future`.
   A task that raises writes the ERROR line `work beside the requests failed`. The lifespan
@@ -129,7 +141,7 @@ backend/
   `await shared.joined(key, start)`. The first call for `key` starts `start()`, and each call
   that arrives before the run ends awaits the same run. A cancelled caller stops awaiting, and
   the run goes on for the others. Each run is in a request, whoever starts it, so each `waiting`
-  in it has a bound under the budget. A wait that may last longer goes in `beside`, with a poll.
+  in it has a bound under the budget. A wait that may last longer is a job.
 - **The key names everything the result of shared work depends on.** Each caller gets the result of
   the work that the first caller started, in the context of the first caller: its actor, its
   request id and its trace. Put the tenant, the actor and the arguments in the key. A key without
@@ -137,13 +149,15 @@ backend/
 - **Shared work reports how each run ended.** A failure raises in each caller that awaits the
   run, and the ERROR line `shared work failed` names it. The lifespan cancels a run still in
   flight at shutdown, and the WARNING line `shared work cancelled` names it.
-- **Each task has one of four homes.** Work that waits past the budget goes in `beside`. Work a
-  caller awaits together goes in an `asyncio.TaskGroup`, and so does an `asyncio.gather` without
+- **Each task has one of five homes.** Work that waits past the budget is a job. Short work the
+  caller does not wait for goes in `beside`. Work a caller awaits together goes in an
+  `asyncio.TaskGroup`, and so does an `asyncio.gather` without
   `return_exceptions=True`: it leaves the others running after the first failure. Work several
   callers await at once goes in `SharedWork`. A loop that the lifespan starts and stops in its own
   order goes in one module of yours, named in the `per-file-ignores` of `pyproject.toml` as
   `["TID251"]`, with its reason. That entry also lets the module import `logging` and the other
-  banned modules, so keep it to the loops.
+  banned modules, so keep it to the loops. A loop paces itself with `app.pacing.every`, and a loop
+  that waits on rows this system writes waits on a wake, never on a sleep.
 - **Postgres is not wrapped.** The process refuses to start on a bound that is not under the
   budget. [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,

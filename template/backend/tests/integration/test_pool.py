@@ -18,6 +18,7 @@ from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
 from app.store.pg import TIMEOUTS, AcquireTimedOut, ConnectionRefused, PostgresDatabase, Timeouts
 from app.wiring import build
+from tests.clock import elapse
 from tests.event_loop import Reported, hold_the_event_loop
 from tests.integration.conftest import Provisioned, connect
 
@@ -78,7 +79,7 @@ async def test_a_transaction_left_idle_is_ended_by_postgres_and_its_connection_r
 
     async with database.connection() as conn:
         await conn.transaction().start()
-        await asyncio.sleep(1)
+        await elapse(1)
         with pytest.raises(driver().InterfaceError):
             await conn.execute("SELECT 1")
 
@@ -95,7 +96,7 @@ async def test_a_transaction_ended_by_postgres_while_the_loop_was_busy_gives_its
         async with database.connection() as conn, conn.transaction():
             await conn.execute("SELECT 1")
             begun.set()
-            await asyncio.sleep(0.05)
+            await elapse(0.05)
             await conn.execute("SELECT 1")
 
     async def busy() -> None:

@@ -1,11 +1,12 @@
 """The waits on systems outside the process, and the tasks that run past one caller.
 
 A wait in a request has a bound under `REQUEST_BUDGET_SECONDS`. `waiting` bounds each wait, and
-refuses one in a request that may last as long as the budget. Work that waits longer runs beside
-the requests: `beside` starts it outside every request. Work that several callers await at once
-is shared work: `SharedWork` runs it one run at a time for each key, and each wait in a run has a
-bound under the budget. The lifespan cancels what is still running at shutdown.
-`docs/adr/template/0021`.
+refuses one in a request that may last as long as the budget. Work that waits longer is a job,
+which a worker process runs: `app/jobs.py`. Work that the caller does not wait for, and that ends
+within the budget, runs beside the requests: `beside` starts it outside every request. Work that
+several callers await at once is shared work: `SharedWork` runs it one run at a time for each
+key, and each wait in a run has a bound under the budget. The lifespan cancels what is still
+running at shutdown. `docs/adr/template/0021` and `0027`.
 """
 
 import asyncio
@@ -35,6 +36,11 @@ _STARTED: Final[set[asyncio.Task[Any]]] = set()
 class WaitOutlastsTheRequest(RuntimeError):
     """A wait in a request, or in shared work, has a bound that is not under
     `REQUEST_BUDGET_SECONDS`."""
+
+
+class BesideOutlastsTheBudget(ValueError):
+    """Work beside the requests has a bound that is not under `REQUEST_BUDGET_SECONDS`. Work
+    that may take longer is a job."""
 
 
 class WaitTimedOut(TimeoutError):
@@ -84,8 +90,8 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
     if _IN_A_REQUEST.get() and seconds >= REQUEST_BUDGET_SECONDS:
         raise WaitOutlastsTheRequest(
             f"{on} may wait {seconds} s in a request or in shared work, and each wait there has a "
-            f"bound under {REQUEST_BUDGET_SECONDS} s. Start the work with app.waits.beside, answer "
-            f"202, and tell the browser the result when the work ends."
+            f"bound under {REQUEST_BUDGET_SECONDS} s. Make the work a job in app/jobs.py, ask for "
+            f"it, and answer 202. The browser reads the job until it ends."
         )
     bound = asyncio.timeout(seconds)
     try:
@@ -97,19 +103,37 @@ async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
         raise WaitTimedOut(f"{on} did not answer within {seconds} s") from error
 
 
-def beside[T](work: Coroutine[Any, Any, T], name: str) -> asyncio.Task[T]:
+def beside[T](work: Coroutine[Any, Any, T], name: str, *, within: float) -> asyncio.Task[T]:
     """Run `work` on the running loop, outside every request, as the task named `name`, and
-    return the task. The task ends with the result of `work`. A request does not await it: a
+    return the task. Past `within` seconds the work is cancelled, and the task raises
+    `WaitTimedOut`. The task ends with the result of `work`. A request does not await it: a
     request that awaits it waits as long as the work.
 
-    A `waiting` in it may last past `REQUEST_BUDGET_SECONDS`. It acts as the actor the caller acts
-    as. `log.beside_failed` names a failure, and `log.beside_cancelled` a cancellation, before the
-    task is done for anything that awaits it. `cancel_beside` cancels it at shutdown. Raises
+    It acts as the actor the caller acts as. `log.beside_failed` names a failure, and
+    `log.beside_cancelled` a cancellation, before the task is done for anything that awaits it.
+    `cancel_beside` cancels it at shutdown. Raises `BesideOutlastsTheBudget` when `within` is not
+    under `REQUEST_BUDGET_SECONDS`: work that may take longer is a job, in `app/jobs.py`. Raises
     `RuntimeError` off the event loop.
     """
+    if not 0 < within < REQUEST_BUDGET_SECONDS:
+        work.close()
+        raise BesideOutlastsTheBudget(
+            f"{name} runs beside the requests within {within} s, and work beside the requests "
+            f"ends within {REQUEST_BUDGET_SECONDS} s. Make work that may take longer a job in "
+            f"app/jobs.py, which the worker process runs."
+        )
     return _started(
-        work, name, in_a_request=False, failed=log.beside_failed, cancelled=log.beside_cancelled
+        _bounded(work, name, within),
+        name,
+        in_a_request=False,
+        failed=log.beside_failed,
+        cancelled=log.beside_cancelled,
     )
+
+
+async def _bounded[T](work: Coroutine[Any, Any, T], name: str, within: float) -> T:
+    async with waiting(within, on=name):
+        return await work
 
 
 class SharedWork[K, T]:

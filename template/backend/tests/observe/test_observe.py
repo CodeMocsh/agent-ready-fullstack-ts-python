@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.deployment import OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.main import create_app
 from app.telemetry import METRIC_ATTRIBUTES, SPAN_ATTRIBUTES
+from tests.clock import hold_the_thread
 from tests.doubles import CANARY
 from tests.widgets import with_widgets
 
@@ -34,7 +35,7 @@ def eventually[T](read: Callable[[], T | None], what: str) -> T:
         answer = read()
         if answer is not None:
             return answer
-        time.sleep(2)
+        hold_the_thread(2)
     raise AssertionError(f"{what} never arrived within {PATIENCE_SECONDS}s")
 
 

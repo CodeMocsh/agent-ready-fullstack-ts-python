@@ -222,6 +222,10 @@ ignore = [
 "tests/log/**" = ["TID251"]
 # The tests that start a task in a request, to show that it is still in the request.
 "tests/waits/**" = ["TID251"]
+# The one module that waits on time in the app, and the one that does in the tests. Each names
+# why it waits.
+"app/pacing.py" = ["TID251"]
+"tests/clock.py" = ["TID251"]
 # The one module that instruments the app, and the tests that read what it exports.
 "app/telemetry.py" = ["TID251"]
 "tests/telemetry/test_telemetry.py" = ["TID251"]
@@ -237,11 +241,16 @@ ignore = [
 "structlog".msg = "Log through a function in app/log_lines.py, which declares every field a line can carry."
 "opentelemetry".msg = "Instrument in app/telemetry.py, which declares every attribute a span or metric can carry."
 # A task started in a request is still in the request, so app.waits.waiting refuses its long wait.
-"asyncio.create_task".msg = "Start work beside the requests with app.waits.beside, share work several callers await with app.waits.SharedWork, and await concurrent work in an asyncio.TaskGroup."
-"asyncio.ensure_future".msg = "Start work beside the requests with app.waits.beside, share work several callers await with app.waits.SharedWork, and await concurrent work in an asyncio.TaskGroup."
-"fastapi.BackgroundTasks".msg = "FastAPI's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
-"fastapi.background".msg = "FastAPI's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
-"starlette.background".msg = "Starlette's BackgroundTasks run inside the request. Start work beside the requests with app.waits.beside."
+"asyncio.create_task".msg = "Ask for a job (app/jobs.py) for work that may outlast the request budget, start short work the caller does not wait for with app.waits.beside, share work several callers await with app.waits.SharedWork, and await concurrent work in an asyncio.TaskGroup."
+"asyncio.ensure_future".msg = "Ask for a job (app/jobs.py) for work that may outlast the request budget, start short work the caller does not wait for with app.waits.beside, share work several callers await with app.waits.SharedWork, and await concurrent work in an asyncio.TaskGroup."
+"fastapi.BackgroundTasks".msg = "FastAPI's BackgroundTasks run inside the request. Ask for a job (app/jobs.py), or start short work with app.waits.beside."
+"fastapi.background".msg = "FastAPI's BackgroundTasks run inside the request. Ask for a job (app/jobs.py), or start short work with app.waits.beside."
+"starlette.background".msg = "Starlette's BackgroundTasks run inside the request. Ask for a job (app/jobs.py), or start short work with app.waits.beside."
+# A sleep names no reason to wait, and a loop of sleeps on rows this system writes is a poll that
+# holds a connection and a slot while it waits. Each wait on time has a helper that names why.
+"asyncio.sleep".msg = "Wait through app.pacing: every for a loop on a period, backoff before a retry, yield_now for a turn of the loop, poll_outside for a system outside the process with no push. Wait on rows this system writes through a wake, never a sleep. In a test, use tests/clock.py."
+"anyio.sleep".msg = "Wait through app.pacing: every for a loop on a period, backoff before a retry, yield_now for a turn of the loop, poll_outside for a system outside the process with no push. Wait on rows this system writes through a wake, never a sleep. In a test, use tests/clock.py."
+"time.sleep".msg = "A blocking sleep holds the event loop. Wait through app.pacing. In a test, use tests/clock.py."
 
 [tool.ruff.lint.isort]
 # A package re-exports with `X as X` rather than a second list of names in `__all__`, and without

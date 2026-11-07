@@ -16,6 +16,7 @@ from app.identity.shared import Actor
 from app.store import Database
 from app.waits import (
     REQUEST_BUDGET_SECONDS,
+    BesideOutlastsTheBudget,
     BesideOutlivedItsCancel,
     SharedWork,
     WaitOutlastsTheRequest,
@@ -62,7 +63,7 @@ async def in_a_background_task(background: BackgroundTasks) -> None:
 
 @router.post("/beside-the-request", status_code=202)
 async def beside_the_request() -> None:
-    task = beside(waits_past_the_budget(), name=WORK)
+    task = beside(waits_past_the_budget(), name=WORK, within=UNDER_THE_BUDGET)
     async with waiting(1.0, on="the work beside the request"):
         _ = await asyncio.wait([task])
     task.result()
@@ -82,7 +83,7 @@ def test_a_request_refuses_a_wait_whose_bound_is_not_under_the_budget(
 ) -> None:
     with (
         TestClient(routed(router, database=database)) as client,
-        pytest.raises(WaitOutlastsTheRequest, match="app.waits.beside"),
+        pytest.raises(WaitOutlastsTheRequest, match="app/jobs.py"),
     ):
         _ = client.post("/in-the-request", params={"seconds": seconds})
 
@@ -133,7 +134,7 @@ async def test_a_task_beside_the_requests_acts_as_the_actor_that_started_it() ->
         acted_as.append(current_actor())
 
     with acting_as(ACTOR):
-        task = beside(records_its_actor(), name=WORK)
+        task = beside(records_its_actor(), name=WORK, within=UNDER_THE_BUDGET)
     _ = await asyncio.wait([task])
 
     assert acted_as == [ACTOR]
@@ -142,7 +143,7 @@ async def test_a_task_beside_the_requests_acts_as_the_actor_that_started_it() ->
 async def test_a_task_beside_the_requests_that_fails_writes_its_traceback(logged: Logged) -> None:
     log.configure(None)
 
-    _ = await asyncio.wait([beside(fails(), name=WORK)])
+    _ = await asyncio.wait([beside(fails(), name=WORK, within=UNDER_THE_BUDGET)])
 
     [line] = [one for one in logged() if one["message"] == "work beside the requests failed"]
     assert line["severity"] == "ERROR"
@@ -154,7 +155,7 @@ async def test_shutdown_cancels_the_tasks_beside_the_requests_and_names_each(
     logged: Logged,
 ) -> None:
     log.configure(None)
-    task = beside(waits_for_ever(), name=WORK)
+    task = beside(waits_for_ever(), name=WORK, within=UNDER_THE_BUDGET)
     await asyncio.sleep(0)
 
     await cancel_beside()
@@ -177,7 +178,7 @@ async def test_shutdown_names_a_task_that_outlives_its_cancel(
             await released.wait()
 
     monkeypatch.setattr(waits, "CANCELLED_WITHIN_SECONDS", 0.01)
-    task = beside(ends_only_when_released(), name=WORK)
+    task = beside(ends_only_when_released(), name=WORK, within=UNDER_THE_BUDGET)
     await asyncio.sleep(0)
 
     with pytest.raises(BesideOutlivedItsCancel, match=WORK):
@@ -192,7 +193,7 @@ async def test_a_task_beside_the_requests_ends_with_the_result_of_its_work() -> 
     async def answers() -> str:
         return "the image"
 
-    assert await beside(answers(), name=WORK) == "the image"
+    assert await beside(answers(), name=WORK, within=UNDER_THE_BUDGET) == "the image"
 
 
 class Draws:
@@ -302,3 +303,26 @@ async def test_shutdown_cancels_shared_work_still_in_flight_and_names_it(logged:
     [line] = [one for one in logged() if one["message"] == "shared work cancelled"]
     assert line["severity"] == "WARNING"
     assert line["work"] == SHARED
+
+
+@pytest.mark.parametrize(
+    "within", [REQUEST_BUDGET_SECONDS, PAST_THE_BUDGET, 0.0, math.inf, math.nan]
+)
+async def test_work_beside_the_requests_whose_bound_is_not_under_the_budget_is_refused(
+    within: float,
+) -> None:
+    with pytest.raises(BesideOutlastsTheBudget, match="app/jobs.py"):
+        _ = beside(waits_for_ever(), name=WORK, within=within)
+
+
+async def test_work_beside_the_requests_past_its_bound_is_cancelled_and_reported(
+    logged: Logged,
+) -> None:
+    log.configure(None)
+
+    task = beside(waits_for_ever(), name=WORK, within=0.01)
+    _ = await asyncio.wait([task])
+
+    assert isinstance(task.exception(), WaitTimedOut)
+    [line] = [one for one in logged() if one["message"] == "work beside the requests failed"]
+    assert line["work"] == WORK
