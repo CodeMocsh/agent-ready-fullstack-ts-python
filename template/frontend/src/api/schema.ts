@@ -234,6 +234,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
         };
     };
     read_job_jobs__id__get: {
@@ -276,6 +285,15 @@ export interface operations {
             };
             /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -341,6 +359,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
             /** @description No database connection is free. Ask again after the seconds in Retry-After */
             503: {
                 headers: {
@@ -385,6 +412,15 @@ export interface operations {
             };
             /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -441,6 +477,15 @@ export interface operations {
             };
             /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -510,6 +555,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
             /** @description No database connection is free. Ask again after the seconds in Retry-After */
             503: {
                 headers: {
@@ -552,6 +606,15 @@ export interface operations {
             };
             /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

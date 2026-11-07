@@ -204,3 +204,13 @@ def test_state_used_after_its_test_ended_fails_and_names_that_test(
 
     with pytest.raises(SharedPastItsTest, match=f"of the app .* with {EARLIER}"):
         use(held.state)
+
+
+def test_a_shared_app_cannot_keep_another_response_policy(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.routed import SharedWithResponseLimits
+
+    monkeypatch.setenv("RESPONSE_MAX_BYTES", "1024")
+    with pytest.raises(SharedWithResponseLimits, match="RESPONSE_MAX_BYTES"):
+        routed(SHARED, database=database)

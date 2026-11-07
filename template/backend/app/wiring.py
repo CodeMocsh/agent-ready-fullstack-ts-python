@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import unquote
 
-from app import admission_limits, connection_budget, jobs
+from app import admission_limits, connection_budget, jobs, response_limits
 from app.admission import Limits, Policy
 from app.deployment import (
     ACKNOWLEDGED_ENV,
@@ -40,6 +40,8 @@ from app.deployment import (
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
     RESOURCE_ATTRIBUTES_ENV,
+    RESPONSE_CEILING_BYTES_ENV,
+    RESPONSE_MAX_BYTES_ENV,
     SAMPLING_RATIO_ENV,
     SEMCONV_ENV,
     SERVICE_NAME_ENV,
@@ -398,3 +400,20 @@ def build(*, serves_requests: bool = True) -> Database:
         kinds=jobs.kinds,
         timeouts=build_timeouts(serves_requests=serves_requests),
     )
+
+
+def build_response_limits() -> response_limits.Limits:
+    """The default response limit and the largest finite route exception this deployment permits."""
+    return response_limits.Limits(
+        default=_response_bytes(RESPONSE_MAX_BYTES_ENV, response_limits.DEFAULT_BYTES),
+        ceiling=_response_bytes(RESPONSE_CEILING_BYTES_ENV, response_limits.CEILING_BYTES),
+    )
+
+
+def _response_bytes(variable: str, shipped: int) -> int:
+    said = stated(variable)
+    if said == "":
+        return shipped
+    if not said.isdecimal():
+        raise response_limits.ResponsePolicyInvalid(f"{variable} must be an integer byte count")
+    return int(said)

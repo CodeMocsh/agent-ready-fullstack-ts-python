@@ -46,6 +46,7 @@ from app.deployment import (
     DEVELOPMENT,
     ENVIRONMENT_ENV,
     INSTANCES_ENV,
+    RESPONSE_ENV,
     TELEMETRY_ENV,
     TIMEOUTS_ENV,
 )
@@ -134,6 +135,7 @@ def nothing_the_shell_exports(monkeypatch: pytest.MonkeyPatch) -> None:
         SCHEMA_ENV,
         INSTANCES_ENV,
         *ADMISSION_ENV,
+        *RESPONSE_ENV,
         *TELEMETRY_ENV,
         *TIMEOUTS_ENV,
     ):

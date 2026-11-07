@@ -8,6 +8,7 @@ import json
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,6 +28,7 @@ from app.store import Connections, Database
 from app.store.memory import MemoryDatabase
 from tests.conftest import Logged
 from tests.doubles import CANARY, telemetry_settings
+from tests.responses.doubles import finite_router, unfinished_router
 from tests.routed import assembled
 from tests.widgets import with_widgets
 
@@ -390,3 +392,41 @@ def test_an_app_with_no_endpoint_is_not_instrumented(logged: Logged, database: D
 
     assert app.state.instruments is None
     assert all("trace_id" not in line for line in logged())
+
+
+@pytest.mark.parametrize("one_origin", [False, True])
+@pytest.mark.parametrize("path", ["/body/1025", "/unfinished"])
+def test_a_response_refusal_has_the_final_status_in_the_span_and_metric(
+    database: Database,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: "Path",
+    one_origin: bool,
+    path: str,
+    logged: Logged,
+) -> None:
+    from app import response_bound
+
+    monkeypatch.setenv("RESPONSE_MAX_BYTES", "1024")
+    monkeypatch.setattr(response_bound, "REQUEST_BUDGET_SECONDS", 0.05)
+    app = assembled(finite_router(), unfinished_router(), database=database)
+    spans = InMemorySpanExporter()
+    metrics = InMemoryMetricReader()
+    instruments = telemetry.instrument(app, telemetry_settings(), spans, metrics)
+    (tmp_path / "index.html").write_text("shell")
+    server = serve.create_server(tmp_path, app) if one_origin else app
+    with TestClient(server) as client:
+        response = client.get(f"/api{path}" if one_origin else path)
+        observed = Instrumented(client, app, spans, metrics, instruments)
+        assert response.status_code == 500
+        lines = logged()
+        expected = "response timed out" if path == "/unfinished" else "response too large"
+        assert any(line["message"] == expected for line in lines)
+        assert any(
+            line["message"] == "request completed" and line["http.response.status_code"] == 500
+            for line in lines
+        )
+        attributes = observed.servers()[0].attributes
+        assert attributes is not None
+        assert attributes["http.response.status_code"] == 500
+        assert observed.durations()[0]["http.response.status_code"] == 500
+    instruments.shutdown()

@@ -5,16 +5,23 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import Lifespan
 
-from app import admission, audit_events, log, request_events, waits
+from app import admission, audit_events, log, request_events, response_bound, waits
 from app.identity.shared import Unauthenticated
 from app.lifespan import lifespan
 from app.models import ErrorBody
-from app.refusal import no_connection_free
+from app.refusal import (
+    ResponseTimedOut,
+    ResponseTooLarge,
+    internal_error,
+    no_connection_free,
+    responses,
+)
 from app.routes import public, tenant
 from app.store import DatabaseBusy
 from app.wiring import (
     TelemetrySettings,
     build_admission,
+    build_response_limits,
     build_service_version,
     build_telemetry,
 )
@@ -47,12 +54,15 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
         version="0.1.0",
         separate_input_output_schemas=False,
         lifespan=lifespan,
+        responses=responses(ResponseTooLarge, ResponseTimedOut),
     )
     app.router.redirect_slashes = False
     for router in routers:
         app.include_router(router)
+    app.add_exception_handler(500, internal_error)
     app.add_exception_handler(Unauthenticated, _refuse)
     app.add_exception_handler(DatabaseBusy, _busy)
+    response_bound.instrument(app, build_response_limits())
     waits.instrument(app)
     request_events.instrument(app)
     admission.instrument(app, build_admission())

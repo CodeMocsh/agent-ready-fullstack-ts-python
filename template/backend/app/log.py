@@ -433,3 +433,20 @@ async def _completed(
             round((time.perf_counter() - started) * 1000, 1),
             named,
         )
+
+
+def response_too_large(*, route: str | None, limit: int, observed: int, reason: str) -> None:
+    """A finite response was refused before its bytes left the process."""
+    _LOG.error(
+        "response too large",
+        route=route,
+        limit=limit,
+        observed=observed,
+        reason=reason,
+        refusal="ResponseTooLarge",
+    )
+
+
+def response_timed_out(*, route: str | None, seconds: float) -> None:
+    """A finite response did not finish buffering before its deadline."""
+    _LOG.error("response timed out", route=route, seconds=seconds, refusal="ResponseTimedOut")

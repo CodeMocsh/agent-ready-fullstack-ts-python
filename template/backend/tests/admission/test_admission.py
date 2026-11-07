@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import StreamingResponse
 from starlette.types import Message
 
-from app import admission, log
+from app import admission, log, response_limits
 from app.admission import Admission, Limits, Policy
 from app.admission_limits import LIMITS
 from app.audit_events import AuditEventPage, RequestEvent
@@ -167,6 +167,7 @@ class Held:
             request: Request, principal: Annotated[Principal, Depends(admitted_from_header)]
         ) -> StreamingResponse:
             admission.stream(request, principal.actor)
+            response_limits.stream(request, reason="The test holds an admitted stream")
             self.count += 1
 
             async def body() -> AsyncIterator[bytes]:

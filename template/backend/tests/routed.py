@@ -27,7 +27,7 @@ from starlette.middleware import Middleware
 from starlette.routing import BaseRoute
 
 from app import log
-from app.deployment import ADMISSION_ENV, stated
+from app.deployment import ADMISSION_ENV, RESPONSE_ENV, stated
 from app.lifespan import build_routes
 from app.main import assemble
 from app.store import Database
@@ -48,6 +48,10 @@ class SharedPastItsTest(RuntimeError):
 
 class SharedWithAdmission(RuntimeError):
     """A test asked `routed` for an app while the environment sets a variable of admission."""
+
+
+class SharedWithResponseLimits(RuntimeError):
+    """A test asked for a shared app while the environment configures response limits."""
 
 
 class SharedWithTelemetry(RuntimeError):
@@ -172,6 +176,12 @@ def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
         raise SharedWithAdmission(
             f"The environment sets {', '.join(set_here)}, and a shared app keeps the admission it "
             f"was built with. Build this app with tests.routed.assembled."
+        )
+    response_settings = [name for name in RESPONSE_ENV if stated(name)]
+    if response_settings:
+        raise SharedWithResponseLimits(
+            f"The environment sets {', '.join(response_settings)}, and a shared app keeps its "
+            "response limits. Build this app with tests.routed.assembled."
         )
     key = tuple(id(router) for router in routers)
     if key in _SHARED_WITH_THIS_TEST:

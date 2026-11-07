@@ -90,6 +90,10 @@ ADMISSION_ENV: Final = (
 """Every variable `wiring.build_admission` reads. Each number replaces the field of
 `app/admission_limits.py` it names. `docs/adr/template/0023`."""
 
+RESPONSE_MAX_BYTES_ENV: Final = "RESPONSE_MAX_BYTES"
+RESPONSE_CEILING_BYTES_ENV: Final = "RESPONSE_CEILING_BYTES"
+RESPONSE_ENV: Final = (RESPONSE_MAX_BYTES_ENV, RESPONSE_CEILING_BYTES_ENV)
+
 ENVIRONMENT_ENV: Final = "APP_ENV"
 DEVELOPMENT: Final = "development"
 PRODUCTION: Final = "production"
