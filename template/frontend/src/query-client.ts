@@ -3,6 +3,7 @@ import {
   type Mutation,
   MutationCache,
   onlineManager,
+  partialMatchKey,
   type Query,
   QueryCache,
   QueryClient,
@@ -19,7 +20,7 @@ declare module "@tanstack/react-query" {
   }
 }
 
-type Read = { granted: boolean; at: number; failure: unknown; refused: boolean };
+type Read = { granted: number; at: number; failure: unknown; refused: boolean };
 
 const NO_FAILURE = Symbol("no failure");
 
@@ -41,7 +42,7 @@ const PERSON_INPUTS = [
   "drop",
 ] as const;
 
-const recordedTimes = new WeakMap<QueryClient, number>();
+const periods = new WeakMap<QueryClient, WeakSet<Query>>();
 const followed = new WeakMap<QueryClient, Causes>();
 const mutationsWithACause = new WeakSet<Mutation<unknown, unknown, unknown, unknown>>();
 
@@ -64,12 +65,24 @@ function causesOf(queryClient: QueryClient): Causes {
   return causes;
 }
 
-function mustReadAgainOnMount(queryClient: QueryClient, query: Query): boolean {
-  const since = recordedTimes.get(queryClient);
-  if (since === undefined) {
+function answeredInThePeriod(queryClient: QueryClient): WeakSet<Query> {
+  const answered = periods.get(queryClient);
+  if (answered === undefined) {
     throw new Error(UNFOLLOWED);
   }
-  return query.state.isInvalidated || query.state.dataUpdatedAt < since;
+  return answered;
+}
+
+function startPeriod(queryClient: QueryClient): void {
+  periods.set(queryClient, new WeakSet<Query>());
+}
+
+export function readIsCurrent(queryClient: QueryClient, query: Query): boolean {
+  return answeredInThePeriod(queryClient).has(query) && !query.state.isInvalidated;
+}
+
+function staleUnlessCurrent(queryClient: QueryClient, query: Query): number {
+  return readIsCurrent(queryClient, query) ? Number.POSITIVE_INFINITY : 0;
 }
 
 function causedBy(queryClient: QueryClient): void {
@@ -82,14 +95,24 @@ function answered(queryClient: QueryClient): void {
   causesOf(queryClient).answeredSinceTheLast = true;
 }
 
+function matching(queryKeys: readonly QueryKey[]): (query: Query) => boolean {
+  return (query) => queryKeys.some((queryKey) => partialMatchKey(query.queryKey, queryKey));
+}
+
 function grant(queryClient: QueryClient, queryKeys: readonly QueryKey[]): void {
   const { reads } = causesOf(queryClient);
-  for (const queryKey of queryKeys) {
-    for (const query of queryClient.getQueryCache().findAll({ queryKey })) {
-      const last = reads.get(query.queryHash);
-      if (last !== undefined) {
-        last.granted = true;
-      }
+  const read = queryClient.getQueryCache().findAll({ predicate: matching(queryKeys) });
+  for (const query of read) {
+    const last = reads.get(query.queryHash);
+    if (last === undefined) {
+      reads.set(query.queryHash, {
+        granted: 1,
+        at: Date.now(),
+        failure: NO_FAILURE,
+        refused: false,
+      });
+    } else {
+      last.granted += 1;
     }
   }
 }
@@ -130,8 +153,9 @@ function admit(queryClient: QueryClient, query: Query): Read {
     last.refused = false;
     return last;
   }
-  if (last === undefined || last.granted) {
-    const read = { granted: false, at: now, failure: NO_FAILURE, refused: false };
+  if (last === undefined || last.granted > 0) {
+    const granted = last === undefined ? 0 : last.granted - 1;
+    const read = { granted, at: now, failure: NO_FAILURE, refused: false };
     reads.set(query.queryHash, read);
     return read;
   }
@@ -172,7 +196,7 @@ function retriesOnlyAnUnreachedRead(failures: number, error: Error): boolean {
 }
 
 async function invalidate(queryClient: QueryClient, queryKeys: readonly QueryKey[]) {
-  await Promise.all(queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+  await queryClient.invalidateQueries({ predicate: matching(queryKeys) });
 }
 
 export async function invalidateForServerEvent(
@@ -206,7 +230,8 @@ export function createQueryClient(record: RecordClientEvent): QueryClient {
     }),
     defaultOptions: {
       queries: {
-        refetchOnMount: (query) => mustReadAgainOnMount(queryClient, query),
+        refetchOnMount: (query) => !readIsCurrent(queryClient, query),
+        staleTime: (query) => staleUnlessCurrent(queryClient, query),
         persister: readsOnlyWithACause,
         retry: retriesOnlyAnUnreachedRead,
       },
@@ -216,20 +241,19 @@ export function createQueryClient(record: RecordClientEvent): QueryClient {
 }
 
 export function followNavigations(router: AnyRouter, queryClient: QueryClient): () => void {
-  if (recordedTimes.has(queryClient)) {
+  if (periods.has(queryClient)) {
     throw new Error("this query client already follows a router");
   }
-  const recordTime = () => recordedTimes.set(queryClient, Date.now());
   const regained = (happened: boolean) => {
     if (happened) {
-      recordTime();
+      startPeriod(queryClient);
       causedBy(queryClient);
     }
   };
   const personActed = () => causedBy(queryClient);
   let loading = false;
   followed.set(queryClient, { answeredSinceTheLast: false, reads: new Map() });
-  recordTime();
+  startPeriod(queryClient);
   for (const input of PERSON_INPUTS) {
     window.addEventListener(input, personActed, { capture: true });
   }
@@ -237,7 +261,7 @@ export function followNavigations(router: AnyRouter, queryClient: QueryClient): 
     router.subscribe("onBeforeLoad", () => {
       causedBy(queryClient);
       if (!loading) {
-        recordTime();
+        startPeriod(queryClient);
       }
       loading = true;
     }),
@@ -246,6 +270,11 @@ export function followNavigations(router: AnyRouter, queryClient: QueryClient): 
     }),
     focusManager.subscribe(regained),
     onlineManager.subscribe(regained),
+    queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === "updated" && event.action.type === "success") {
+        answeredInThePeriod(queryClient).add(event.query);
+      }
+    }),
     () => {
       for (const input of PERSON_INPUTS) {
         window.removeEventListener(input, personActed, { capture: true });
@@ -256,7 +285,7 @@ export function followNavigations(router: AnyRouter, queryClient: QueryClient): 
     for (const stop of stops) {
       stop();
     }
-    recordedTimes.delete(queryClient);
+    periods.delete(queryClient);
     followed.delete(queryClient);
   };
 }

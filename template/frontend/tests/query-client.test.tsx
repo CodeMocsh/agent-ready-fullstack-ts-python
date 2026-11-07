@@ -188,8 +188,7 @@ it("keeps a read made before a redirect current for the screen it redirects to",
 it("refuses to mount a query over data on a client that follows no router", () => {
   const unfollowed = createQueryClient(vi.fn());
   unfollowed.setQueryData(TASKS, AS_READ);
-  const screen = new QueryObserver(unfollowed, tasksQuery());
-  expect(() => screen.subscribe(() => undefined)).toThrow(/follows no router/);
+  expect(() => new QueryObserver(unfollowed, tasksQuery())).toThrow(/follows no router/);
 });
 
 it("refuses to mount a query over data once the client stops following its router", () => {
@@ -338,6 +337,19 @@ it("reads again with no outside cause once a refetch interval has passed, and no
   expect(screen.getCurrentResult().error).toBeNull();
   await readAgain(screen);
   expect(screen.getCurrentResult().error).toBeInstanceOf(CycleStopped);
+});
+
+it("spaces its backstop from a read with a cause, as TanStack spaces its polls", async () => {
+  const backstop = 30_000;
+  const screen = aQueryOfTasks({ refetchInterval: backstop });
+  await settle();
+  vi.setSystemTime(Date.now() + backstop / 2);
+  await act(() => invalidateForServerEvent(client, [TASKS]));
+  await settle();
+  vi.setSystemTime(Date.now() + backstop / 2);
+  await readAgain(screen);
+  expect(screen.getCurrentResult().error).toBeInstanceOf(CycleStopped);
+  expect(reads).toBe(2);
 });
 
 it("reads on its backstop no sooner than the interval after the read before it", async () => {
@@ -525,7 +537,7 @@ it.each([
   expect(reads).toBe(3);
 });
 
-it("refuses to read on a client that follows no router", async () => {
+it("refuses to read on a client that follows no router", () => {
   const unfollowed = createQueryClient(vi.fn());
-  await expect(unfollowed.fetchQuery(tasksQuery())).rejects.toThrow(/follows no router/);
+  expect(() => unfollowed.fetchQuery(tasksQuery())).toThrow(/follows no router/);
 });
