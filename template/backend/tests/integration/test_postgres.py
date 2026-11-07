@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from app.jobs import KINDS
+from app.jobs import kinds
 from app.main import create_app
 from app.store import Database, ddl
 from app.store.migrate import emit_sql, known_version
@@ -45,7 +45,7 @@ database that already had the table -- bites on the first schema change rather t
 def a_database(schema: str) -> Any:
     from app.store.pg import PostgresDatabase
 
-    return PostgresDatabase(dsn=postgres_dsn(), schema=schema, draws=ONE_PROCESS, kinds=KINDS)
+    return PostgresDatabase(dsn=postgres_dsn(), schema=schema, draws=ONE_PROCESS, kinds=kinds)
 
 
 async def test_the_schema_applies_and_reports_its_version(database: Database) -> None:

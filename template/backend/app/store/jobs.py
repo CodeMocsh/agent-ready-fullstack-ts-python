@@ -2,8 +2,8 @@
 
 A job is one unit of durable work. A request asks for it and answers `202`. On Postgres a worker
 process claims it, as `app/worker.py` says. The memory substrate holds its rows in one process,
-so it runs its own jobs. `app/jobs.py` maps each kind of job to its handler.
-`docs/adr/template/0027`.
+so it runs its own jobs. `app/jobs.py` maps each kind of job to its handler, and gives each
+handler what it needs for the job's tenant. `docs/adr/template/0027`.
 
 A job runs at least once, so a handler is idempotent. A handler that raises is tried again, up to
 `MAX_ATTEMPTS` attempts, and the job is then dead.
@@ -24,7 +24,7 @@ from app import log
 from app.audit_events import current_actor
 from app.identity.shared import Actor
 from app.models import JsonObject
-from app.store import Database, DatabaseBusy, TaskStore
+from app.store import DatabaseBusy
 
 MAX_ATTEMPTS: Final = 5
 """The most attempts a job gets. A job whose last attempt fails is dead."""
@@ -33,8 +33,8 @@ ATTEMPTS_SPENT: Final = "AttemptsSpent"
 """The failure of a job whose last attempt ended with no outcome and no failure it named: its
 lease ended, or its worker stopped."""
 
-Handler = Callable[[TaskStore, JsonObject], Awaitable[JsonObject]]
-"""What runs a job: the store of the job's tenant and the job's input, to the job's outcome."""
+Handler = Callable[[str, JsonObject], Awaitable[JsonObject]]
+"""What runs a job: the job's tenant and the job's input, to the job's outcome."""
 
 Kinds = Mapping[str, Handler]
 """Each kind of job, and its handler."""
@@ -54,8 +54,8 @@ class UnstorableJson(ValueError):
 
 
 class LeaseLost(RuntimeError):
-    """A transaction of a job found that the job's claim is no longer this attempt's: the lease
-    ended, or another worker claimed the job. The transaction rolls back."""
+    """A transaction of a job found that the job's claim is no longer this attempt's, or that the
+    transaction is for a tenant that is not the job's. The transaction rolls back."""
 
 
 @dataclass(frozen=True)
@@ -148,12 +148,6 @@ def handler_of(kinds: Kinds, kind: str) -> Handler:
     return handler
 
 
-def store_of_the_job(database: Database, tenant_id: str) -> TaskStore:
-    """The store a job's handler gets: scoped to `tenant_id`, the tenant of the job. The one
-    place a job obtains a store, as `deps.get_store` is for a request."""
-    return database.store(tenant_id)
-
-
 def asker() -> Actor:
     """The actor that asks for a job here. Raises `AskedByNobody` where nothing names one."""
     actor = current_actor()
@@ -194,13 +188,13 @@ def _holds_unstorable_text(value: JsonValue) -> bool:
 
 
 async def attempted(
-    handler: Handler, store: TaskStore, asked: Asked, *, job: str, kind: str, attempt: int
+    handler: Handler, tenant_id: str, asked: Asked, *, job: str, kind: str, attempt: int
 ) -> JsonObject | Failed | Deferred:
     """The outcome of one attempt of `handler`: the outcome, `Failed` when the handler raises or
     returns an outcome that cannot be stored, or `Deferred` when it got no database connection.
     `log.job_failed` names each failure. `LeaseLost` and a cancellation raise."""
     try:
-        outcome = await handler(store, asked.input)
+        outcome = await handler(tenant_id, asked.input)
         _ = encoded(outcome)
     except LeaseLost:
         raise

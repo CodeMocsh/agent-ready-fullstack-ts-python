@@ -397,13 +397,12 @@ class PostgresDatabase:
         *,
         dsn: str,
         draws: Draws,
-        kinds: Kinds,
+        kinds: Callable[["PostgresDatabase"], Kinds],
         schema: str | None = None,
         min_size: int = 1,
         timeouts: Timeouts = TIMEOUTS,
     ) -> None:
         self._dsn: str = dsn
-        self.kinds: Kinds = kinds
         self.schema: str = resolve_schema(schema)
         self._draws: Draws = draws
         self._min_size: int = min_size
@@ -412,6 +411,8 @@ class PostgresDatabase:
         self._pool: Any = None
         self._opening: asyncio.Lock = asyncio.Lock()
         self._waited: Callable[[float], None] | None = None
+        self.kinds: Kinds = kinds(self)
+        """Each kind of job, and the handler that `kinds` built for it."""
 
     def budget(self) -> ConnectionBudget:
         """The budget the pool opened under. Raises `RuntimeError` before the pool first opens."""
@@ -562,7 +563,10 @@ class PostgresDatabase:
             if claim is not None and (
                 await conn.fetchval(_HOLD_CLAIM, UUID(claim.id), tenant_id, claim.token) is None
             ):
-                raise LeaseLost(f"attempt {claim.attempts} of job {claim.id} lost its lease")
+                raise LeaseLost(
+                    f"attempt {claim.attempts} of job {claim.id} lost its lease, or opened a "
+                    "transaction for a tenant that is not the job's"
+                )
             yield conn
 
     async def check(self) -> str:

@@ -7,7 +7,7 @@ Each entry lists only the imports that module makes today. `docs/adr/template/00
 
 LAYERS: dict[str, frozenset[str]] = {
     "shared": frozenset(),
-    "tasks": frozenset(),
+    "tasks": frozenset({"shared"}),
     "client_events": frozenset(),
     "jobs": frozenset(),
 }

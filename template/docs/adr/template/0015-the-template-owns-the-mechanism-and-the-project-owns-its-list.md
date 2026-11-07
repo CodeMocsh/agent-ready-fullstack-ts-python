@@ -42,7 +42,8 @@ and the bullet on `identity_stub` below says why.
 | `app/identity/__init__.py`: its resolver, `principal_for` | `app/identity/shared.py`: `Principal`, `Actor`, `Unauthenticated`, the sentinel, the probe |
 
 - **`_skip_if_exists` in `copier.yml` carries every list module but `app/identity/__init__.py`.**
-  An update adds a list module that is missing and leaves a present one alone.
+  An update adds a list module that is missing, but `app/jobs.py` without the example, and
+  leaves a present one alone.
 - **The template's code or tests import every list module but `app/log_lines.py`**, so a project
   cannot delete one. `_skip_if_exists` therefore never re-adds a module the project removed.
   `app/log_lines.py` is the exception: no template code imports it, and ruff allows `structlog`
@@ -50,6 +51,11 @@ and the bullet on `identity_stub` below says why.
 - **`identity_stub` carries `app/identity/__init__.py`, not `_skip_if_exists`.** The resolver it
   ships is the identity stub, and the stub's own tests exercise it. The answer keeps the two in
   step: true brings both, and false brings neither. `app/identity/shared.py` reaches every project.
+- **`example_resource` also carries `app/jobs.py`, on an update.** Its first render imports the
+  example, so a project without the example cannot keep that render. Such a project writes its
+  own `app/jobs.py`. `app/wiring.py` imports it, so a project without one fails at once. This is
+  the cost of the second considered option below, taken for this one module.
+  [0027](0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md).
 - **`frontend/e2e/signed-in.ts` does nothing under the identity stub.** A project that
   authenticates signs in there, and every live spec opens the app through it.
 - **The project's tests of what its production refuses are excluded on update instead.**

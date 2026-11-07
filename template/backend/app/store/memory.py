@@ -10,6 +10,7 @@ real enough — the fast tier and the frontend's zero-backend mode both stand on
 """
 
 import asyncio
+from collections.abc import Callable
 from contextvars import Context
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -30,7 +31,6 @@ from app.store.jobs import (
     attempted,
     encoded,
     handler_of,
-    store_of_the_job,
 )
 from app.store.migrate import known_version
 
@@ -166,25 +166,25 @@ class MemoryDatabase:
     other starts empty, which is what makes `two tenants do not see each other` a real
     assertion here and not a coincidence of both being handed the same rows.
 
-    It runs each job it is asked for, in this process, through the handler `kinds` names: no
-    other process can see its rows, so no worker could claim one. A job runs outside every
-    request, as the actor that asked, and is tried again at once when it fails.
+    It runs each job it is asked for, in this process, through the handlers that `kinds(self)`
+    builds: no other process can see its rows, so no worker could claim one. A job runs outside
+    every request, as the actor that asked, and is tried again at once when it fails.
     `docs/adr/template/0027`.
     """
 
     name: str = "memory"
 
-    def __init__(self, seed_tenant: str, *, kinds: Kinds) -> None:
+    def __init__(self, seed_tenant: str, *, kinds: Callable[["MemoryDatabase"], Kinds]) -> None:
         self._tenants: dict[str, list[Task]] = {
             seed_tenant: [Task(id=id, title=title, done=done) for id, title, done in SEED]
         }
         self._events: dict[str, list[tuple[int, RecordedAuditEvent]]] = {}
         self._counter: list[int] = [len(SEED)]
         self._recorded: list[int] = [0]
-        self._kinds: Kinds = kinds
         self._jobs: dict[str, dict[str, Job]] = {}
         self._asked: list[int] = [0]
         self._running: set[asyncio.Task[None]] = set()
+        self._kinds: Kinds = kinds(self)
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)
@@ -240,12 +240,7 @@ class MemoryDatabase:
         attempt = 1
         while True:
             result = await attempted(
-                handler,
-                store_of_the_job(self, tenant_id),
-                asked,
-                job=job.id,
-                kind=job.kind,
-                attempt=attempt,
+                handler, tenant_id, asked, job=job.id, kind=job.kind, attempt=attempt
             )
             if isinstance(result, Deferred):
                 await backoff(result.after)

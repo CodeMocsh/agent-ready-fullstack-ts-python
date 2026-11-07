@@ -14,7 +14,7 @@ from app.store.pg_jobs import JobClaims
 from app.worker import run
 from tests.clock import elapse
 from tests.integration.conftest import ONE_PROCESS, Provisioned
-from tests.jobs_contract import CONTRACT_KINDS, Finish, JobsContract
+from tests.jobs_contract import Finish, JobsContract, contract_kinds
 
 QUICK = Leases(lease=5.0, renewal=1.0, retry=0.01)
 """A retry that waits a hundredth of a second, so a dead job is dead in a test's time."""
@@ -29,7 +29,7 @@ class TestThePostgresSubstrate(JobsContract):
             dsn=provisioned.app_dsn,
             schema=provisioned.schema,
             draws=ONE_PROCESS,
-            kinds=CONTRACT_KINDS,
+            kinds=contract_kinds,
         )
         await postgres.check()
         try:
@@ -43,9 +43,9 @@ class TestThePostgresSubstrate(JobsContract):
 
         async def finished() -> None:
             while True:
-                claim = await claims.claim(CONTRACT_KINDS)
+                claim = await claims.claim(database.kinds)
                 if claim is not None:
-                    await run(claims, CONTRACT_KINDS, claim)
+                    await run(claims, claim)
                     continue
                 async with database.connection() as conn:
                     if await conn.fetchval(_LEFT) == 0:

@@ -19,9 +19,11 @@ from app.models.jobs import (
     JobState as JobState,
     JsonObject as JsonObject,
 )
-from app.models.shared import ErrorBody as ErrorBody
-from app.models.tasks import (
+from app.models.shared import (
     PAGE_MAX as PAGE_MAX,
+    ErrorBody as ErrorBody,
+)
+from app.models.tasks import (
     CreateTaskBody as CreateTaskBody,
     Task as Task,
     TaskPage as TaskPage,

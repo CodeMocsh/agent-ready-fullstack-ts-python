@@ -64,7 +64,7 @@ example_resource:
   help: >-
     Keep updating the example resource (`tasks`) on `copier update`? To stop, set it to false in
     .copier-answers.yml and commit before you update. Changing it to no during an update deletes
-    the example's files, your edits included.
+    the example's files and app/jobs.py, your edits and your own kinds of job included.
   default: true
 
 # The same, for the identity stub: `app/identity/__init__.py`, which resolves every request to
@@ -95,6 +95,7 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/task_jobs.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/app/jobs.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/started/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/components/task-list.tsx{% endif %}"
@@ -133,7 +134,9 @@ _exclude:
 # exists. Each holds only a project's own list, and the mechanism around it is a module the template
 # keeps updating. The table in docs/adr/template/0015 names each. A project cannot delete one of
 # these but log_lines.py, because the template's code imports each, so `_skip_if_exists` never
-# re-adds one somebody removed. A deleted log_lines.py returns empty.
+# re-adds one somebody removed. A deleted log_lines.py returns empty. A first render that imports
+# the example is in the example's `_exclude` lines too. Otherwise an update writes it into a
+# project without the example, and its import fails.
 _skip_if_exists:
   - backend/app/errors.py
   - backend/app/environment.py

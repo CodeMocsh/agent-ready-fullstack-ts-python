@@ -1,9 +1,6 @@
-from typing import Final
-
 from pydantic import BaseModel, Field
 
-PAGE_MAX: Final = 100
-"""The most rows one page of a list holds. `docs/adr/template/0026`."""
+from app.models.shared import PAGE_MAX
 
 
 class Task(BaseModel):

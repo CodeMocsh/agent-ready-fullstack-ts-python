@@ -390,11 +390,11 @@ def build(*, serves_requests: bool = True) -> Database:
                 f"{INSTANCES_ENV} set and {DATABASE_URL_ENV} unset: the in-memory substrate "
                 f"holds no connection. Unset it, or set {DATABASE_URL_ENV}."
             )
-        return MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=jobs.KINDS)
+        return MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=jobs.kinds)
     return PostgresDatabase(
         dsn=dsn,
         schema=os.environ.get(SCHEMA_ENV),
         draws=build_draws(),
-        kinds=jobs.KINDS,
+        kinds=jobs.kinds,
         timeouts=build_timeouts(serves_requests=serves_requests),
     )

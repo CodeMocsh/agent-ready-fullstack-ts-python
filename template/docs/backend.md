@@ -119,8 +119,9 @@ backend/
   bound as a constant beside the port. The adapter hands it to its driver, and the caller hands
   it to `waiting`. The double then runs inside the same block, and the route test fails.
 - **Make a wait past the budget a job.** Name its kind in `app/jobs.py`, with a handler that takes
-  the store of the job's tenant and the job's input, and returns the outcome. A route asks for it
-  with `Database.jobs(tenant_id).ask(kind, input)`, through `JobsDep`, and answers `202` with the
+  the job's tenant and the job's input, and returns the outcome. Build the handler in `kinds`, and
+  take each store there, for the job's tenant. A route asks for the job with
+  `Database.jobs(tenant_id).ask(kind, input)`, through `JobsDep`, and answers `202` with the
   job. The browser reads `GET /jobs/{id}` again until the job is `done` or `dead`. On Postgres the
   worker process, `python -m app.worker`, runs it as the actor that asked. A job runs at least
   once, so a handler does on a second run what it did on the first. A handler that raises is
