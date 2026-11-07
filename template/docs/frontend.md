@@ -40,14 +40,15 @@ that changes other shared state puts it back after its last test.
 
 The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them today.
 
-- **A read stays current until the next navigation, focus or reconnect.** `src/query-client.ts`
-  keeps TanStack's default `staleTime` of `0`. A `useQuery` call that mounts reads again when its
-  data arrived before the last navigation, focus or reconnect, or when this tab invalidated it.
-  `followNavigations` records the time of each. `src/main.tsx` calls it once. A navigation that
-  starts while another one loads, such as a redirect, records nothing. `router.invalidate()` counts
+- **A read stays current until the next navigation, focus or reconnect.** A `useQuery` call that
+  mounts, or turns `enabled`, reads again only when its data arrived before the last navigation,
+  focus or reconnect, or when this tab invalidated it. The default `staleTime` says the same:
+  infinite while the read is current. `followNavigations` notes each of these events, by answers
+  rather than by time. `src/main.tsx` calls it once. A navigation that
+  starts while another one loads, such as a redirect, starts no new period. `router.invalidate()` counts
   as a navigation. A tab that regains focus reads again every mounted query. Without a stream, these
   reads are the only way a tab learns of a write it did not make. Another person, another tab and a
-  job outside a request make such writes. With a longer `staleTime`, the screen shows their change
+  job outside a request make such writes. With a fixed `staleTime`, the screen shows their change
   late. The screen does not show that it is late. A part that opens without a navigation can show
   data as old as the last navigation, focus or reconnect.
   `tests/query-client.test.tsx` holds this.

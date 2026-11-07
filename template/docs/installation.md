@@ -431,6 +431,20 @@ What to expect, because it is not all free:
     job", "Start short work the caller does not wait for" and "Each task has one of five homes".
     In `docs/development.md`, take the bullet that starts "`make dev` with a `DATABASE_URL`".
   [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
+- **From 0.64.0 a read stays fresh while it is current, and the read guard counts each cause.**
+  - The default `staleTime` is infinite while a read is current, and 0 after: until the next
+    navigation, focus or reconnect, unless this tab invalidates the key. `fetchQuery`,
+    `ensureQueryData` and `prefetchQuery` then answer from the cache, and a part with
+    `refetchOnMount: true` reads nothing. A read after a person's input invalidates the key
+    through a mutation, or calls `refetch()`.
+  - A query with its own `staleTime` replaces the default. Combine it with `readIsCurrent` from
+    `src/query-client.ts`, or a query that turns `enabled` over current data can be stopped.
+  - A `focusout` is no longer a person's input. A save on blur is still the person's mutation,
+    because the person pressed a key or a pointer before leaving the field.
+  - If you patched `admit` in `src/query-client.ts` to keep the time of an earlier read, take the
+    template's copy. A test that polls runs TanStack's timer: with the real clock, or with `Date`
+    and the timers faked and advanced together.
+  [adr/template/0024](adr/template/0024-every-read-has-an-outside-cause.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

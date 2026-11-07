@@ -30,22 +30,33 @@ ordinary invalidation in an ordinary callback. Only the running cycle shows it.
   - a focus: the tab regains focus;
   - a reconnect: the tab comes back online;
   - a person's input: a `pointerdown`, a `pointerup`, a `keydown`, a `click`, a `submit`, a
-    `change` or a `drop` anywhere in the tab;
+    `change` or a `drop` anywhere in the tab. A person who leaves a field presses a key or a
+    pointer first, so a save on blur is the person's mutation. A `focusout` is not an input: a
+    script moves the focus as often as a person does;
   - a person's mutation: a mutation that starts before any read has answered since the last of
     the causes above. It permits a read of the keys in its `meta.invalidates`, when it settles;
   - a server event: `invalidateForServerEvent(queryClient, queryKeys)` in `src/query-client.ts`,
     in a stream under `src/streams/`. It permits a read of the keys it names;
   - a backstop: a query's `refetchInterval`, at its spacing.
-- **A navigation, a focus, a reconnect and a person's input each permit one read of every key.**
-  A person's mutation and a server event permit one read of the keys they name, and of no other
-  key. `followNavigations` hears the causes. The default `persister` that `createQueryClient`
-  sets checks each read of a key against the record of its last read before the read starts. It
-  waits one microtask first, so that each listener of a focus or a reconnect hears the cause
-  before the read that the event starts. A retry of a read that never reached the server is the
-  same read.
+- **A navigation, a focus, a reconnect and a person's input each permit one read of every key.** A
+  person's mutation and a server event permit one read of the keys they name, and of no other key.
+  Each one counts: eight mutations from one click, or two server events in one tick, permit eight or
+  two reads. A permit that comes before the key's next read since the last cause stands in for that
+  read's own permit. One mutation or event permits, and starts, one read of each active query its
+  keys match, however many of its keys match that query. `tests/query-client-causes.test.tsx` holds
+  this. `followNavigations` hears the causes. The default `persister` that `createQueryClient` sets
+  checks each read of a key against the record of its last read before the read starts. It waits one
+  microtask first, so that each listener of a focus or a reconnect hears the cause before the read
+  that the event starts. A retry of a read that never reached the server is the same read.
 - **The record of a key outlives its query, and not the next cause.** `src/query-client.ts` keeps
   the last read of each key by its hash, and forgets every record at each outside cause. A key
   whose query was removed, or collected, reads again only with an outside cause.
+- **A current read starts no read.** A read is current until the next navigation, focus or
+  reconnect, as [0020](0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
+  says. The default `staleTime` is infinite while the read is current, so a part that mounts, or
+  a query that turns `enabled`, over that data starts no read, and so no `CycleStopped`. A
+  project's own `staleTime` replaces the default; one that combines with `readIsCurrent` keeps
+  this.
 - **A new key is a new read.** A key that was never read reads under the cause that is current.
   So a dependent query that turns `enabled` and a query whose parameters change each read once.
   The next or the previous page of an infinite query is a new read too: a fetch whose
@@ -55,8 +66,13 @@ ordinary invalidation in an ordinary callback. Only the running cycle shows it.
   its settle starts fails with `CycleStopped`. A write awaited after another write is not a cause
   either, because the first one's settle waits for the reads it starts: send both in one
   `mutationFn`, or start both with no `await` between them.
-- **A backstop permits a read at its spacing, and no sooner.** A key with no new cause reads
-  again only when its shortest `refetchInterval` has passed since its last read.
+- **A backstop permits a read at its spacing, and no sooner.** A key with no new cause reads again
+  only when its shortest `refetchInterval` has passed since its last read. TanStack restarts the
+  interval timer of each observer with listeners at each update of its query, so after a read with a
+  cause the next poll also comes a whole spacing later. `tests/query-client-backstop.test.tsx` holds
+  this on TanStack's own timer. A test of a poll runs TanStack's timer, with the real clock, or with
+  `Date` and the timers faked and advanced together. A test that fakes `Date` alone, or sends a poll
+  with `refetch()`, sends a read the app never sends.
 - **A cycle is stopped, drawn and reported.** The read does not start. The query fails with
   `CycleStopped`, which names the key. The screen draws the error. The query cache reports it as
   a client event of kind `query` and error `CycleStopped`. Nothing retries it, also not a
