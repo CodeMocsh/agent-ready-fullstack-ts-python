@@ -13,11 +13,12 @@ from fastapi import APIRouter, Depends
 
 from app.deps import resolved_principal
 from app.refusal import NoConnectionFree, TooManyRequests, responses
-from app.routes.tenant import tasks
+from app.routes.tenant import jobs, tasks
 
 router = APIRouter(
     dependencies=[Depends(resolved_principal)],
     responses=responses(NoConnectionFree, TooManyRequests),
 )
 
+router.include_router(jobs.router)
 router.include_router(tasks.router)

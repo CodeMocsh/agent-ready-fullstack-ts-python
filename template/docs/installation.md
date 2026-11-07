@@ -398,6 +398,39 @@ What to expect, because it is not all free:
   - In `docs/backend.md`, take the template's bullet that starts "A store read answers one page".
     In `docs/frontend.md`, take the bullet that starts "A list is read a page at a time".
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
+- **From 0.63.0 work that outlives its request is a job that a worker process claims.** Before
+  you take the update, list each `beside` your project starts, with its bound.
+  - Run `make migrate`. It adds `job_claims` and `jobs`. `job_claims` is the second table that no
+    policy scopes: it holds what a worker reads to claim the next job of any tenant, and no
+    input and no outcome.
+  - `beside` takes `within=`, under `REQUEST_BUDGET_SECONDS`. Move each `beside` whose work may
+    take longer to a job: name its kind in `app/jobs.py`, with a handler that takes the store of
+    the job's tenant and the job's input and returns the outcome. The route asks for it with
+    `Database.jobs(tenant_id).ask(kind, input)`, through `JobsDep`, and answers `202` with the
+    job. A screen reads `GET /jobs/{id}` with a `refetchInterval` until the job is not
+    `pending`. A handler runs at least once, so make it idempotent. An input that `jsonb` cannot
+    hold raises `UnstorableJson`: answer it with `UnstorableInput`, from `app.refusal`.
+  - Give each remaining `beside` a `within=` under the budget.
+  - ruff now refuses `asyncio.sleep`, `anyio.sleep` and `time.sleep`, in each module that
+    `per-file-ignores` does not exempt from `TID251`. Wait through
+    `app/pacing.py`: `every` for a loop on a period, `backoff` before a retry, `yield_now` for a
+    turn of the loop, `poll_outside` for a system outside the process with no push. In a test,
+    use `tests/clock.py`. A loop that sleeps to read rows your own system writes again waits on
+    a wake: send `pg_notify` in the transaction that writes, and `LISTEN` for it.
+  - Run `python -m app.worker` beside the web process, as a service of its own with the same
+    environment. `docs/deployment.md` says how. Count its processes in `DATABASE_INSTANCES`. The
+    development loop on Postgres is two processes, so an unset `DATABASE_INSTANCES` there is two.
+  - `MemoryDatabase` and `PostgresDatabase` take `kinds=`, the map of `app/jobs.py`. A test that
+    builds one passes it. A route test on memory waits for each job with
+    `MemoryDatabase.drained()`.
+  - Each process now holds `TEMPLATE_IN_PROCESS` beside its pool: the worker's `LISTEN`
+    connection. The pool of each process is one connection smaller.
+  - If you merged `devtools/dev.sh` or `devtools/contract-test.sh` by hand, take the template's
+    worker. Run `make openapi`, and commit `openapi.json` and `frontend/src/api/schema.ts`.
+  - In `docs/backend.md`, take the template's bullets that start "Make a wait past the budget a
+    job", "Start short work the caller does not wait for" and "Each task has one of five homes".
+    In `docs/development.md`, take the bullet that starts "`make dev` with a `DATABASE_URL`".
+  [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

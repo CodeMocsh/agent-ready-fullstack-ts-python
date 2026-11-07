@@ -14,6 +14,11 @@ from app.models.client_events import (
     RouteId as RouteId,
     Status as Status,
 )
+from app.models.jobs import (
+    Job as Job,
+    JobState as JobState,
+    JsonObject as JsonObject,
+)
 from app.models.shared import ErrorBody as ErrorBody
 from app.models.tasks import (
     PAGE_MAX as PAGE_MAX,

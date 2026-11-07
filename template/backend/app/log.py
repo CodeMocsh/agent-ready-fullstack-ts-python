@@ -289,6 +289,35 @@ def shared_cancelled(work: str) -> None:
     _LOG.warning("shared work cancelled", work=work)
 
 
+def working(*, substrate: str, schema: str, kinds: tuple[str, ...], at_once: int) -> None:
+    """The worker process claims the jobs of `kinds` from the schema `schema`, `at_once` at a
+    time."""
+    _LOG.info("working", substrate=substrate, schema=schema, kinds=list(kinds), at_once=at_once)
+
+
+def job_done(*, kind: str, job: str, attempt: int) -> None:
+    """Attempt `attempt` of the job `job` of `kind` ended the job with an outcome."""
+    _LOG.info("job done", kind=kind, job=job, attempt=attempt)
+
+
+def job_failed(*, kind: str, job: str, attempt: int, error: BaseException) -> None:
+    """Attempt `attempt` of the job `job` of `kind` raised `error`. The traceback goes whole into
+    `exception`."""
+    _LOG.warning("job failed", kind=kind, job=job, attempt=attempt, exc_info=error)
+
+
+def job_dead(*, kind: str, job: str, attempts: int, failure: str) -> None:
+    """The job `job` of `kind` failed on each of its `attempts` attempts, and runs no more.
+    `failure` names the class of the last error."""
+    _LOG.error("job dead", kind=kind, job=job, attempts=attempts, failure=failure)
+
+
+def lease_lost(*, kind: str, job: str, attempt: int) -> None:
+    """Attempt `attempt` of the job `job` of `kind` stopped, because its lease ended or another
+    worker claimed the job. It wrote nothing after that."""
+    _LOG.warning("lease lost", kind=kind, job=job, attempt=attempt)
+
+
 _IDENTITY_OPEN_ON_PURPOSE: Final = (
     f"identity: none, and {ACKNOWLEDGED_ENV} says that is deliberate -- every request is "
     f"served as one tenant"

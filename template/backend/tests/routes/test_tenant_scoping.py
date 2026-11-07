@@ -1,7 +1,8 @@
 """The tenant scope is not something a route can forget.
 
-`Database.store(tenant_id)` is the only way to obtain a `TaskStore`, and `deps.get_store` is
-the only caller of it, so a route receives a store already scoped to its request's tenant and
+`Database.store(tenant_id)` is the only way to obtain a `TaskStore`. `deps.get_store` is the
+only caller of it for a request, and `store_of_the_job` for a job, so a route receives a store
+already scoped to its request's tenant, a job's handler one scoped to the job's tenant, and each
 has no unscoped one to reach for instead. A type checker cannot see either half of that: a
 route that resolved the database itself and asked for another tenant's store would compile,
 serve, and leak. Row-level security is the backstop and this is the door.
@@ -14,7 +15,8 @@ from typing import NamedTuple
 
 APP = Path(__file__).resolve().parents[2] / "app"
 DEPS_MODULE = "deps.py"
-SCOPING_FUNCTION = "get_store"
+SCOPING_FUNCTIONS = frozenset({(DEPS_MODULE, "get_store"), ("jobs.py", "store_of_the_job")})
+"""Where a store is obtained: for a request, from its principal, and for a job, from its claim."""
 SUBSTRATE_FUNCTION = "database_of"
 
 
@@ -68,10 +70,11 @@ def test_a_store_is_obtained_in_one_place_and_that_place_resolves_the_tenant() -
     """
     calls = _sites_where(_obtains_a_store)
     assert calls, "no call to Database.store() found: this test has stopped checking anything"
-    stray = [c for c in calls if (c.module, c.function) != (DEPS_MODULE, SCOPING_FUNCTION)]
+    stray = [c for c in calls if (c.module, c.function) not in SCOPING_FUNCTIONS]
     assert not stray, (
-        f"a store is obtained outside {DEPS_MODULE}:{SCOPING_FUNCTION}(): {stray}. "
-        "Take it from the request through StoreDep, which resolves the tenant for you."
+        f"a store is obtained outside {sorted(SCOPING_FUNCTIONS)}: {stray}. Take it from the "
+        "request through StoreDep, or in a job from its handler's argument. Each resolves the "
+        "tenant for you."
     )
 
 

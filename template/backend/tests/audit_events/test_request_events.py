@@ -23,6 +23,7 @@ from app.audit_events import (
 )
 from app.identity.shared import Actor, Principal, Unauthenticated
 from app.main import ROUTERS
+from app.pacing import yield_now
 from app.refusal import NoConnectionFree
 from app.request_events import RecordsRequests
 from app.store import Database, DatabaseBusy
@@ -181,7 +182,7 @@ async def test_a_cancelled_request_records_nothing() -> None:
         task = asyncio.current_task()
         assert task is not None
         task.cancel()
-        await asyncio.sleep(0)
+        await yield_now()
 
     scope: Scope = {
         "type": "http",

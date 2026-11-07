@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import unquote
 
-from app import admission_limits, connection_budget
+from app import admission_limits, connection_budget, jobs
 from app.admission import Limits, Policy
 from app.deployment import (
     ACKNOWLEDGED_ENV,
@@ -53,7 +53,7 @@ from app.deployment import (
 from app.identity.shared import SENTINEL_TENANT
 from app.migrate import OWNER_URL_ENV
 from app.store import Database
-from app.store.budget import Draws
+from app.store.budget import TEMPLATE_IN_PROCESS, Draws
 from app.store.conn import SCHEMA_ENV
 from app.store.memory import MemoryDatabase
 from app.store.pg import SMALLEST_BOUND, TIMEOUTS, PostgresDatabase, Timeouts
@@ -233,16 +233,19 @@ def _sampling_ratio() -> float:
     return ratio
 
 
-def build_timeouts() -> Timeouts:
+def build_timeouts(*, serves_requests: bool = True) -> Timeouts:
     """The bounds on every wait on Postgres: `TIMEOUTS`, with each one a deployment set replaced
     by its value in seconds. Raises `TimeoutsMisconfigured` on a value that is not a number of
-    seconds of at least `SMALLEST_BOUND`, and on a bound that makes a request wait on Postgres
-    for as long as `REQUEST_BUDGET_SECONDS`: the answer to a statement, or a connection."""
+    seconds of at least `SMALLEST_BOUND`. In a process that serves requests, it also raises on a
+    bound that makes a request wait on Postgres for as long as `REQUEST_BUDGET_SECONDS`: the
+    answer to a statement, or a connection. The worker serves none."""
     timeouts = Timeouts(
         statement=_seconds(STATEMENT_TIMEOUT_ENV, TIMEOUTS.statement),
         idle_in_transaction=_seconds(IDLE_IN_TRANSACTION_TIMEOUT_ENV, TIMEOUTS.idle_in_transaction),
         acquire=_seconds(ACQUIRE_TIMEOUT_ENV, TIMEOUTS.acquire),
     )
+    if not serves_requests:
+        return timeouts
     for variable, wait, seconds in (
         (STATEMENT_TIMEOUT_ENV, "an answer", timeouts.answer),
         (ACQUIRE_TIMEOUT_ENV, "a connection", timeouts.acquire),
@@ -251,9 +254,7 @@ def build_timeouts() -> Timeouts:
             raise TimeoutsMisconfigured(
                 f"{variable}={stated(variable)!r} makes a request wait {seconds} s for {wait}, "
                 f"and each wait in a request has a bound under {REQUEST_BUDGET_SECONDS} s. Run "
-                f"long work with app.waits.beside. Give each of its calls its own timeout=, and "
-                f"its transaction SET LOCAL statement_timeout and "
-                f"idle_in_transaction_session_timeout."
+                f"long work as a job, in app/jobs.py: the worker process allows a longer bound."
             )
     return timeouts
 
@@ -331,11 +332,17 @@ def _rate(variable: str, shipped: float) -> float:
     return rate
 
 
+DEVELOPMENT_PROCESSES: Final = 2
+"""The processes of the development loop on Postgres: the web process and the worker."""
+
+
 def build_draws() -> Draws:
     """Everything that holds connections to the database: `DATABASE_INSTANCES` processes, each
-    holding `connection_budget.IN_PROCESS` beside the pool, and `connection_budget.OUTSIDE`.
+    holding `TEMPLATE_IN_PROCESS` and `connection_budget.IN_PROCESS` beside the pool, and
+    `connection_budget.OUTSIDE`.
 
-    The development loop is one process, so there an unset `DATABASE_INSTANCES` is one. Raises
+    The development loop on Postgres is two processes, the web process and the worker, so there
+    an unset `DATABASE_INSTANCES` is two. Raises
     `InstancesMisconfigured` when production leaves it unset, and on a value that is not a
     whole number of at least one.
     """
@@ -343,9 +350,9 @@ def build_draws() -> Draws:
     if said == "" and not in_development():
         raise InstancesMisconfigured(
             f"{INSTANCES_ENV} is unset, and production sizes each pool from it. Set it to the "
-            f"most processes that hold connections at once, the processes of a revision that "
-            f"drains during a rollout included: twice the most instances, when a rollout "
-            f"overlaps them all."
+            f"most processes that hold connections at once, the workers and the processes of a "
+            f"revision that drains during a rollout included: twice the most instances of each, "
+            f"when a rollout overlaps them all."
         )
     if said != "" and not (said.isdecimal() and int(said) >= 1):
         raise InstancesMisconfigured(
@@ -353,14 +360,16 @@ def build_draws() -> Draws:
             f"least 1."
         )
     return Draws(
-        instances=1 if said == "" else int(said),
-        in_process=connection_budget.IN_PROCESS,
+        instances=DEVELOPMENT_PROCESSES if said == "" else int(said),
+        in_process={**TEMPLATE_IN_PROCESS, **connection_budget.IN_PROCESS},
         outside=connection_budget.OUTSIDE,
     )
 
 
-def build() -> Database:
-    """The substrate this deployment gets, from the environment."""
+def build(*, serves_requests: bool = True) -> Database:
+    """The substrate this deployment gets, from the environment, running the jobs that
+    `app/jobs.py` names. The worker serves no request, and passes `serves_requests=False` for
+    the bounds of `build_timeouts`."""
     if os.environ.get(OWNER_URL_ENV):
         raise OwnerCredentialVisible(
             f"{OWNER_URL_ENV} is set in this process. The application never applies DDL, and "
@@ -381,10 +390,11 @@ def build() -> Database:
                 f"{INSTANCES_ENV} set and {DATABASE_URL_ENV} unset: the in-memory substrate "
                 f"holds no connection. Unset it, or set {DATABASE_URL_ENV}."
             )
-        return MemoryDatabase(seed_tenant=SENTINEL_TENANT)
+        return MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=jobs.KINDS)
     return PostgresDatabase(
         dsn=dsn,
         schema=os.environ.get(SCHEMA_ENV),
         draws=build_draws(),
-        timeouts=build_timeouts(),
+        kinds=jobs.KINDS,
+        timeouts=build_timeouts(serves_requests=serves_requests),
     )

@@ -9,8 +9,11 @@ from fastapi.testclient import TestClient
 
 from app import lifespan, main, waits
 from app.deployment import ADMISSION_MODE_ENV
-from app.waits import BesideOutlivedItsCancel, WaitTimedOut, beside
+from app.waits import REQUEST_BUDGET_SECONDS, BesideOutlivedItsCancel, WaitTimedOut, beside
+from tests.clock import elapse
 from tests.conftest import Logged
+
+UNDER_THE_BUDGET = REQUEST_BUDGET_SECONDS - 0.01
 
 
 def _refused(**named: object) -> None:
@@ -45,7 +48,7 @@ def test_shutdown_cancels_the_work_beside_the_requests_before_the_database_close
             ended.append("the work")
 
     async def starts_the_work() -> None:
-        _ = beside(works_until_cancelled(), name="work until shutdown")
+        _ = beside(works_until_cancelled(), name="work until shutdown", within=UNDER_THE_BUDGET)
 
     app = main.create_app()
     with TestClient(app) as serving:
@@ -72,10 +75,12 @@ def test_a_task_that_outlives_its_cancel_fails_the_shutdown_and_the_database_sti
         try:
             _ = await asyncio.Event().wait()
         except asyncio.CancelledError:
-            await asyncio.sleep(1)
+            await elapse(1)
 
     async def starts_the_work() -> None:
-        _ = beside(ends_a_second_after_its_cancel(), name="ignores its cancel")
+        _ = beside(
+            ends_a_second_after_its_cancel(), name="ignores its cancel", within=UNDER_THE_BUDGET
+        )
 
     monkeypatch.setattr(waits, "CANCELLED_WITHIN_SECONDS", 0.01)
     app = main.create_app()
@@ -100,7 +105,7 @@ def test_a_database_that_does_not_close_in_time_fails_the_shutdown_within_its_bo
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def closes_after_a_second() -> None:
-        await asyncio.sleep(1)
+        await elapse(1)
 
     monkeypatch.setattr(lifespan, "CLOSED_WITHIN_SECONDS", 0.01)
     app = main.create_app()

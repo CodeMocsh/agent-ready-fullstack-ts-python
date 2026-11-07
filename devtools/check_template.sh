@@ -609,7 +609,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
-              log main models observe routes serve started store telemetry waits wiring"
+              log main models observe pacing routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -784,6 +784,9 @@ done
 need_grep 'BACKEND_PORT' devtools/dev.sh "Each port comes from the environment, so two checkouts can run at once."
 need_grep 'FRONTEND_PORT' devtools/dev.sh
 need_grep 'BACKEND_PORT' devtools/contract-test.sh
+for loop in devtools/dev.sh devtools/contract-test.sh; do
+    need_grep 'python -m app.worker' "$loop" "On Postgres a job is ended by the worker process. A loop without one leaves every job pending. Only a loop of two processes shows code that needs the memory of one process (docs/adr/template/0027)."
+done
 need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
 need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts "No gate runs the Playwright configs, so a hard-coded port fails nowhere."
 need_grep 'process.env.FRONTEND_PORT' frontend/playwright.live.config.ts
@@ -919,7 +922,8 @@ need_only f docs/adr/template \
     0023-the-server-admits-each-actor-s-requests-within-a-bound.md \
     0024-every-read-has-an-outside-cause.md \
     0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md \
-    0026-every-store-read-is-a-page.md
+    0026-every-store-read-is-a-page.md \
+    0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -982,8 +986,10 @@ for name in ('Task', 'CreateTaskBody', 'UpdateTaskBody', 'ErrorBody'):
 split = [n for n in schemas if n.endswith('-Input') or n.endswith('-Output')]
 assert not split, f'input/output schemas split: {split}. The aliases in src/api/types.ts import each schema by name.'
 paths = spec['paths']
-assert sorted(paths) == ['/client-events', '/tasks', '/tasks/{id}'], sorted(paths)
+assert sorted(paths) == ['/client-events', '/jobs/{id}', '/tasks', '/tasks/{id}', '/tasks/{id}/close'], sorted(paths)
 assert '201' in paths['/tasks']['post']['responses']
+assert '202' in paths['/tasks/{id}/close']['post']['responses'], 'a route that asks for a job answers 202 and does nothing more (docs/adr/template/0027)'
+assert 'content' in paths['/jobs/{id}']['get']['responses']['404'], 'GET /jobs/{id} 404 declares no body, and the typed handlers cannot mock a response with no model.'
 assert schemas['ClientEvent']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvent must refuse an undeclared field'
 assert schemas['ClientEvents']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvents must refuse an undeclared field'
 assert '204' in paths['/tasks/{id}']['delete']['responses']
@@ -1497,6 +1503,29 @@ printf '%s\n' "$out" | grep -q 'reportCallIssue' || {
     exit 1
 }
 
+echo "==> assert the lint refuses work beside the requests with no bound, and a loop of sleeps"
+cat >backend/app/planted_waits.py <<'PY'
+import asyncio
+
+from app.waits import beside
+
+
+async def polls_its_own_rows() -> None:
+    while True:
+        await asyncio.sleep(1)
+
+
+def starts_long_work() -> None:
+    _ = beside(polls_its_own_rows(), name="a poll")
+PY
+slept="$(cd backend && uv run --no-sync ruff check app/planted_waits.py 2>&1)" && sleep_refused=no || sleep_refused=yes
+unbounded="$(cd backend && uv run --no-sync basedpyright app/planted_waits.py 2>&1)" && bound_refused=no || bound_refused=yes
+rm backend/app/planted_waits.py
+[ "$sleep_refused" = yes ] || fail "ruff passed a bare asyncio.sleep in app/. A loop of sleeps on rows this system writes is the poll that docs/adr/template/0027 replaces with a wake."
+printf '%s\n' "$slept" | grep -q 'app.pacing' || { printf '%s\n' "$slept" >&2; fail "ruff refused the sleep, but its message does not name app.pacing"; }
+[ "$bound_refused" = yes ] || fail "basedpyright passed app.waits.beside with no within=. Without a bound, beside is the home of long work again."
+printf '%s\n' "$unbounded" | grep -q 'within' || { printf '%s\n' "$unbounded" >&2; fail "basedpyright refused the planted module, but not for the missing within="; }
+
 echo "==> frontend: lint, test, build"
 
 echo "==> assert a fresh install ships no known high-severity vulnerability"
@@ -1642,8 +1671,12 @@ if docker info >/dev/null 2>&1; then
     run "make db-test" env -u TEST_DATABASE_URL make db-test
     POSTGRES_RAN=yes
     echo "    postgres: yes (container) -- store contract and migration suites ran"
+    run "contract suite (live backend on Postgres, a worker beside it)" \
+        env -u BACKEND_PORT -u FRONTEND_PORT -u DATABASE_URL make test-contract-db
+    need_nothing_outlived "the contract suite on Postgres"
+    echo "    postgres: yes (container) -- the contract suite crossed two processes"
 else
-    echo "    postgres: NO DOCKER -- the container that make db-test starts did not run."
+    echo "    postgres: NO DOCKER -- neither make db-test nor make test-contract-db ran in a container."
 fi
 NO_DOCKER="$WORK/no-docker"
 mkdir -p "$NO_DOCKER"

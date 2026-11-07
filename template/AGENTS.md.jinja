@@ -133,9 +133,15 @@ fans out to both. Each half works without the other's toolchain.
 - A call that waits without `await` goes in a `def` route or in `asyncio.to_thread`. A call to a
   system outside the process goes in `asyncio.to_thread`, inside `app.waits.waiting`.
 - Each wait in a request has a bound under the request budget. Wrap each call to a system
-  outside the process, except Postgres, in `app.waits.waiting`, at the call into its port. Start
-  work that waits longer with `app.waits.beside`, answer `202`, and tell the browser the result
-  when the work ends. A WebSocket is not a request, and `waiting` does not hold it.
+  outside the process, except Postgres, in `app.waits.waiting`, at the call into its port. A
+  WebSocket is not a request, and `waiting` does not hold it.
+- Work that may outlast the request budget is a job. Name its kind in `app/jobs.py`, ask for it,
+  and answer `202`. On Postgres the worker process runs it at least once, so make each handler
+  idempotent. `app.waits.beside` is only for work the caller does not wait for, within the
+  budget. [adr/template/0027](docs/adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
+  says why.
+- Never wait on rows this system writes with a sleep: wait on a wake. Wait on time only through
+  `app/pacing.py`.
 - The lifespan runs at each start of the process, and in each test that starts the app. Keep it
   cheap: build setup that is pure and costly once per process, and cache it. A route test mounts
   its routers with `tests.routed.routed`, and hands it each value the lifespan puts on
@@ -171,7 +177,7 @@ fans out to both. Each half works without the other's toolchain.
 ```bash
 make install        # the git hooks, both halves, then the browser
 make pre-commit     # the gate, once per tree
-make dev            # both halves: backend :8000, frontend :5173, live mode
+make dev            # both halves, live mode; with DATABASE_URL, the worker too
 make dev-frontend   # frontend only, mock mode
 make lint           # auto-fix and lint both halves
 make test           # both halves, then the contract suite against the real backend

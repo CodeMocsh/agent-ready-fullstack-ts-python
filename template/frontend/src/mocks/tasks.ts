@@ -1,4 +1,5 @@
 import { http } from "@/mocks/http";
+import { jobStore } from "@/mocks/jobs";
 import { taskStore } from "@/mocks/store";
 
 export function resetTasks(): void {
@@ -25,6 +26,14 @@ export const taskHandlers = [
       ? response(404).json({ detail: "Task not found" })
       : response(200).json(updated);
   }),
+
+  http.post("/tasks/{id}/close", ({ params, response }) =>
+    response(202).json(
+      jobStore.ended("close a task", {
+        closed: taskStore.update(params.id, { done: true }) !== null,
+      }),
+    ),
+  ),
 
   http.delete("/tasks/{id}", ({ params, response }) =>
     taskStore.remove(params.id)

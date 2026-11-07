@@ -29,6 +29,7 @@ from uuid import uuid4
 import pytest
 
 from app.identity.shared import Actor
+from app.jobs import KINDS
 from app.store import Database
 from app.store.acting import SET_ACTING, acting
 from app.store.budget import Draws
@@ -174,7 +175,9 @@ async def provisioned() -> AsyncIterator[Provisioned]:
 async def a_postgres_database(where: Provisioned) -> Any:
     from app.store.pg import PostgresDatabase
 
-    database = PostgresDatabase(dsn=where.app_dsn, schema=where.schema, draws=ONE_PROCESS)
+    database = PostgresDatabase(
+        dsn=where.app_dsn, schema=where.schema, draws=ONE_PROCESS, kinds=KINDS
+    )
     await database.check()
     return database
 

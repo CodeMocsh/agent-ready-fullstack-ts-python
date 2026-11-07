@@ -34,6 +34,7 @@ what the contract suite does.
 """
 
 import asyncio
+import json
 import math
 import time
 from collections.abc import AsyncGenerator, Callable
@@ -45,11 +46,12 @@ from uuid import UUID, uuid4
 from app import log
 from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, current_actor
 from app.identity.shared import Actor
-from app.models import PAGE_MAX, CreateTaskBody, Task, TaskPage, UpdateTaskBody
+from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
 from app.store import (
     AuditEvents,
     Connections,
     DatabaseBusy,
+    Jobs,
     NoSuchAuditEvent,
     TaskStore,
     TenantUnset,
@@ -59,6 +61,7 @@ from app.store.acting import SET_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
+from app.store.jobs import Kinds, LeaseLost, asker, encoded, fence, handler_of
 from app.store.migrate import check, schema_version
 
 _SET_TENANT = "SELECT set_config($1, $2, true)"
@@ -81,6 +84,19 @@ _AUDIT_EVENTS = (
     "FROM audit_events WHERE seq > $1 ORDER BY seq LIMIT $2"
 )
 _AN_AUDIT_EVENT = "SELECT EXISTS (SELECT 1 FROM audit_events WHERE seq = $1)"
+_ASK_CLAIM = "INSERT INTO job_claims (id, tenant_id, kind) VALUES ($1, $2, $3)"
+_ASK_JOB = (
+    "INSERT INTO jobs (id, tenant_id, kind, input, actor_issuer, actor_subject, actor_name, "
+    "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name) "
+    "VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10) "
+    "RETURNING id, kind, state, outcome, failure"
+)
+_WAKE = "SELECT pg_notify($1, '')"
+_A_JOB = "SELECT id, kind, state, outcome, failure FROM jobs WHERE id = $1"
+_HOLD_CLAIM = (
+    "SELECT 1 FROM job_claims WHERE id = $1 AND tenant_id = $2 AND token = $3 "
+    "AND state = 'running' AND lease_ends > now() FOR KEY SHARE"
+)
 
 
 SMALLEST_BOUND: Final = 0.001
@@ -167,7 +183,7 @@ def _task(row: Any) -> Task:
     return Task(id=str(row["id"]), title=row["title"], done=row["done"])
 
 
-def _actor(issuer: str | None, subject: str | None, name: str | None) -> Actor | None:
+def actor_from(issuer: str | None, subject: str | None, name: str | None) -> Actor | None:
     """The actor the three columns name, `None` when all three are null. Raises
     `pydantic.ValidationError` when only some are."""
     if issuer is None and subject is None and name is None:
@@ -176,7 +192,7 @@ def _actor(issuer: str | None, subject: str | None, name: str | None) -> Actor |
 
 
 def _recorded(row: Any) -> RecordedAuditEvent:
-    acted_for = _actor(
+    acted_for = actor_from(
         row["on_behalf_of_issuer"], row["on_behalf_of_subject"], row["on_behalf_of_name"]
     )
     return RecordedAuditEvent(
@@ -306,6 +322,63 @@ class PostgresAuditEvents:
         )
 
 
+def _job(row: Any) -> Job:
+    outcome = row["outcome"]
+    return Job(
+        id=str(row["id"]),
+        kind=row["kind"],
+        state=row["state"],
+        outcome=None if outcome is None else json.loads(outcome),
+        failure=row["failure"],
+    )
+
+
+def wakes(schema: str) -> str:
+    """The channel on which a job that is asked for in `schema` wakes the workers."""
+    return f"{schema}_jobs"
+
+
+class PostgresJobs:
+    """`Jobs` against a pool, scoped to one tenant. A job is two rows: its claim in `job_claims`,
+    which no policy scopes, and the job in `jobs`, which the policy scopes."""
+
+    def __init__(self, database: "PostgresDatabase", tenant_id: str) -> None:
+        self._database: PostgresDatabase = database
+        self._tenant_id: str = tenant_id
+
+    async def ask(self, kind: str, input: JsonObject) -> Job:
+        _ = handler_of(self._database.kinds, kind)
+        actor = asker()
+        stored = encoded(input)
+        acted_for = actor.on_behalf_of
+        id = uuid4()
+        async with self._database.scoped(self._tenant_id) as conn:
+            await conn.execute(_ASK_CLAIM, id, self._tenant_id, kind)
+            row = await conn.fetchrow(
+                _ASK_JOB,
+                id,
+                self._tenant_id,
+                kind,
+                stored,
+                actor.issuer,
+                actor.subject,
+                actor.name,
+                None if acted_for is None else acted_for.issuer,
+                None if acted_for is None else acted_for.subject,
+                None if acted_for is None else acted_for.name,
+            )
+            await conn.execute(_WAKE, wakes(self._database.schema))
+        return _job(row)
+
+    async def read(self, id: str) -> Job | None:
+        parsed = _as_id(id)
+        if parsed is None:
+            return None
+        async with self._database.scoped(self._tenant_id) as conn:
+            row = await conn.fetchrow(_A_JOB, parsed)
+        return None if row is None else _job(row)
+
+
 def _refuse_unset(tenant_id: str) -> None:
     if tenant_id.strip() == "":
         raise TenantUnset(
@@ -324,12 +397,14 @@ class PostgresDatabase:
         *,
         dsn: str,
         draws: Draws,
+        kinds: Kinds,
         schema: str | None = None,
         min_size: int = 1,
         timeouts: Timeouts = TIMEOUTS,
     ) -> None:
         self._dsn: str = dsn
-        self._schema: str = resolve_schema(schema)
+        self.kinds: Kinds = kinds
+        self.schema: str = resolve_schema(schema)
         self._draws: Draws = draws
         self._min_size: int = min_size
         self._timeouts: Timeouts = timeouts
@@ -346,7 +421,7 @@ class PostgresDatabase:
 
     def _server_settings(self) -> dict[str, str]:
         return {
-            "search_path": self._schema,
+            "search_path": self.schema,
             "statement_timeout": _milliseconds(self._timeouts.statement),
             "idle_in_transaction_session_timeout": _milliseconds(
                 self._timeouts.idle_in_transaction
@@ -356,12 +431,7 @@ class PostgresDatabase:
     async def _budgeted(self) -> ConnectionBudget:
         """The budget under the server's limits, read on one connection that closes before the
         pool opens. Raises `OverBudget` when the draws do not fit."""
-        conn = await _driver().connect(
-            dsn=self._dsn,
-            timeout=self._timeouts.acquire,
-            command_timeout=self._timeouts.answer,
-            server_settings=self._server_settings(),
-        )
+        conn = await self.dedicated()
         try:
             limits = await server_limits(conn)
         finally:
@@ -436,6 +506,16 @@ class PostgresDatabase:
             else:
                 await pool.release(conn)
 
+    async def dedicated(self) -> Any:
+        """A connection of its own, outside the pool and its budget, with the same search path
+        and bounds. The caller closes it."""
+        return await _driver().connect(
+            dsn=self._dsn,
+            timeout=self._timeouts.acquire,
+            command_timeout=self._timeouts.answer,
+            server_settings=self._server_settings(),
+        )
+
     def connections(self) -> Connections:
         """The pool's connections now. Before the pool opens and after it closes, none in use.
         Before it first opens, a size of none. Safe to call from another thread, as a metric
@@ -444,9 +524,9 @@ class PostgresDatabase:
         budget = self._budget
         most = 0 if budget is None else budget.pool
         if pool is None:
-            return Connections(pool=self._schema, used=0, idle=0, max_size=most)
+            return Connections(pool=self.schema, used=0, idle=0, max_size=most)
         idle = pool.get_idle_size()
-        return Connections(pool=self._schema, used=pool.get_size() - idle, idle=idle, max_size=most)
+        return Connections(pool=self.schema, used=pool.get_size() - idle, idle=idle, max_size=most)
 
     def time_waits(self, record: Callable[[float], None]) -> None:
         self._waited = record
@@ -463,21 +543,35 @@ class PostgresDatabase:
         _refuse_unset(tenant_id)
         return PostgresAuditEvents(self, tenant_id)
 
+    def jobs(self, tenant_id: str) -> Jobs:
+        _refuse_unset(tenant_id)
+        return PostgresJobs(self, tenant_id)
+
     @asynccontextmanager
     async def scoped(self, tenant_id: str) -> AsyncGenerator[Any]:
         """A connection inside a transaction that has set `tenant_id`, which every statement
-        on tenant data runs in."""
+        on tenant data runs in.
+
+        Inside `app.store.jobs.fenced`, the transaction first holds the claim with
+        `FOR KEY SHARE` until it ends, so no worker can claim the job while it runs. Raises
+        `LeaseLost`, and rolls back, when the claim is no longer this attempt's, or is of another
+        tenant."""
         async with self.connection() as conn, conn.transaction():
             await conn.execute(_SET_TENANT, TENANT_GUC, tenant_id)
+            claim = fence()
+            if claim is not None and (
+                await conn.fetchval(_HOLD_CLAIM, UUID(claim.id), tenant_id, claim.token) is None
+            ):
+                raise LeaseLost(f"attempt {claim.attempts} of job {claim.id} lost its lease")
             yield conn
 
     async def check(self) -> str:
         async with self.connection() as conn:
-            return await check(conn, self._schema)
+            return await check(conn, self.schema)
 
     async def schema_version(self) -> str | None:
         async with self.connection() as conn:
-            return await schema_version(conn, self._schema)
+            return await schema_version(conn, self.schema)
 
     async def close(self) -> None:
         if self._pool is not None:

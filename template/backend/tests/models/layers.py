@@ -9,4 +9,5 @@ LAYERS: dict[str, frozenset[str]] = {
     "shared": frozenset(),
     "tasks": frozenset(),
     "client_events": frozenset(),
+    "jobs": frozenset(),
 }

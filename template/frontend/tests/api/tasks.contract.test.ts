@@ -1,7 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { API_BASE_URL } from "@/api/base";
+import { type Job, jobsApi } from "@/api/jobs";
 import { type Task, tasksApi } from "@/api/tasks";
 import { againstLiveBackend } from "./target";
+
+async function ended(id: string): Promise<Job> {
+  const deadline = Date.now() + 15_000;
+  for (;;) {
+    const job = await jobsApi.read(id);
+    if (job.state !== "pending" || Date.now() > deadline) {
+      return job;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 
 async function everyTask(): Promise<Task[]> {
   const tasks: Task[] = [];
@@ -84,5 +96,25 @@ describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers
       "Task not found",
     );
     await expect(tasksApi.remove("does-not-exist")).rejects.toThrow("Task not found");
+  });
+});
+
+describe(`jobs contract (${againstLiveBackend ? "live backend" : "mock handlers"})`, () => {
+  it("answers a job it was asked for as pending, and reads it back ended", async () => {
+    const asked = await tasksApi.close("does-not-exist");
+    expect(asked.state).toBe("pending");
+    expect(await ended(asked.id)).toEqual({
+      id: asked.id,
+      kind: "close a task",
+      state: "done",
+      outcome: { closed: false },
+      failure: null,
+    });
+  });
+
+  it("refuses a job that is not there with a 404 and an ErrorBody", async () => {
+    const answered = await fetch(`${API_BASE_URL}/jobs/does-not-exist`);
+    expect(answered.status).toBe(404);
+    expect(await answered.json()).toEqual({ detail: "Job not found" });
   });
 });

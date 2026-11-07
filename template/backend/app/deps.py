@@ -14,7 +14,7 @@ from fastapi import Depends, Request
 from app import admission, audit_events, log
 from app.identity import principal_for
 from app.identity.shared import Principal
-from app.store import Database, TaskStore
+from app.store import Database, Jobs, TaskStore
 
 
 def database_of(request: Request) -> Database:
@@ -74,3 +74,11 @@ def get_store(request: Request, principal: PrincipalDep) -> TaskStore:
 
 
 StoreDep = Annotated[TaskStore, Depends(get_store)]
+
+
+def get_jobs(request: Request, principal: PrincipalDep) -> Jobs:
+    """The jobs this request may ask for and read, already scoped to its tenant."""
+    return database_of(request).jobs(principal.tenant_id)
+
+
+JobsDep = Annotated[Jobs, Depends(get_jobs)]
