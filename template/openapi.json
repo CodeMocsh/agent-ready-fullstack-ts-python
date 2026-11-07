@@ -24,6 +24,16 @@
           "204": {
             "description": "Successful Response"
           },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -59,6 +69,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -139,6 +159,16 @@
               }
             }
           },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "503": {
             "description": "No database connection is free. Ask again after the seconds in Retry-After",
             "content": {
@@ -201,6 +231,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }
@@ -274,6 +314,16 @@
               }
             }
           },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
           "503": {
             "description": "No database connection is free. Ask again after the seconds in Retry-After",
             "content": {
@@ -333,6 +383,16 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
           },
           "503": {
             "description": "No database connection is free. Ask again after the seconds in Retry-After",
@@ -399,6 +459,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }

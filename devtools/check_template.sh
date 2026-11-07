@@ -648,7 +648,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
-              log main models observe pacing routes serve started store telemetry waits wiring worker"
+              log main models observe pacing responses routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -962,7 +962,8 @@ need_only f docs/adr/template \
     0024-every-read-has-an-outside-cause.md \
     0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md \
     0026-every-store-read-is-a-page.md \
-    0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md
+    0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md \
+    0028-every-finite-response-has-a-byte-bound.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1504,7 +1505,7 @@ run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
 echo "==> assert the startup gate refuses telemetry imported in every process"
 MAIN=backend/app/main.py
-LAZY='from app import admission, audit_events, log, request_events, waits'
+LAZY='from app import admission, audit_events, log, request_events, response_bound, waits'
 grep -qxF "$LAZY" "$MAIN" || fail "$MAIN no longer says '$LAZY', so the startup gate mutation tests nothing"
 cp "$MAIN" "$WORK/main.py"
 sed -i.bak "s/^$LAZY\$/$LAZY, telemetry/" "$MAIN" && rm -f "$MAIN.bak"

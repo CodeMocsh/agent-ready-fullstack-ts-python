@@ -118,3 +118,29 @@ describe(`jobs contract (${againstLiveBackend ? "live backend" : "mock handlers"
     expect(await answered.json()).toEqual({ detail: "Job not found" });
   });
 });
+
+if (againstLiveBackend) {
+  it("refuses an oversized page through the live HTTP path", async () => {
+    const created: string[] = [];
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      for (let index = 0; index < 9; index += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const task = await tasksApi.create({ title: "x".repeat(512 * 1024) });
+        created.push(task.id);
+      }
+      const answered = await fetch(`${API_BASE_URL}/tasks`);
+      expect(answered.status).toBe(500);
+      expect(await answered.json()).toEqual({ detail: "Response exceeds its byte limit" });
+      await expect(tasksApi.list(null)).rejects.toThrow("Response exceeds its byte limit");
+    } finally {
+      for (const id of created) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await tasksApi.remove(id);
+      }
+    }
+    expect((await tasksApi.list(null)).tasks.every((task) => !created.includes(task.id))).toBe(
+      true,
+    );
+  });
+}

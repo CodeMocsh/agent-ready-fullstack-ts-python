@@ -35,9 +35,11 @@ from typing import Any, Final
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 
+from app import response_limits
 from app.main import create_app
-from app.refusal import NoSuchAsset
-from app.wiring import BundleMissing, build_bundle
+from app.refusal import NoSuchAsset, internal_error
+from app.response_bound import BoundsResponses
+from app.wiring import BundleMissing, build_bundle, build_response_limits
 
 INDEX: Final = "index.html"
 ASSETS: Final = "assets"
@@ -150,12 +152,14 @@ def create_server(bundle: Path, api: FastAPI) -> ASGIApp:
         async with api.router.lifespan_context(api):
             yield
 
+    limits = build_response_limits()
     server = FastAPI(lifespan=lifespan, openapi_url=None)
+    server.add_exception_handler(500, internal_error)
     server.middleware("http")(_refuse_oversized)
     server.mount(PREFIX, api)
 
     @server.get("/{held:path}", include_in_schema=False)
-    async def bundled(held: str) -> FileResponse:
+    async def bundled(request: Request, held: str) -> FileResponse:
         """The file the path names, or the shell so the client router can take the path.
 
         An asset is exempt from that fallback. Its name carries the build's hash, so a request
@@ -167,9 +171,12 @@ def create_server(bundle: Path, api: FastAPI) -> ASGIApp:
         if found is None and held.startswith(f"{ASSETS}/"):
             raise NoSuchAsset(f"no such asset: {held}")
         served = index if found is None else found
+        response_limits.allow(
+            request, max_bytes=limits.ceiling, reason="The deployed frontend bundle"
+        )
         return FileResponse(served, headers={"cache-control": _caching(bundle, served)})
 
-    return _confined(server)
+    return _confined(BoundsResponses(server, limits=limits))
 
 
 def _caching(bundle: Path, served: Path) -> str:

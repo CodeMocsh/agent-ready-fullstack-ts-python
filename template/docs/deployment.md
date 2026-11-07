@@ -567,3 +567,29 @@ shares one actor's [admission](#admission-and-the-edge). Put a limit at the edge
 can reach it.
 [adr/template/0004](adr/template/0004-a-route-cannot-escape-the-identity-seam.md) says what a
 replacement owes.
+
+## Response bytes
+
+The default finite response limit is `RESPONSE_MAX_BYTES`, initially 4194304 bytes.
+A route can declare a different limit through `response_limits.allow`.
+The bundled-file route declares the deployment ceiling so large assets need no global default increase.
+`RESPONSE_CEILING_BYTES`, initially 16777216 bytes, caps every finite route exception.
+Set the ceiling below your edge's response limit. Allow headroom for encoding changes.
+Both settings must be integer byte counts of at least 1024. The default cannot exceed the ceiling.
+Invalid settings stop application construction.
+
+[Cloud Run's limit](https://docs.cloud.google.com/run/quotas#request_limits_for_cloud_run)
+is 32 MiB for HTTP/1 responses without chunked delivery or streaming.
+It is not a limit for every transport or deployment.
+The template uses a smaller ceiling by default and does not hard-code Cloud Run into route policies.
+
+A `ResponseTooLarge` refusal answers `500` before any success body leaves the guard.
+The `response too large` log names the limit and observed bytes without logging the body.
+Buffering starts at response start and must finish within the existing request budget.
+A buffer timeout answers the named `ResponseTimedOut` refusal. Handler work before response start keeps its existing wait policy.
+The existing 5xx signal can alert on these refusals. Verify that signal in your deployed monitoring system.
+A route exception needs a code reason. A stream needs an explicit declaration and its own resource bounds.
+[adr/template/0028](adr/template/0028-every-finite-response-has-a-byte-bound.md) defines both contracts.
+
+Finite buffering costs up to the selected limit per active response, plus application allocations and transport copies.
+Choose concurrency and memory together. This limit does not bound serialization work or decompressed content.

@@ -12,7 +12,7 @@ keeps out of the spec.
 
 from typing import Any, ClassVar, Final, Literal, final
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.models import ErrorBody
@@ -32,6 +32,31 @@ class ApiError(HTTPException):
         super().__init__(
             status_code=self.status, detail=self.description if detail is None else detail
         )
+
+
+@final
+class ResponseTooLarge(ApiError):
+    """A finite response exceeded its declared byte limit."""
+
+    status = 500
+    description = "Response exceeds its byte limit"
+
+
+@final
+class ResponseTimedOut(ApiError):
+    """A finite response did not complete its body within the response budget."""
+
+    status = 500
+    description = "Response did not finish within its time limit"
+
+
+async def internal_error(_request: Request, _error: Exception) -> JSONResponse:
+    """An unhandled HTTP failure, with the error shape the API declares."""
+    return JSONResponse(
+        status_code=500,
+        content=ErrorBody(detail="Internal server error").model_dump(),
+        headers={"cache-control": "no-store"},
+    )
 
 
 @final
