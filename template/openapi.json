@@ -424,11 +424,11 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "The input holds a value that cannot be stored",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/ErrorBody"
                 }
               }
             }

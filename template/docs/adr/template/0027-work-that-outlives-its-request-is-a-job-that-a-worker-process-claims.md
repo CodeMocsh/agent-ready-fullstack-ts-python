@@ -50,12 +50,16 @@ More CPU for the same process does not help. One event loop uses one core.
   maps each kind of job to its handler, as
   [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says. The
   template ships that map with the one kind of the example resource, `close a task`, which
-  `POST /tasks/{id}/close` asks for.
+  `app/task_jobs.py` holds and `POST /tasks/{id}/close` asks for.
 - **Two tables hold a job.** `job_claims` holds only what a claim and a sweep read: the id, the
   tenant, the kind, the state, the lease token, the end of the lease, the attempts, and the time
   the job is ready. `jobs` is a tenant table. It holds the input, the actor that asked, and the
-  outcome. `jobs` references `job_claims` on `(tenant_id, id)`, so a claim cannot name the job
+  outcome. `jobs` references `job_claims` on `(id, tenant_id)`, so a claim cannot name the job
   of another tenant.
+- **An input and an outcome are JSON that `jsonb` can hold.** `encoded` refuses a number that is
+  not finite, the character U+0000 and a surrogate code point with `UnstorableJson`, on both
+  substrates. A route answers
+  it with `UnstorableInput`, a `422`. An outcome that cannot be stored fails its attempt.
 - **`job_claims` is the second exemption from isolation.** A worker claims the next job of any
   tenant, so the claim cannot be scoped to a tenant before it is made. `EXEMPT_FROM_ISOLATION` in
   `tests/store/test_schema.py` names it, and a test asserts that it has only the columns above.
@@ -80,66 +84,82 @@ More CPU for the same process does not help. One event loop uses one core.
   [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) records
   each write of a job under the actor that asked for it. A handler cannot open a transaction
   that the fence does not check.
-- **The end of a job is a fenced write.** The transaction that writes the outcome to `jobs` also
-  marks the claim done. A worker whose lease ended cannot end the job.
+- **Each end of an attempt is a fenced write.** The transaction that writes the outcome or the
+  failure to `jobs` also marks the claim `ended`, and the one that makes a job ready again
+  clears its token. A worker whose lease ended can do none of them.
 - **A job runs at least once.** A handler is idempotent.
 - **A job that fails `MAX_ATTEMPTS` times is dead.** The line `job dead` names it, and its
-  outcome says why. A job that fails fewer times is ready again after a delay that grows with
-  each attempt.
+  `failure` names the class of the last error. A job that fails fewer times is ready again after
+  `Leases.retry_in`, which doubles with each attempt. A claim past `MAX_ATTEMPTS` ends the job
+  dead with the failure `AttemptsSpent`: its last attempt ended with no outcome, as when its
+  lease ended or its worker stopped.
+- **An attempt that gets no database connection does not count.** `attempted` answers
+  `Deferred`, the line `database busy` names the refusal, and the job is ready again after the
+  refusal's `Retry-After`. When the write that makes it ready also gets no connection, the lease
+  ends, and the next claim counts.
 - **A wait on the work of another process is a wake, never a loop of sleeps.** The write of a
   job sends `pg_notify` in its own transaction, so the wake comes only after the commit. The
-  worker hears it through `LISTEN`. A sweep on a long period is the backstop, and it also finds
-  leases that ended. This is
+  worker hears it through `LISTEN`, and a slot that claims a job wakes the others to look again.
+  A slot with no job also wakes when a failed job is ready again or a lease ends, which
+  `next_claim_within` reads. `SWEEP_SECONDS` bounds every wait. When the `LISTEN` connection
+  ends, the worker stops with `WakesLost`, and its platform starts it again. This is
   [0024](0024-every-read-has-an-outside-cause.md) on the backend: each read has an outside
   cause.
 - **`GET /jobs/{id}` answers the state of a job:** `pending`, `done` with its outcome, or `dead`
-  with its failure. The browser learns that a job ended by reading it again. A screen that shows a job reads it with a `refetchInterval`
-  backstop while the job is queued or running. The template ships no stream. A project with a
-  stream sends a server event when a job ends.
+  with its failure. The browser learns that a job ended by reading it again. A screen that
+  shows a job reads it with a `refetchInterval` while the job is `pending`. The template ships no
+  stream. A project with a stream sends a server event when a job ends.
 - **The web process and the worker process have one entry point each.** `app.main:app` serves
   requests. `python -m app.worker` claims jobs and serves no request. No variable chooses a
-  role. The web process starts no job loop, and a test asserts that a started app runs none.
-- **Every development loop on Postgres runs two processes.** `make dev` with a `DATABASE_URL`
-  starts both, and so does `make test-contract-db`. The gate runs each of these on Postgres:
+  role. The web process starts no job loop: `test_the_web_process_loads_no_job_loop` builds the
+  app and asserts that it loads neither `app.worker` nor `app.store.pg_jobs`.
+- **`make dev` and `make test-contract-db` run two processes on Postgres.** Each starts the
+  worker beside the backend when `DATABASE_URL` is set. `make dev-backend` starts the backend
+  alone. The template's own gate runs each of these on Postgres:
   - `make test-contract-db`: the live contract suite, through the dev proxy, with a worker
     beside the backend. Its job test asks for a job through the API, and reads its outcome
     through the API. Without the worker it fails.
   - `make db-test`: `test_a_task_closes_through_a_job_that_the_worker_process_ends` serves the
-    app in the test and starts `python -m app.worker` beside it.
+    app in the test and starts `python -m app.worker` beside it, and
+    `test_a_worker_in_another_process_ends_a_job_that_this_process_asked_for` does the same
+    with no example.
   The other live contract runs are on the memory substrate, which runs its own jobs. On a
-  machine with no Docker, the gate runs neither, and says so.
+  machine with no Docker, the gate runs neither, and says so. In a project that declined the
+  example, only the second test crosses a process.
 - **The memory substrate runs its own jobs.** `MemoryDatabase` holds its rows in the memory of
   one process, so no other process can claim them. It runs each job after the write that asks
   for it, in that process, through the handler in `app/jobs.py`. A route test waits for each job
   with `MemoryDatabase.drained()`. No variable chooses this. The substrate does.
 - **`JobsContract` in `tests/jobs_contract.py` holds the contract once.** Each binding runs it,
   as `TaskStoreContract` does for the stores. On Postgres,
-  `tests/integration/test_jobs_on_postgres.py` also runs the kill, the reclaim, the wake and the
-  fence: a slow attempt's write to a tenant table fails with `LeaseLost` after another worker
-  claims the job.
+  `tests/integration/test_jobs_on_postgres.py` also runs the kill, the reclaim, the renewal, the
+  wake, the delay before a retry and the fence: a slow attempt's write fails with `LeaseLost`
+  after another worker claims the job, whether it writes a tenant table or ends the job.
 - **`DATABASE_INSTANCES` counts the worker processes too.** Each process holds
   `TEMPLATE_IN_PROCESS` in `app/store/budget.py` beside the template's pool: the worker's
   `LISTEN` connection. In the development loop on Postgres, an unset `DATABASE_INSTANCES` is two.
-- **The worker has its own bounds.** `build(serves_requests=False)` skips the rule of 0021 that
-  refuses a statement bound of 9 s or more, which is a rule of the web process.
+- **The worker accepts a longer bound on a statement.** `build(serves_requests=False)` skips the
+  rule of 0021 that refuses a bound whose answer reaches `REQUEST_BUDGET_SECONDS`, which is a
+  rule of the web process.
 - **`beside(work, name=..., within=...)` takes a bound under `REQUEST_BUDGET_SECONDS`.** `beside`
   is for work that the caller does not wait for, not for work that is long. Work that may take
   longer is a job. A bound that is not under the budget raises `BesideOutlastsTheBudget`, whose
-  message names `app/jobs.py`. Past its bound, the work is cancelled and fails with
-  `WaitTimedOut`. The message of
+  message names `app/jobs.py`, and one that is not a finite positive number raises
+  `ValueError`. Past
+  its bound, the work is cancelled and fails with `WaitTimedOut`. The message of
   `WaitOutlastsTheRequest` names jobs too.
 - **ruff refuses a bare sleep.** `asyncio.sleep`, `anyio.sleep` and `time.sleep` are in
-  `banned-api`, and each message names the helpers in `app/pacing.py`. A test waits on time
-  through `tests/clock.py`: `elapse` and `hold_the_thread`. Each helper names why it
-  waits:
+  `banned-api`, and each message names the helpers in `app/pacing.py`. The ban holds in each
+  module that `per-file-ignores` does not exempt from `TID251`. A test waits on time through
+  `tests/clock.py`: `elapse` and `hold_the_thread`. Each helper names why it waits:
   - `every(period)` for a periodic loop;
   - `backoff(...)` for a retry inside one call, with a bound;
   - `yield_now()` to give the event loop a turn;
   - `poll_outside(check, period=..., within=..., on=...)` for a system outside the process that
     has no push, inside `waiting`, so its bound is under the budget in a request.
   No helper waits on rows that this system writes. That wait is a wake.
-- **`check_template.sh` plants a `beside` with no bound and a loop of sleeps**, and expects the
-  lint to fail on each.
+- **The template's own gate plants a `beside` with no bound and a loop of sleeps**, and expects
+  the lint to fail on each.
 
 ## Considered options
 
@@ -155,7 +175,7 @@ More CPU for the same process does not help. One event loop uses one core.
   the release step. `procrastinate` needs psycopg, a second driver beside asyncpg. With our own
   lease beside either, two records name the holder of a job.
 - **A fence checked in each statement, or at the end of the job.** A claim can commit between the
-  check and the commit of the write. The share lock closes that gap.
+  check and the commit of the write. The lock held until the commit closes that gap.
 - **One process with a role that runs both, for the development loop and the tests.** Nothing
   crosses a process there. Each coupling that the audit found passes every test and fails in
   production.
@@ -170,7 +190,7 @@ More CPU for the same process does not help. One event loop uses one core.
   no outcome is smaller.
 - **A claim that loops over the tenants, scoped to each.** The list of tenants is itself a read
   across tenants, and the worker waits on the slowest tenant.
-- **On the memory substrate, a job that stays queued, and a start line that says so.** A job
+- **On the memory substrate, a job that stays `pending`, and a start line that says so.** A job
   that never runs looks like a job that is slow. A start line is a warning where the code
   cannot correctly proceed.
 - **On the memory substrate, refuse to write a job.** `make test` and `make dev` with no
@@ -193,8 +213,8 @@ More CPU for the same process does not help. One event loop uses one core.
 - The application role reads every tenant id and every job kind in `job_claims`.
 - The web process reserves the worker's `LISTEN` connection in its share, and does not use it.
 - Nothing checks that a handler is idempotent. A review does.
-- A job's input is a row in `jobs`. A large input is read in pages, as
-  [0026](0026-every-store-read-is-a-page.md) says.
+- A job's input is one row in `jobs`, read whole. Keep it small: a handler reads large data
+  through the store, in pages, as [0026](0026-every-store-read-is-a-page.md) says.
 - On the memory substrate one process serves requests and runs jobs. Its development loop does
   not show a coupling to the memory of one process. The loop on Postgres does.
 - Nothing checks that a `poll_outside` waits on a system outside the process. A review does.

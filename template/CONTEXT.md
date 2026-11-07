@@ -206,7 +206,8 @@ _Avoid_: rate limit (the edge's limit is per address), throttle, quota.
 
 **Durable work**:
 Work that outlives the request that asks for it, and outlives the process that starts it. A
-worker runs it from Postgres. `docs/adr/template/0027`.
+worker runs it from Postgres. On the in-memory substrate the backend runs it, and it ends with
+that process. `docs/adr/template/0027`.
 _Avoid_: background work, async work.
 
 **Job**:
@@ -223,7 +224,8 @@ _Avoid_: lock (a lease ends on its own), reservation.
 
 **Worker**:
 The process that `python -m app.worker` starts. It claims jobs and serves no request. In
-`docs/frontend.md`, a worker is a process of vitest, which is another thing.
+`docs/frontend.md`, a worker is a process of vitest or the mock service worker, which are other
+things.
 _Avoid_: background process, consumer.
 
 **Work beside the requests**:

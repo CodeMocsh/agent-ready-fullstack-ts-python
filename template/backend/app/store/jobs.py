@@ -9,6 +9,8 @@ A job runs at least once, so a handler is idempotent. A handler that raises is t
 `MAX_ATTEMPTS` attempts, and the job is then dead.
 """
 
+import json
+import re
 from collections.abc import Awaitable, Callable, Generator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -16,17 +18,20 @@ from dataclasses import dataclass
 from typing import Final
 from uuid import UUID
 
+from pydantic import JsonValue
+
 from app import log
 from app.audit_events import current_actor
 from app.identity.shared import Actor
 from app.models import JsonObject
-from app.store import Database, TaskStore
+from app.store import Database, DatabaseBusy, TaskStore
 
 MAX_ATTEMPTS: Final = 5
 """The most attempts a job gets. A job whose last attempt fails is dead."""
 
-LEASE_LOST: Final = "LeaseLost"
-"""The failure of a job whose lease ended on each of its attempts."""
+ATTEMPTS_SPENT: Final = "AttemptsSpent"
+"""The failure of a job whose last attempt ended with no outcome and no failure it named: its
+lease ended, or its worker stopped."""
 
 Handler = Callable[[TaskStore, JsonObject], Awaitable[JsonObject]]
 """What runs a job: the store of the job's tenant and the job's input, to the job's outcome."""
@@ -41,6 +46,11 @@ class UnknownKind(LookupError):
 
 class AskedByNobody(RuntimeError):
     """A job was asked for outside a request and outside `acting_as`, so no actor asked."""
+
+
+class UnstorableJson(ValueError):
+    """An input or an outcome holds a value that a `jsonb` column cannot hold: a number that is
+    not finite, the character U+0000, or a surrogate code point, U+D800 to U+DFFF."""
 
 
 class LeaseLost(RuntimeError):
@@ -97,9 +107,18 @@ class Asked:
 
 @dataclass(frozen=True)
 class Failed:
-    """An attempt whose handler raised. `failure` names the class of the error."""
+    """An attempt whose handler raised, or returned an outcome that cannot be stored. `failure`
+    names the class of the error."""
 
     failure: str
+
+
+@dataclass(frozen=True)
+class Deferred:
+    """An attempt that got no database connection. It does not count, and the job is ready again
+    after `after` seconds, as the refusal asked."""
+
+    after: float
 
 
 _FENCE: ContextVar[Claim | None] = ContextVar("fence", default=None)
@@ -146,15 +165,49 @@ def asker() -> Actor:
     return actor
 
 
+def encoded(value: JsonObject) -> str:
+    """`value` as JSON that a `jsonb` column can hold. Raises `UnstorableJson` on a number that is
+    not finite, on the character U+0000, and on a surrogate code point."""
+    try:
+        text = json.dumps(value, allow_nan=False)
+    except ValueError as error:
+        raise UnstorableJson("a value holds a number that is not finite") from error
+    if _holds_unstorable_text(value):
+        raise UnstorableJson("a value holds the character U+0000 or a surrogate code point")
+    return text
+
+
+_UNSTORABLE_TEXT: Final = re.compile("[\x00\ud800-\udfff]")
+
+
+def _holds_unstorable_text(value: JsonValue) -> bool:
+    if isinstance(value, str):
+        return _UNSTORABLE_TEXT.search(value) is not None
+    if isinstance(value, dict):
+        return any(
+            _holds_unstorable_text(key) or _holds_unstorable_text(held)
+            for key, held in value.items()
+        )
+    if isinstance(value, list):
+        return any(_holds_unstorable_text(held) for held in value)
+    return False
+
+
 async def attempted(
     handler: Handler, store: TaskStore, asked: Asked, *, job: str, kind: str, attempt: int
-) -> JsonObject | Failed:
-    """The outcome of one attempt of `handler`, or `Failed` when it raises. `log.job_failed`
-    names each failure. `LeaseLost` and a cancellation raise."""
+) -> JsonObject | Failed | Deferred:
+    """The outcome of one attempt of `handler`: the outcome, `Failed` when the handler raises or
+    returns an outcome that cannot be stored, or `Deferred` when it got no database connection.
+    `log.job_failed` names each failure. `LeaseLost` and a cancellation raise."""
     try:
-        return await handler(store, asked.input)
+        outcome = await handler(store, asked.input)
+        _ = encoded(outcome)
     except LeaseLost:
         raise
+    except DatabaseBusy as busy:
+        log.database_busy(type(busy).__name__)
+        return Deferred(after=busy.retry_after)
     except Exception as error:
         log.job_failed(kind=kind, job=job, attempt=attempt, error=error)
         return Failed(failure=type(error).__name__)
+    return outcome

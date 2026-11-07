@@ -1,9 +1,10 @@
 """Every wait on time in the app, each named for why it waits.
 
-ruff refuses a bare `asyncio.sleep`, `anyio.sleep` and `time.sleep` everywhere but here and
-`tests/clock.py`. A wait on time is right for a loop on a period, a retry, a turn of the event
-loop, and a system outside the process that has no push. A wait on rows that this system writes
-is never a wait on time: it is a wake, as `pg_notify` wakes the worker, with a long backstop.
+ruff refuses a bare `asyncio.sleep`, `anyio.sleep` and `time.sleep` in each module that
+`per-file-ignores` does not exempt from `TID251`. This module and `tests/clock.py` are the two
+exempt for that reason alone. A wait on time is right for a loop on a period, a retry, a turn of
+the event loop, and a system outside the process that has no push. A wait on rows that this
+system writes is never a wait on time: it is a wake, as `pg_notify` wakes the worker.
 `docs/adr/template/0027`.
 """
 

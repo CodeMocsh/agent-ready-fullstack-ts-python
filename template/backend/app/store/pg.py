@@ -61,7 +61,7 @@ from app.store.acting import SET_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
-from app.store.jobs import Kinds, LeaseLost, asker, fence, handler_of
+from app.store.jobs import Kinds, LeaseLost, asker, encoded, fence, handler_of
 from app.store.migrate import check, schema_version
 
 _SET_TENANT = "SELECT set_config($1, $2, true)"
@@ -349,6 +349,7 @@ class PostgresJobs:
     async def ask(self, kind: str, input: JsonObject) -> Job:
         _ = handler_of(self._database.kinds, kind)
         actor = asker()
+        stored = encoded(input)
         acted_for = actor.on_behalf_of
         id = uuid4()
         async with self._database.scoped(self._tenant_id) as conn:
@@ -358,7 +359,7 @@ class PostgresJobs:
                 id,
                 self._tenant_id,
                 kind,
-                json.dumps(input),
+                stored,
                 actor.issuer,
                 actor.subject,
                 actor.name,

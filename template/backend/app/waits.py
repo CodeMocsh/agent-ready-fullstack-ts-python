@@ -111,11 +111,15 @@ def beside[T](work: Coroutine[Any, Any, T], name: str, *, within: float) -> asyn
 
     It acts as the actor the caller acts as. `log.beside_failed` names a failure, and
     `log.beside_cancelled` a cancellation, before the task is done for anything that awaits it.
-    `cancel_beside` cancels it at shutdown. Raises `BesideOutlastsTheBudget` when `within` is not
-    under `REQUEST_BUDGET_SECONDS`: work that may take longer is a job, in `app/jobs.py`. Raises
+    `cancel_beside` cancels it at shutdown. Raises `ValueError` on a bound that is not a positive
+    number of seconds, and `BesideOutlastsTheBudget` when `within` is not under
+    `REQUEST_BUDGET_SECONDS`: work that may take longer is a job, in `app/jobs.py`. Raises
     `RuntimeError` off the event loop.
     """
-    if not 0 < within < REQUEST_BUDGET_SECONDS:
+    if not 0 < within < math.inf:
+        work.close()
+        raise ValueError(f"{name} is bounded by {within} s, which is not a bound")
+    if within >= REQUEST_BUDGET_SECONDS:
         work.close()
         raise BesideOutlastsTheBudget(
             f"{name} runs beside the requests within {within} s, and work beside the requests "

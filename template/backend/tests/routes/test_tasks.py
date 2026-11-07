@@ -13,11 +13,11 @@ from fastapi.testclient import TestClient
 
 from app.audit_events import acting_as
 from app.identity.shared import SENTINEL_PRINCIPAL, SENTINEL_TENANT
-from app.jobs import CLOSE_A_TASK
 from app.models import Job
 from app.routes import tenant
 from app.store import Database
 from app.store.memory import MemoryDatabase
+from app.task_jobs import CLOSE_A_TASK
 from tests.pages import every_event
 from tests.routed import routed
 
@@ -154,3 +154,10 @@ def test_the_job_of_another_tenant_is_404(client: TestClient, database: Database
     asked = client.portal.call(asked_elsewhere)
 
     assert client.get(f"/jobs/{asked.id}").status_code == 404
+
+
+def test_closing_a_task_whose_id_cannot_be_stored_is_refused(client: TestClient) -> None:
+    response = client.post("/tasks/a%00b/close")
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "The input holds a value that cannot be stored"}

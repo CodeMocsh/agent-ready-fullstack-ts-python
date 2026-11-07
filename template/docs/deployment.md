@@ -362,15 +362,22 @@ says why.
   the age of the oldest job that is ready: `SELECT min(ready_at) FROM job_claims WHERE state =
   'ready'`.
 - **A worker that stops loses no job.** SIGTERM and SIGINT stop each attempt. Its lease ends
-  after `Leases.lease`, and another worker claims the job. Each claim counts one attempt, so a
-  job that each of `MAX_ATTEMPTS` workers dies on is `dead`, with the failure `LeaseLost`.
-- **The worker skips the request budget's bound on a statement.** `DATABASE_STATEMENT_TIMEOUT`
-  of 9 s or more starts a worker, and refuses a web process.
+  after `Leases.lease`, and another worker claims the job. Each claim counts one attempt. A
+  claim past `MAX_ATTEMPTS` ends the job `dead`, with the failure `AttemptsSpent`.
+- **A worker whose `LISTEN` connection ends stops,** with `WakesLost`, as when Postgres restarts.
+  Let the platform start it again.
+- **The worker accepts a longer bound on a statement.** A `DATABASE_STATEMENT_TIMEOUT` whose
+  answer reaches `REQUEST_BUDGET_SECONDS` starts a worker, and refuses a web process.
+- **An attempt that gets no database connection does not count.** The job is ready again after
+  the refusal's `Retry-After`, and the line `database busy` names the refusal. When the write
+  that makes it ready also gets no connection, the lease ends, and the next claim counts. A pool
+  too small for `AT_ONCE` handlers and their renewals defers jobs again and again: watch the
+  line.
 - **The worker refuses the in-memory substrate.** Without `DATABASE_URL`, the web process runs
   each job itself, and no other process can see them.
 - **Watch the line `job dead`.** It names the kind, the job and the failure. Each attempt that
-  fails before it writes the WARNING line `job failed`, with its traceback, and an attempt whose
-  lease ended writes `lease lost`.
+  fails writes the WARNING line `job failed`, with its traceback. An attempt whose lease ended
+  writes `lease lost`.
 
 ## Work beside the requests
 

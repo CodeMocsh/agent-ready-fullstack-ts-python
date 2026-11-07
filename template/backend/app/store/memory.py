@@ -17,15 +17,18 @@ from datetime import UTC, datetime
 from app import log
 from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, acting_as
 from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
+from app.pacing import backoff
 from app.store import AuditEvents, Jobs, NoSuchAuditEvent, TaskStore, TenantUnset, numbered
 from app.store.jobs import (
     MAX_ATTEMPTS,
     Asked,
+    Deferred,
     Failed,
     Handler,
     Kinds,
     asker,
     attempted,
+    encoded,
     handler_of,
     store_of_the_job,
 )
@@ -200,6 +203,7 @@ class MemoryDatabase:
         request, as the actor that asked. Returns the job, `pending`."""
         handler = handler_of(self._kinds, kind)
         actor = asker()
+        _ = encoded(input)
         self._asked[0] += 1
         job = Job(id=str(self._asked[0]), kind=kind, state="pending", outcome=None, failure=None)
         self._jobs.setdefault(tenant_id, {})[job.id] = job
@@ -243,9 +247,12 @@ class MemoryDatabase:
                 kind=job.kind,
                 attempt=attempt,
             )
-            if not isinstance(result, Failed) or attempt == MAX_ATTEMPTS:
+            if isinstance(result, Deferred):
+                await backoff(result.after)
+            elif not isinstance(result, Failed) or attempt == MAX_ATTEMPTS:
                 return attempt, result
-            attempt += 1
+            else:
+                attempt += 1
 
     async def check(self) -> str:
         """A no-op that reports the current version: this substrate has no schema to be

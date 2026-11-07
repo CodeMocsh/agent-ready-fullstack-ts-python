@@ -94,6 +94,7 @@ github_ci:
 _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/models/tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/app/routes/tenant/tasks.py{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}backend/app/task_jobs.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/started/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/components/task-list.tsx{% endif %}"

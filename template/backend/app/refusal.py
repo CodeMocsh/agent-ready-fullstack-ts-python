@@ -52,6 +52,15 @@ class NoSuchJob(ApiError):
 
 
 @final
+class UnstorableInput(ApiError):
+    """A route was handed a value that the job it asks for cannot hold: a number that is not
+    finite, the character U+0000, or a surrogate code point."""
+
+    status = 422
+    description = "The input holds a value that cannot be stored"
+
+
+@final
 class NoConnectionFree(ApiError):
     """A request that got no database connection in time. `app/main.py` answers it with a
     `Retry-After`, and every tenant route declares it. `docs/adr/template/0022`."""

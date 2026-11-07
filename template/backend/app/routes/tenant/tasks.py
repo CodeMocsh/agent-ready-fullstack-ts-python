@@ -2,8 +2,10 @@ from fastapi import APIRouter, Response
 
 from app.deps import JobsDep, StoreDep
 from app.errors import NoSuchTask, responses
-from app.jobs import CLOSE_A_TASK
 from app.models import CreateTaskBody, Job, Task, TaskPage, UpdateTaskBody
+from app.refusal import UnstorableInput
+from app.store.jobs import UnstorableJson
+from app.task_jobs import CLOSE_A_TASK
 
 router = APIRouter()
 
@@ -36,6 +38,9 @@ async def delete_task(store: StoreDep, id: str) -> Response:
     return Response(status_code=204)
 
 
-@router.post("/tasks/{id}/close", status_code=202)
+@router.post("/tasks/{id}/close", status_code=202, responses=responses(UnstorableInput))
 async def close_task(jobs: JobsDep, id: str) -> Job:
-    return await jobs.ask(CLOSE_A_TASK, {"id": id})
+    try:
+        return await jobs.ask(CLOSE_A_TASK, {"id": id})
+    except UnstorableJson as refused:
+        raise UnstorableInput from refused

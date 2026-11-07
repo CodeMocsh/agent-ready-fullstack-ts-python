@@ -408,9 +408,11 @@ What to expect, because it is not all free:
     the job's tenant and the job's input and returns the outcome. The route asks for it with
     `Database.jobs(tenant_id).ask(kind, input)`, through `JobsDep`, and answers `202` with the
     job. A screen reads `GET /jobs/{id}` with a `refetchInterval` until the job is not
-    `pending`. A handler runs at least once, so make it idempotent.
+    `pending`. A handler runs at least once, so make it idempotent. An input that `jsonb` cannot
+    hold raises `UnstorableJson`: answer it with `UnstorableInput`, from `app.refusal`.
   - Give each remaining `beside` a `within=` under the budget.
-  - ruff now refuses `asyncio.sleep`, `anyio.sleep` and `time.sleep`. Wait through
+  - ruff now refuses `asyncio.sleep`, `anyio.sleep` and `time.sleep`, in each module that
+    `per-file-ignores` does not exempt from `TID251`. Wait through
     `app/pacing.py`: `every` for a loop on a period, `backoff` before a retry, `yield_now` for a
     turn of the loop, `poll_outside` for a system outside the process with no push. In a test,
     use `tests/clock.py`. A loop that sleeps to read rows your own system writes again waits on
@@ -427,6 +429,7 @@ What to expect, because it is not all free:
     worker. Run `make openapi`, and commit `openapi.json` and `frontend/src/api/schema.ts`.
   - In `docs/backend.md`, take the template's bullets that start "Make a wait past the budget a
     job", "Start short work the caller does not wait for" and "Each task has one of five homes".
+    In `docs/development.md`, take the bullet that starts "`make dev` with a `DATABASE_URL`".
   [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 

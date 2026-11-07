@@ -53,9 +53,9 @@ beside the requests: a request that joins it waits as long as the work.
   whoever starts it, because a request may join it. Each failure writes `shared work failed`, and
   each cancellation `shared work cancelled`. `cancel_beside` cancels a run still in flight.
 - **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's `BackgroundTasks`.**
-  Each is in `banned-api` in `pyproject.toml`, and each message names jobs and `beside`. The messages for
-  `create_task` and `ensure_future` also name `SharedWork` and `asyncio.TaskGroup`. A task they
-  start is still in its request. A loop that the lifespan starts is in a module the project names
+  Each is in `banned-api` in `pyproject.toml`, and each message names jobs and `beside`. The
+  messages for `create_task` and `ensure_future` also name `SharedWork` and
+  `asyncio.TaskGroup`. A task they start is still in its request. A loop that the lifespan starts is in a module the project names
   in `per-file-ignores`, because the lifespan is not in a request.
 - **The template ships no stream.** The record of the work and its settling are the jobs of
   0027.
@@ -108,7 +108,7 @@ beside the requests: a request that joins it waits as long as the work.
   and nothing checks that the two are equal.
 - A `DATABASE_STATEMENT_TIMEOUT` of 9 s or more, or a `DATABASE_ACQUIRE_TIMEOUT` of 10 s or
   more, refuses a web process. A long statement goes in a job, and the worker, which serves no
-  request, starts with a longer bound.
+  request, accepts a longer bound.
 - Each caller of shared work gets the result of the work that the first caller started, in the
   context of the first caller: its actor, its request id and its trace. The key names everything
   the result depends on, and nothing checks that it does.

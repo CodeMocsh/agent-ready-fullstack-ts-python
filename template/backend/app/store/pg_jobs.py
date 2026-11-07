@@ -7,6 +7,7 @@ new token. Every transaction of the job then holds that claim with `FOR KEY SHAR
 `docs/adr/template/0027`.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncGenerator, Callable, Iterable
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from uuid import UUID, uuid4
 
 from app.identity.shared import Actor
 from app.models import JsonObject
-from app.store.jobs import LEASES, Asked, Claim, LeaseLost, Leases
+from app.store.jobs import LEASES, Asked, Claim, LeaseLost, Leases, encoded
 from app.store.pg import PostgresDatabase, actor_from, wakes
 
 _CLAIM = (
@@ -39,14 +40,25 @@ _DEAD = "UPDATE jobs SET state = 'dead', failure = $2 WHERE id = $1"
 _ENDED = "UPDATE job_claims SET state = 'ended', token = NULL, lease_ends = NULL WHERE id = $1"
 _AGAIN = (
     "UPDATE job_claims SET state = 'ready', token = NULL, lease_ends = NULL, "
-    "ready_at = now() + make_interval(secs => $2) WHERE id = $1"
+    "ready_at = now() + make_interval(secs => $2), attempts = attempts - $3 WHERE id = $1"
+)
+_NEXT = (
+    "SELECT extract(epoch FROM min(next) - now()) FROM ("
+    "SELECT ready_at AS next FROM job_claims WHERE state = 'ready' "
+    "AND kind = ANY($1::text[]) UNION ALL "
+    "SELECT lease_ends FROM job_claims WHERE state = 'running' AND lease_ends > now() "
+    "AND kind = ANY($1::text[])) AS later"
 )
 
 
+class WakesLost(RuntimeError):
+    """The connection that hears each job asked for ended, so no job wakes the worker."""
+
+
 class JobClaims:
-    """The jobs of every tenant in one schema, as a worker claims them. Each method but `claim`
-    and `renew` runs inside `app.store.jobs.fenced`, and raises `LeaseLost` when the claim is no
-    longer this attempt's."""
+    """The jobs of every tenant in one schema, as a worker claims them. `asked`, `done`, `dead`,
+    `again` and `deferred` run inside `app.store.jobs.fenced`, and raise `LeaseLost` when the
+    claim is no longer this attempt's."""
 
     def __init__(self, database: PostgresDatabase, leases: Leases = LEASES) -> None:
         self.database: PostgresDatabase = database
@@ -98,7 +110,7 @@ class JobClaims:
     async def done(self, claim: Claim, outcome: JsonObject) -> None:
         """End the job of `claim` with `outcome`."""
         async with self.database.scoped(claim.tenant_id) as conn:
-            await conn.execute(_DONE, UUID(claim.id), json.dumps(outcome))
+            await conn.execute(_DONE, UUID(claim.id), encoded(outcome))
             await conn.execute(_ENDED, UUID(claim.id))
 
     async def dead(self, claim: Claim, failure: str) -> None:
@@ -110,21 +122,41 @@ class JobClaims:
     async def again(self, claim: Claim) -> None:
         """Make the job of `claim` ready again, after `Leases.retry_in` its attempts."""
         async with self.database.scoped(claim.tenant_id) as conn:
-            await conn.execute(_AGAIN, UUID(claim.id), self.leases.retry_in(claim.attempts))
+            await conn.execute(_AGAIN, UUID(claim.id), self.leases.retry_in(claim.attempts), 0)
+
+    async def deferred(self, claim: Claim, after: float) -> None:
+        """Make the job of `claim` ready again after `after` seconds, and do not count the
+        attempt."""
+        async with self.database.scoped(claim.tenant_id) as conn:
+            await conn.execute(_AGAIN, UUID(claim.id), after, 1)
+
+    async def next_claim_within(self, kinds: Iterable[str]) -> float | None:
+        """The seconds until a job of one of `kinds` is ready, or a lease of one ends: the next
+        claim that time alone makes possible. Zero or less when a job is ready now. `None` when
+        none is coming."""
+        async with self.database.connection() as conn:
+            seconds = await conn.fetchval(_NEXT, list(kinds))
+        return None if seconds is None else float(seconds)
 
     @asynccontextmanager
-    async def listening(self, woken: Callable[[], None]) -> AsyncGenerator[None]:
-        """Inside the block, call `woken` each time a job is asked for in this schema. The wait is
-        a connection of its own, outside the pool, which `app.store.budget.TEMPLATE_IN_PROCESS`
-        counts."""
+    async def listening(self, woken: Callable[[], None]) -> AsyncGenerator[asyncio.Event]:
+        """Inside the block, call `woken` each time a job is asked for in this schema, and yield
+        an event that is set when the connection that hears it ends. That connection is its own,
+        outside the pool, and `app.store.budget.TEMPLATE_IN_PROCESS` counts it."""
         conn: Any = await self.database.dedicated()
         channel = wakes(self.database.schema)
+        ended = asyncio.Event()
 
         def heard(*_: object) -> None:
             woken()
 
+        def lost(_: object) -> None:
+            ended.set()
+
         await conn.add_listener(channel, heard)
+        conn.add_termination_listener(lost)
         try:
-            yield
+            yield ended
         finally:
+            conn.remove_termination_listener(lost)
             await conn.close()

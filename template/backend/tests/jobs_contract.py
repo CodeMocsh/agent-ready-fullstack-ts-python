@@ -11,6 +11,7 @@ Every test asks as `ASKER`, and asserts only the jobs it asked for.
 """
 
 import asyncio
+import math
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextvars import Context
 from typing import Final
@@ -22,7 +23,7 @@ from app.audit_events import acting_as, current_actor
 from app.identity.shared import SENTINEL_TENANT, Actor
 from app.models import CreateTaskBody, JsonObject
 from app.store import Database, TaskStore
-from app.store.jobs import MAX_ATTEMPTS, AskedByNobody, Handler, UnknownKind
+from app.store.jobs import MAX_ATTEMPTS, AskedByNobody, Handler, UnknownKind, UnstorableJson
 from tests.conftest import Logged
 from tests.pages import every_task
 
@@ -53,6 +54,10 @@ async def always_fails(_store: TaskStore, _input: JsonObject) -> JsonObject:
     raise ValueError("this kind never ends")
 
 
+async def answers_what_cannot_be_stored(_store: TaskStore, _input: JsonObject) -> JsonObject:
+    return {"ratio": math.inf}
+
+
 async def fails_once(_store: TaskStore, input: JsonObject) -> JsonObject:
     key = str(input["key"])
     ATTEMPTS[key] = ATTEMPTS.get(key, 0) + 1
@@ -66,6 +71,7 @@ CONTRACT_KINDS: Final[dict[str, Handler]] = {
     "creates a task": creates_a_task,
     "always fails": always_fails,
     "fails once": fails_once,
+    "answers what cannot be stored": answers_what_cannot_be_stored,
 }
 
 Finish = Callable[[], Awaitable[None]]
@@ -181,3 +187,24 @@ class JobsContract:
             _ = await without_an_actor(
                 database.jobs(SENTINEL_TENANT).ask("answers who asked", {"n": 4})
             )
+
+    @pytest.mark.parametrize(
+        "input", [{"ratio": math.nan}, {"name": "a\x00b"}, {"a\x00b": 1}, {"half": "\ud800"}]
+    )
+    async def test_an_input_that_cannot_be_stored_is_refused(
+        self, database: Database, input: JsonObject
+    ) -> None:
+        with pytest.raises(UnstorableJson):
+            _ = await database.jobs(SENTINEL_TENANT).ask("answers who asked", input)
+
+    async def test_an_outcome_that_cannot_be_stored_fails_each_attempt(
+        self, database: Database, finish: Finish
+    ) -> None:
+        jobs = database.jobs(SENTINEL_TENANT)
+        asked = await jobs.ask("answers what cannot be stored", {})
+
+        await finish()
+
+        read = await jobs.read(asked.id)
+        assert read is not None
+        assert (read.state, read.failure) == ("dead", "UnstorableJson")

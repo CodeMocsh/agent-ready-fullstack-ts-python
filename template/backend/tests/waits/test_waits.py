@@ -305,13 +305,19 @@ async def test_shutdown_cancels_shared_work_still_in_flight_and_names_it(logged:
     assert line["work"] == SHARED
 
 
-@pytest.mark.parametrize(
-    "within", [REQUEST_BUDGET_SECONDS, PAST_THE_BUDGET, 0.0, math.inf, math.nan]
-)
+@pytest.mark.parametrize("within", [REQUEST_BUDGET_SECONDS, PAST_THE_BUDGET])
 async def test_work_beside_the_requests_whose_bound_is_not_under_the_budget_is_refused(
     within: float,
 ) -> None:
     with pytest.raises(BesideOutlastsTheBudget, match="app/jobs.py"):
+        _ = beside(waits_for_ever(), name=WORK, within=within)
+
+
+@pytest.mark.parametrize("within", [0.0, -1.0, math.inf, math.nan])
+async def test_work_beside_the_requests_whose_bound_is_not_a_bound_is_refused(
+    within: float,
+) -> None:
+    with pytest.raises(ValueError, match="not a bound"):
         _ = beside(waits_for_ever(), name=WORK, within=within)
 
 

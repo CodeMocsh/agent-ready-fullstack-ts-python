@@ -2,11 +2,14 @@
 handler `app/jobs.py` names, and serves no request. The web process, `app.main:app`, starts no
 job loop. `docs/adr/template/0027`.
 
-`AT_ONCE` slots each claim one job at a time. A slot that finds no job waits until a job is asked
-for, which `pg_notify` tells it, or until `SWEEP_SECONDS` pass, which also finds each lease that
-ended. While a handler runs, its slot renews the lease. A lease that ends stops the attempt, and
-the fence keeps the attempt from writing anything after that. SIGTERM and SIGINT cancel each
-attempt, and the leases they held end on their own.
+`AT_ONCE` slots each claim one job at a time, and a slot that claims one wakes the others to look
+again. A slot that finds no job waits until a job is asked for, which `pg_notify` tells it, until
+a job that failed is ready or a lease ends, or until `SWEEP_SECONDS` pass. While a handler runs,
+its slot renews the lease. A lease that ends stops the attempt, and the fence keeps the attempt
+from writing anything after that. A handler that gets no database connection makes its job ready
+again after the refusal's `Retry-After`, and the attempt does not count. SIGTERM and SIGINT cancel
+each attempt, and the leases they held end on their own. When the connection that hears each job
+asked for ends, the worker stops with `WakesLost`, so that its platform starts it again.
 
 The memory substrate runs its own jobs, in the web process, so this process refuses it.
 """
@@ -23,10 +26,11 @@ from app.loop_watch import LoopWatch
 from app.pacing import backoff, every
 from app.store import DatabaseBusy
 from app.store.jobs import (
-    LEASE_LOST,
+    ATTEMPTS_SPENT,
     MAX_ATTEMPTS,
     Asked,
     Claim,
+    Deferred,
     Failed,
     Kinds,
     LeaseLost,
@@ -36,7 +40,7 @@ from app.store.jobs import (
     store_of_the_job,
 )
 from app.store.pg import PostgresDatabase
-from app.store.pg_jobs import JobClaims
+from app.store.pg_jobs import JobClaims, WakesLost
 from app.wiring import build, build_service_version
 
 AT_ONCE: Final = 4
@@ -53,11 +57,24 @@ class WorkerNeedsPostgres(RuntimeError):
 async def work(
     claims: JobClaims, kinds: Kinds, *, at_once: int = AT_ONCE, sweep: float = SWEEP_SECONDS
 ) -> None:
-    """Claim and run the jobs of `kinds`, `at_once` at a time, until cancelled."""
+    """Claim and run the jobs of `kinds`, `at_once` at a time, until cancelled. Raises
+    `WakesLost` when the connection that hears each job asked for ends."""
     wake = asyncio.Event()
-    async with claims.listening(wake.set), asyncio.TaskGroup() as group:
-        for _ in range(at_once):
-            _ = group.create_task(_slot(claims, kinds, wake, sweep))
+    try:
+        async with claims.listening(wake.set) as ended, asyncio.TaskGroup() as group:
+            for _ in range(at_once):
+                _ = group.create_task(_slot(claims, kinds, wake, sweep))
+            _ = group.create_task(_until_lost(ended))
+    except* WakesLost as lost:
+        raise WakesLost(
+            "the connection that hears each job asked for ended. The worker stops, so that its "
+            "platform starts it again."
+        ) from lost
+
+
+async def _until_lost(ended: asyncio.Event) -> None:
+    _ = await ended.wait()
+    raise WakesLost("the LISTEN connection ended")
 
 
 async def _slot(claims: JobClaims, kinds: Kinds, wake: asyncio.Event, sweep: float) -> None:
@@ -66,8 +83,10 @@ async def _slot(claims: JobClaims, kinds: Kinds, wake: asyncio.Event, sweep: flo
         try:
             claim = await claims.claim(kinds.keys())
             if claim is None:
-                await _woken(wake, sweep)
+                coming = await claims.next_claim_within(kinds.keys())
+                await _woken(wake, sweep if coming is None else min(sweep, max(coming, 0.0)))
             else:
+                wake.set()
                 await run(claims, kinds, claim)
         except DatabaseBusy as busy:
             log.database_busy(type(busy).__name__)
@@ -96,8 +115,8 @@ async def run(claims: JobClaims, kinds: Kinds, claim: Claim) -> None:
 
 async def _attempt(claims: JobClaims, kinds: Kinds, claim: Claim, asked: Asked) -> None:
     if claim.attempts > MAX_ATTEMPTS:
-        await claims.dead(claim, LEASE_LOST)
-        log.job_dead(kind=claim.kind, job=claim.id, attempts=MAX_ATTEMPTS, failure=LEASE_LOST)
+        await claims.dead(claim, ATTEMPTS_SPENT)
+        log.job_dead(kind=claim.kind, job=claim.id, attempts=MAX_ATTEMPTS, failure=ATTEMPTS_SPENT)
         return
     attempt = attempted(
         handler_of(kinds, claim.kind),
@@ -108,7 +127,9 @@ async def _attempt(claims: JobClaims, kinds: Kinds, claim: Claim, asked: Asked) 
         attempt=claim.attempts,
     )
     result = await _renewing(claims, claim, attempt)
-    if not isinstance(result, Failed):
+    if isinstance(result, Deferred):
+        await claims.deferred(claim, result.after)
+    elif not isinstance(result, Failed):
         await claims.done(claim, result)
         log.job_done(kind=claim.kind, job=claim.id, attempt=claim.attempts)
     elif claim.attempts >= MAX_ATTEMPTS:

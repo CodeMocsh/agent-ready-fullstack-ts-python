@@ -1,5 +1,5 @@
-"""The waits on time a test makes, each named for why it waits. ruff refuses a bare sleep
-everywhere but here and `app/pacing.py`. `docs/adr/template/0027`."""
+"""The waits on time a test makes, each named for why it waits. ruff refuses a bare sleep in each
+test that `per-file-ignores` does not exempt from `TID251`. `docs/adr/template/0027`."""
 
 import asyncio
 import time
