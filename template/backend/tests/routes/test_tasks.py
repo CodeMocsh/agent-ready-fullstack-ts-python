@@ -11,9 +11,13 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
+from app.audit_events import acting_as
 from app.identity.shared import SENTINEL_PRINCIPAL, SENTINEL_TENANT
+from app.jobs import CLOSE_A_TASK
+from app.models import Job
 from app.routes import tenant
 from app.store import Database
+from app.store.memory import MemoryDatabase
 from tests.pages import every_event
 from tests.routed import routed
 
@@ -105,3 +109,48 @@ def test_a_request_records_who_it_served_and_which_request_it_was(
         404,
     )
     assert event.request_id == answered.headers["x-request-id"]
+
+
+def test_closing_a_task_asks_for_a_job_that_marks_it_done(
+    client: TestClient, database: Database
+) -> None:
+    response = client.post("/tasks/2/close")
+
+    assert response.status_code == 202
+    assert response.json()["state"] == "pending"
+    assert isinstance(database, MemoryDatabase)
+    assert client.portal is not None
+    client.portal.call(database.drained)
+    assert client.get(f"/jobs/{response.json()['id']}").json()["outcome"] == {"closed": True}
+    assert [task["done"] for task in client.get("/tasks").json()["tasks"] if task["id"] == "2"] == [
+        True
+    ]
+
+
+def test_closing_a_task_that_is_not_there_ends_the_job_with_nothing_closed(
+    client: TestClient, database: Database
+) -> None:
+    asked = client.post("/tasks/999/close").json()
+
+    assert isinstance(database, MemoryDatabase)
+    assert client.portal is not None
+    client.portal.call(database.drained)
+    assert client.get(f"/jobs/{asked['id']}").json()["outcome"] == {"closed": False}
+
+
+def test_a_job_that_is_not_there_is_404(client: TestClient) -> None:
+    response = client.get("/jobs/999")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Job not found"}
+
+
+def test_the_job_of_another_tenant_is_404(client: TestClient, database: Database) -> None:
+    async def asked_elsewhere() -> Job:
+        with acting_as(SENTINEL_PRINCIPAL.actor):
+            return await database.jobs("a-second-tenant").ask(CLOSE_A_TASK, {"id": "1"})
+
+    assert client.portal is not None
+    asked = client.portal.call(asked_elsewhere)
+
+    assert client.get(f"/jobs/{asked.id}").status_code == 404

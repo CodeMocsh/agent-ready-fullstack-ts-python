@@ -13,8 +13,9 @@ two, and the split is the whole reason the application never applies DDL:
   its time or its sequence.
 
 There is deliberately **no third role**, and no `SECURITY DEFINER` function anywhere. A role
-holding `BYPASSRLS` exists only to answer a question that cannot know a tenant — a queue claim
-taking the next row across tenants is the usual one — and this project has no such question.
+holding `BYPASSRLS` exists only to answer a question that cannot know a tenant. The one such
+question here is a worker's claim of the next job of any tenant, and it reads `job_claims`, which
+no policy scopes and which holds no input and no outcome. `docs/adr/template/0027`.
 `tests/integration/test_isolation.py` asserts the absence rather than trusting it, because
 "nothing here can see across tenants" is exactly the claim a security review asks you to prove.
 

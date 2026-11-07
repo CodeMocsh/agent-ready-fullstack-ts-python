@@ -45,10 +45,12 @@ More CPU for the same process does not help. One event loop uses one core.
 
 - **A job is one unit of durable work.** It is a row in Postgres, and a worker process claims
   it. A request that asks for work past the request budget writes the job in its own
-  transaction, answers `202` with the id of the job, and does nothing more. `app/jobs/` holds
-  the mechanism. The project's `app/jobs.py` maps each job kind to its handler, as
+  transaction, answers `202` with the job, and does nothing more. `app/store/jobs.py`,
+  `app/store/pg_jobs.py` and `app/worker.py` hold the mechanism. The project's `app/jobs.py`
+  maps each kind of job to its handler, as
   [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says. The
-  template ships that map with the one kind of the example resource.
+  template ships that map with the one kind of the example resource, `close a task`, which
+  `POST /tasks/{id}/close` asks for.
 - **Two tables hold a job.** `job_claims` holds only what a claim and a sweep read: the id, the
   tenant, the kind, the state, the lease token, the end of the lease, the attempts, and the time
   the job is ready. `jobs` is a tenant table. It holds the input, the actor that asked, and the
@@ -63,22 +65,24 @@ More CPU for the same process does not help. One event loop uses one core.
 - **A claim takes one row with `FOR UPDATE SKIP LOCKED`, and sets a new lease token.** It takes a
   job that is ready, or a job whose lease has ended. So a job that a dead worker held runs
   again. Each claim counts one attempt. The worker renews the lease while the handler runs.
-- **Every transaction of a job holds its claim until it commits.** The first statement of each
-  transaction is a `SELECT ... FOR SHARE` on the row in `job_claims`, with the token of this
-  attempt and a lease that has not ended. When no row matches, the transaction raises
-  `LeaseLost` and rolls back. While the share lock is held, no claim can take the row, so a check
-  at the start of the transaction is enough. This is the fence. A worker that was slow writes
-  nothing after another worker claims the job.
+- **Every transaction of a job holds its claim until it commits.** Inside `fenced(claim)`,
+  `PostgresDatabase.scoped` runs a `SELECT ... FOR KEY SHARE` on the row in `job_claims` first,
+  with the tenant, the token of this attempt and a lease that has not ended. When no row
+  matches, the transaction raises `LeaseLost` and rolls back. While the lock is held, the
+  `FOR UPDATE` of a claim skips the row, so a check at the start of the transaction is enough. A
+  renewal does not wait for the lock, because it updates no key. This is the fence. A worker that
+  was slow writes nothing after another worker claims the job.
 - **A handler gets a fenced store, and no `Database`.** The mechanism opens the store with the
-  tenant of the claim, runs the handler in `acting_as` the actor in `jobs`, and puts the fence in
-  each transaction of that store. So
+  tenant of the claim, through `store_of_the_job`, runs the handler in `acting_as` the actor in
+  `jobs`, and puts the fence in each transaction of that store.
+  `tests/routes/test_tenant_scoping.py` allows a store only from `deps.get_store` and
+  `store_of_the_job`. So
   [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) records
   each write of a job under the actor that asked for it. A handler cannot open a transaction
   that the fence does not check.
 - **The end of a job is a fenced write.** The transaction that writes the outcome to `jobs` also
   marks the claim done. A worker whose lease ended cannot end the job.
-- **A job runs at least once.** A handler is idempotent. A test runs each kind in `app/jobs.py`
-  twice on one input, and asserts one outcome.
+- **A job runs at least once.** A handler is idempotent.
 - **A job that fails `MAX_ATTEMPTS` times is dead.** The line `job dead` names it, and its
   outcome says why. A job that fails fewer times is ready again after a delay that grows with
   each attempt.
@@ -88,33 +92,33 @@ More CPU for the same process does not help. One event loop uses one core.
   leases that ended. This is
   [0024](0024-every-read-has-an-outside-cause.md) on the backend: each read has an outside
   cause.
-- **`GET /jobs/{id}` answers the state and the outcome of a job.** The browser learns that a job
-  ended by reading it again. A screen that shows a job reads it with a `refetchInterval`
+- **`GET /jobs/{id}` answers the state of a job:** `pending`, `done` with its outcome, or `dead`
+  with its failure. The browser learns that a job ended by reading it again. A screen that shows a job reads it with a `refetchInterval`
   backstop while the job is queued or running. The template ships no stream. A project with a
   stream sends a server event when a job ends.
 - **The web process and the worker process have one entry point each.** `app.main:app` serves
   requests. `python -m app.worker` claims jobs and serves no request. No variable chooses a
   role. The web process starts no job loop, and a test asserts that a started app runs none.
 - **Every development loop on Postgres runs two processes.** `make dev` with a `DATABASE_URL`
-  starts both. The gate starts a worker beside the live backend, in the run through the dev
-  proxy and in the run through `app.serve`. A contract test asks for a job through the API, and
-  reads its outcome through the API.
+  starts both, and so does `make test-contract-db`. In `make db-test`, which the gate runs,
+  `test_a_task_closes_through_a_job_that_the_worker_process_ends` serves the app in the test and
+  starts `python -m app.worker` beside it. It asks for a job through the API, and reads its
+  outcome through the API. The gate's live contract runs are on the memory substrate, which runs
+  its own jobs.
 - **The memory substrate runs its own jobs.** `MemoryDatabase` holds its rows in the memory of
   one process, so no other process can claim them. It runs each job after the write that asks
   for it, in that process, through the handler in `app/jobs.py`. A route test waits for each job
-  with `await database.jobs.drained()`. No variable chooses this. The substrate does.
+  with `MemoryDatabase.drained()`. No variable chooses this. The substrate does.
 - **`JobsContract` in `tests/jobs_contract.py` holds the contract once.** Each binding runs it,
-  as `TaskStoreContract` does for the stores. On Postgres it also runs the kill, the reclaim and
-  the fence: a slow attempt's write to a tenant table fails with `LeaseLost` after another
-  worker claims the job.
-- **`DATABASE_INSTANCES` counts the worker processes too.** `IN_PROCESS` in
-  `app/connection_budget.py` is the most that one process holds beside the template's pool. The
-  worker's `LISTEN` connection is in it. In the development loop on Postgres, an unset
-  `DATABASE_INSTANCES` is two.
-- **The worker has its own `Timeouts`.** The rule of 0021 that refuses a statement bound of 9 s
-  or more is a rule of the web process. The lease is longer than the period of its renewal plus
-  the worker's statement bound, because a renewal waits for each transaction that holds the
-  claim.
+  as `TaskStoreContract` does for the stores. On Postgres,
+  `tests/integration/test_jobs_on_postgres.py` also runs the kill, the reclaim, the wake and the
+  fence: a slow attempt's write to a tenant table fails with `LeaseLost` after another worker
+  claims the job.
+- **`DATABASE_INSTANCES` counts the worker processes too.** Each process holds
+  `TEMPLATE_IN_PROCESS` in `app/store/budget.py` beside the template's pool: the worker's
+  `LISTEN` connection. In the development loop on Postgres, an unset `DATABASE_INSTANCES` is two.
+- **The worker has its own bounds.** `build(serves_requests=False)` skips the rule of 0021 that
+  refuses a statement bound of 9 s or more, which is a rule of the web process.
 - **`beside(work, name=..., within=...)` takes a bound under `REQUEST_BUDGET_SECONDS`.** `beside`
   is for work that the caller does not wait for, not for work that is long. Work that may take
   longer is a job. A bound past the budget raises, and its message names jobs. The message of
@@ -182,6 +186,7 @@ More CPU for the same process does not help. One event loop uses one core.
   `LeaseLost`. So `loop_watch` runs in the worker, and the lease is longer than its worst hold.
 - The application role reads every tenant id and every job kind in `job_claims`.
 - The web process reserves the worker's `LISTEN` connection in its share, and does not use it.
+- Nothing checks that a handler is idempotent. A review does.
 - A job's input is a row in `jobs`. A large input is read in pages, as
   [0026](0026-every-store-read-is-a-page.md) says.
 - On the memory substrate one process serves requests and runs jobs. Its development loop does

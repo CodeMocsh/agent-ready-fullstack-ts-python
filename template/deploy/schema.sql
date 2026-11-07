@@ -159,6 +159,64 @@ END
 $audit$;
 INSERT INTO applied_once(key) VALUES('0033_audit_row_change') ON CONFLICT DO NOTHING;
 
+-- 0040_job_claims
+CREATE TABLE IF NOT EXISTS job_claims (
+  id          uuid PRIMARY KEY,
+  tenant_id   text NOT NULL,
+  kind        text NOT NULL,
+  state       text NOT NULL DEFAULT 'ready'
+    CONSTRAINT job_claims_state_known CHECK (state IN ('ready', 'running', 'ended')),
+  token       uuid,
+  lease_ends  timestamptz,
+  attempts    integer NOT NULL DEFAULT 0,
+  ready_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT job_claims_tenant_id_not_empty CHECK (tenant_id <> ''),
+  CONSTRAINT job_claims_lease_whole CHECK (
+    (state = 'running') = (token IS NOT NULL)
+    AND (token IS NULL) = (lease_ends IS NULL)
+  ),
+  UNIQUE (id, tenant_id)
+);
+INSERT INTO applied_once(key) VALUES('0040_job_claims') ON CONFLICT DO NOTHING;
+
+-- 0041_job_claims_ready_idx
+CREATE INDEX IF NOT EXISTS job_claims_ready_idx ON job_claims (ready_at) WHERE state = 'ready';
+INSERT INTO applied_once(key) VALUES('0041_job_claims_ready_idx') ON CONFLICT DO NOTHING;
+
+-- 0042_job_claims_lease_idx
+CREATE INDEX IF NOT EXISTS job_claims_lease_idx ON job_claims (lease_ends) WHERE state = 'running';
+INSERT INTO applied_once(key) VALUES('0042_job_claims_lease_idx') ON CONFLICT DO NOTHING;
+
+-- 0050_jobs
+CREATE TABLE IF NOT EXISTS jobs (
+  id                    uuid PRIMARY KEY,
+  tenant_id             text NOT NULL,
+  kind                  text NOT NULL,
+  input                 jsonb NOT NULL,
+  actor_issuer          text NOT NULL,
+  actor_subject         text NOT NULL,
+  actor_name            text NOT NULL,
+  on_behalf_of_issuer   text,
+  on_behalf_of_subject  text,
+  on_behalf_of_name     text,
+  state                 text NOT NULL DEFAULT 'pending'
+    CONSTRAINT jobs_state_known CHECK (state IN ('pending', 'done', 'dead')),
+  outcome               jsonb,
+  failure               text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT jobs_tenant_id_not_empty CHECK (tenant_id <> ''),
+  CONSTRAINT jobs_claim FOREIGN KEY (id, tenant_id) REFERENCES job_claims (id, tenant_id),
+  CONSTRAINT jobs_ended_whole CHECK (
+    (state = 'done') = (outcome IS NOT NULL)
+    AND (state = 'dead') = (failure IS NOT NULL)
+  ),
+  CONSTRAINT jobs_on_behalf_of_whole CHECK (
+    (on_behalf_of_issuer IS NULL) = (on_behalf_of_subject IS NULL)
+    AND (on_behalf_of_subject IS NULL) = (on_behalf_of_name IS NULL)
+  )
+);
+INSERT INTO applied_once(key) VALUES('0050_jobs') ON CONFLICT DO NOTHING;
+
 -- 0100_tasks_policy
 DO $app$
 BEGIN
@@ -189,6 +247,21 @@ END
 $app$;
 INSERT INTO applied_once(key) VALUES('0101_audit_events_policy') ON CONFLICT DO NOTHING;
 
+-- 0102_jobs_policy
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies
+                 WHERE schemaname = current_schema()
+                   AND tablename = 'jobs'
+                   AND policyname = 'jobs_tenant_isolation') THEN
+    CREATE POLICY jobs_tenant_isolation ON jobs FOR ALL
+      USING (tenant_id = current_setting('app.tenant_id', true))
+      WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0102_jobs_policy') ON CONFLICT DO NOTHING;
+
 -- 0120_tasks_force
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 INSERT INTO applied_once(key) VALUES('0120_tasks_force') ON CONFLICT DO NOTHING;
@@ -196,6 +269,10 @@ INSERT INTO applied_once(key) VALUES('0120_tasks_force') ON CONFLICT DO NOTHING;
 -- 0121_audit_events_force
 ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
 INSERT INTO applied_once(key) VALUES('0121_audit_events_force') ON CONFLICT DO NOTHING;
+
+-- 0122_jobs_force
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY;
+INSERT INTO applied_once(key) VALUES('0122_jobs_force') ON CONFLICT DO NOTHING;
 
 -- 0140_tasks_audit
 DO $app$
@@ -221,6 +298,31 @@ BEGIN
 END
 $app$;
 INSERT INTO applied_once(key) VALUES('0140_tasks_audit') ON CONFLICT DO NOTHING;
+
+-- 0142_jobs_audit
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                 WHERE tgrelid = 'jobs'::regclass
+                   AND tgname = 'jobs_audit_insert') THEN
+    CREATE TRIGGER jobs_audit_insert AFTER INSERT ON jobs
+      REFERENCING NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION audit_row_change();
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                 WHERE tgrelid = 'jobs'::regclass
+                   AND tgname = 'jobs_audit_update') THEN
+    CREATE TRIGGER jobs_audit_update AFTER UPDATE ON jobs
+      REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows FOR EACH STATEMENT EXECUTE FUNCTION audit_row_change();
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger
+                 WHERE tgrelid = 'jobs'::regclass
+                   AND tgname = 'jobs_audit_delete') THEN
+    CREATE TRIGGER jobs_audit_delete AFTER DELETE ON jobs
+      REFERENCING OLD TABLE AS old_rows FOR EACH STATEMENT EXECUTE FUNCTION audit_row_change();
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0142_jobs_audit') ON CONFLICT DO NOTHING;
 
 -- 0200_audit_events_outcome
 ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS outcome text NOT NULL DEFAULT 'done' CONSTRAINT audit_events_outcome_known CHECK (outcome IN ('done', 'absent'));

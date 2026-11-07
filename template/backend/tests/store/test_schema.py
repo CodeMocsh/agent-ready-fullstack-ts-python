@@ -553,15 +553,18 @@ def test_every_created_index_leads_with_the_tenant() -> None:
     Constraint-backed indexes are exempt and named here rather than skipped silently: a
     primary key on a global identifier, a uuid or a sequence, and the `UNIQUE (id, tenant_id)` a
     child table's foreign key must reference are each about uniqueness of a surrogate key, not
-    about serving a scan.
+    about serving a scan. A table that no policy scopes, such as `job_claims`, is read across
+    every tenant, so its indexes serve that read instead.
     """
     for key, sql in statements(DEFAULT_SCHEMA):
-        found = re.search(r"CREATE\s+(?:UNIQUE\s+)?INDEX[^(]*\(([^)]*)\)", sql, re.IGNORECASE)
-        if found is None:
+        found = re.search(
+            r"CREATE\s+(?:UNIQUE\s+)?INDEX[^(]*\bON\s+(\w+)\s*\(([^)]*)\)", sql, re.IGNORECASE
+        )
+        if found is None or found.group(1) not in ddl.TENANT_TABLES:
             continue
-        leading = found.group(1).split(",")[0].strip()
+        leading = found.group(2).split(",")[0].strip()
         assert leading == "tenant_id", (
-            f"{key} indexes ({found.group(1)}) and leads with {leading!r}. Every index on a "
+            f"{key} indexes ({found.group(2)}) and leads with {leading!r}. Every index on a "
             f"tenant table leads with tenant_id, or the policy cannot use it."
         )
 
@@ -588,13 +591,46 @@ def test_a_schema_name_too_long_to_derive_a_role_from_is_refused() -> None:
         resolve_schema("s" * 57)
 
 
-EXEMPT_FROM_ISOLATION = frozenset({"applied_once"})
-"""Tables that hold no tenant data, named one at a time.
+EXEMPT_FROM_ISOLATION = frozenset({"applied_once", "job_claims"})
+"""Tables that no policy scopes, named one at a time.
 
-The ledger is the only one: a schema version belongs to the deployment rather than to anybody,
-and a policy on it would hide it from the role whose only job is to read it. Adding a name here
-is how you say "this is not tenant data" -- out loud, in a diff, rather than by omission.
+The ledger holds no tenant data: a schema version belongs to the deployment rather than to
+anybody, and a policy on it would hide it from the role whose only job is to read it.
+`job_claims` holds what a worker reads to claim the next job of any tenant, so it cannot be
+scoped to one tenant before the claim. It holds no input and no outcome, which
+`test_the_claims_hold_only_what_a_claim_reads` asserts. `docs/adr/template/0027`. Adding a name
+here is how you say "every tenant may read this" -- out loud, in a diff, rather than by omission.
 """
+
+CLAIM_COLUMNS = frozenset(
+    {"id", "tenant_id", "kind", "state", "token", "lease_ends", "attempts", "ready_at"}
+)
+"""What a claim and a sweep read, and nothing a tenant asked or a job answered."""
+
+
+def test_the_claims_hold_only_what_a_claim_reads() -> None:
+    create = next(
+        sql
+        for _, sql in statements(DEFAULT_SCHEMA)
+        if "CREATE TABLE IF NOT EXISTS job_claims" in sql
+    )
+    body = create[create.index("(") + 1 : create.rindex(")")]
+    columns = {
+        line.split()[0]
+        for line in body.splitlines()
+        if line.startswith("  ")
+        and not line.startswith(("  CONSTRAINT", "  UNIQUE", "  )", "    "))
+    }
+    added = [
+        key
+        for key, sql in statements(DEFAULT_SCHEMA)
+        if re.search(r"ALTER TABLE job_claims ADD COLUMN", sql)
+    ]
+    assert columns == CLAIM_COLUMNS, (
+        f"job_claims holds {sorted(columns - CLAIM_COLUMNS)} beside what a claim reads. Every "
+        f"tenant can read it. Put what a tenant asked or a job answered in jobs."
+    )
+    assert not added, f"{added} adds a column to job_claims, which every tenant can read"
 
 
 def created_tables() -> set[str]:

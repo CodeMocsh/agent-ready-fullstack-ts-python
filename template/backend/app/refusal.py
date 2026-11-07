@@ -44,6 +44,14 @@ class NoSuchAsset(ApiError):
 
 
 @final
+class NoSuchJob(ApiError):
+    """A job the tenant has no such job of. `GET /jobs/{id}` declares it."""
+
+    status = 404
+    description = "Job not found"
+
+
+@final
 class NoConnectionFree(ApiError):
     """A request that got no database connection in time. `app/main.py` answers it with a
     `Retry-After`, and every tenant route declares it. `docs/adr/template/0022`."""

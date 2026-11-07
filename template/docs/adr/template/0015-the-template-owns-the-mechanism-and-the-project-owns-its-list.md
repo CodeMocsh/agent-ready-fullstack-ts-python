@@ -34,6 +34,7 @@ and the bullet on `identity_stub` below says why.
 | `tests/tiers.py`: its tiers | `tests/tier.py`: what a tier is |
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |
 | `app/log_lines.py`: its own log lines | `app/log.py`: the format, the request line, the template's lines |
+| `app/jobs.py`: its kinds of job, and the handler of each | `app/store/jobs.py`, `app/store/pg_jobs.py`, `app/worker.py` |
 | `frontend/e2e/signed-in.ts`: how its live specs sign in | the live specs that use its `test` |
 | `frontend/tests/read-budgets.ts`: its screens' read budgets, and its streams | `frontend/tests/first-draw.tsx`: `ReadBudget`, `readsOf`, `screens` |
 | `frontend/tests/signed-in.ts`: how the read-budget test signs in | `frontend/tests/first-draw.test.tsx` |

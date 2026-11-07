@@ -204,6 +204,66 @@ BEGIN
 END
 $audit$""",
     ),
+    (
+        "0040_job_claims",
+        """CREATE TABLE IF NOT EXISTS job_claims (
+  id          uuid PRIMARY KEY,
+  tenant_id   text NOT NULL,
+  kind        text NOT NULL,
+  state       text NOT NULL DEFAULT 'ready'
+    CONSTRAINT job_claims_state_known CHECK (state IN ('ready', 'running', 'ended')),
+  token       uuid,
+  lease_ends  timestamptz,
+  attempts    integer NOT NULL DEFAULT 0,
+  ready_at    timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT job_claims_tenant_id_not_empty CHECK (tenant_id <> ''),
+  CONSTRAINT job_claims_lease_whole CHECK (
+    (state = 'running') = (token IS NOT NULL)
+    AND (token IS NULL) = (lease_ends IS NULL)
+  ),
+  UNIQUE (id, tenant_id)
+)""",
+    ),
+    (
+        "0041_job_claims_ready_idx",
+        "CREATE INDEX IF NOT EXISTS job_claims_ready_idx ON job_claims (ready_at)"
+        " WHERE state = 'ready'",
+    ),
+    (
+        "0042_job_claims_lease_idx",
+        "CREATE INDEX IF NOT EXISTS job_claims_lease_idx ON job_claims (lease_ends)"
+        " WHERE state = 'running'",
+    ),
+    (
+        "0050_jobs",
+        """CREATE TABLE IF NOT EXISTS jobs (
+  id                    uuid PRIMARY KEY,
+  tenant_id             text NOT NULL,
+  kind                  text NOT NULL,
+  input                 jsonb NOT NULL,
+  actor_issuer          text NOT NULL,
+  actor_subject         text NOT NULL,
+  actor_name            text NOT NULL,
+  on_behalf_of_issuer   text,
+  on_behalf_of_subject  text,
+  on_behalf_of_name     text,
+  state                 text NOT NULL DEFAULT 'pending'
+    CONSTRAINT jobs_state_known CHECK (state IN ('pending', 'done', 'dead')),
+  outcome               jsonb,
+  failure               text,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT jobs_tenant_id_not_empty CHECK (tenant_id <> ''),
+  CONSTRAINT jobs_claim FOREIGN KEY (id, tenant_id) REFERENCES job_claims (id, tenant_id),
+  CONSTRAINT jobs_ended_whole CHECK (
+    (state = 'done') = (outcome IS NOT NULL)
+    AND (state = 'dead') = (failure IS NOT NULL)
+  ),
+  CONSTRAINT jobs_on_behalf_of_whole CHECK (
+    (on_behalf_of_issuer IS NULL) = (on_behalf_of_subject IS NULL)
+    AND (on_behalf_of_subject IS NULL) = (on_behalf_of_name IS NULL)
+  )
+)""",
+    ),
 ]
 """Idempotent, additive, one statement each.
 
@@ -248,10 +308,11 @@ ACTING_GUCS: tuple[str, ...] = (
 """The connection settings `audit_row_change` reads: who acts, and in which request and trace.
 Empty reads as unset. A write with no actor issuer or subject is refused."""
 
-TENANT_TABLES: tuple[str, ...] = ("tasks", "audit_events")
-"""Every table holding tenant data. `applied_once` is the ledger and is deliberately absent:
-the schema version is not anybody's data, and a policy on it would hide the ledger from the
-role whose only job is to read it."""
+TENANT_TABLES: tuple[str, ...] = ("tasks", "audit_events", "jobs")
+"""Every table holding tenant data. Two tables are deliberately absent. `applied_once` is the
+ledger: the schema version is not anybody's data, and a policy on it would hide the ledger from
+the role whose only job is to read it. `job_claims` holds what a worker reads to claim the next
+job of any tenant: no input and no outcome, which are in `jobs`. `docs/adr/template/0027`."""
 
 
 def _policy_sql(table: str) -> str:

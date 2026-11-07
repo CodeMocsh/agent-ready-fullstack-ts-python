@@ -1,4 +1,5 @@
 import { request } from "@/api/client";
+import type { Job } from "@/api/jobs";
 import type { components } from "@/api/schema";
 
 export type Task = components["schemas"]["Task"];
@@ -14,4 +15,5 @@ export const tasksApi = {
   update: (id: string, body: UpdateTaskBody) =>
     request<Task>(`/tasks/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   remove: (id: string) => request<void>(`/tasks/${id}`, { method: "DELETE" }),
+  close: (id: string) => request<Job>(`/tasks/${id}/close`, { method: "POST" }),
 };

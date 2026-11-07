@@ -209,6 +209,11 @@ ignore = [
 # replacement resolver might raise, which is not knowable from here.
 [tool.ruff.lint.per-file-ignores]
 "app/identity/shared.py" = ["BLE001"]
+# A job's handler is the project's code, and any error it raises is an attempt that failed: the
+# job is tried again, then dead. `attempted` names each failure in `job failed`, and the job's
+# outcome names it, so nothing is swallowed. Narrowing the except would mean naming every error
+# every handler might raise.
+"app/store/jobs.py" = ["BLE001"]
 # A test asserts, and holds fixture credentials for a database it starts and drops.
 "tests/**" = ["S101", "S105"]
 # The one module that writes the log, and the tests that read it.

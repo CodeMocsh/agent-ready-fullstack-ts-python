@@ -16,6 +16,10 @@ RESERVING: Final = ("superuser_reserved_connections", "reserved_connections")
 """The settings that keep connections for roles the application does not connect as.
 `reserved_connections` exists from Postgres 16."""
 
+TEMPLATE_IN_PROCESS: Final[Mapping[str, int]] = {"the worker's LISTEN connection": 1}
+"""Each connection that one process of the template's holds beside the template's pool. Both
+processes take an equal share, so the web process keeps this one and does not use it."""
+
 _LIMITS: Final = "SELECT name, setting::int FROM pg_settings WHERE name = ANY($1::text[])"
 
 

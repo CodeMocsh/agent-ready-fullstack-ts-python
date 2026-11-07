@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from typing import Final, Protocol, runtime_checkable
 
 from app.audit_events import AuditEventPage, RequestEvent
-from app.models import CreateTaskBody, Task, TaskPage, UpdateTaskBody
+from app.models import CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
 
 BIGINT_DIGITS: Final = 19
 """The most digits a `bigint` has."""
@@ -102,6 +102,21 @@ class AuditEvents(Protocol):
         ...
 
 
+@runtime_checkable
+class Jobs(Protocol):
+    """One tenant's jobs. `docs/adr/template/0027`."""
+
+    async def ask(self, kind: str, input: JsonObject) -> Job:
+        """Write a job of `kind` on `input`, asked by the actor that acts here, and return it
+        `pending`. Raises `UnknownKind` when no handler runs `kind`, and `AskedByNobody` when no
+        actor acts here."""
+        ...
+
+    async def read(self, id: str) -> Job | None:
+        """The job `id` of this tenant, or `None` when this tenant has no such job."""
+        ...
+
+
 class NoSuchAuditEvent(LookupError):
     """`AuditEvents.list` was handed an `after` that names no event of its tenant: not the
     `next` of one of its pages."""
@@ -158,6 +173,10 @@ class Database(Protocol):
     def audit_events(self, tenant_id: str) -> AuditEvents:
         """One tenant's audit events. Raises `TenantUnset` on an empty tenant, on every
         substrate."""
+        ...
+
+    def jobs(self, tenant_id: str) -> Jobs:
+        """One tenant's jobs. Raises `TenantUnset` on an empty tenant, on every substrate."""
         ...
 
     async def check(self) -> str:

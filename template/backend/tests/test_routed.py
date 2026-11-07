@@ -13,6 +13,7 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from app.deployment import ADMISSION_BURST_ENV, OTLP_ENDPOINT_ENV, SERVICE_NAME_ENV
 from app.identity.shared import SENTINEL_TENANT
+from app.jobs import KINDS
 from app.main import ROUTERS
 from app.store import Database
 from app.store.memory import MemoryDatabase
@@ -59,7 +60,9 @@ def test_an_assembled_app_has_built_its_routes_before_the_first_request(
 
 
 def test_the_next_test_gets_the_same_app_with_only_its_own_state(database: Database) -> None:
-    earlier = routed(SHARED, database=MemoryDatabase(seed_tenant=SENTINEL_TENANT), left="behind")
+    earlier = routed(
+        SHARED, database=MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=KINDS), left="behind"
+    )
     earlier.dependency_overrides[shared] = lambda: "overridden"
     take_back(EARLIER)
 
@@ -132,7 +135,7 @@ def test_a_test_that_changes_what_a_shared_app_serves_fails_and_the_next_gets_a_
     change: Callable[[FastAPI, APIRouter], None], database: Database
 ) -> None:
     router = _a_router()
-    changed = routed(router, database=MemoryDatabase(seed_tenant=SENTINEL_TENANT))
+    changed = routed(router, database=MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=KINDS))
     change(changed, router)
 
     with pytest.raises(SharedAppChanged, match=f"{EARLIER} changed .* tests.routed.assembled"):

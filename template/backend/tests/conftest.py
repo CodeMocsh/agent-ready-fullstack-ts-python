@@ -49,6 +49,7 @@ from app.deployment import (
     TELEMETRY_ENV,
     TIMEOUTS_ENV,
 )
+from app.jobs import KINDS
 
 os.environ[ENVIRONMENT_ENV] = DEVELOPMENT
 os.environ["PYTHONASYNCIODEBUG"] = "1"
@@ -230,7 +231,7 @@ def pytest_runtest_teardown(item: pytest.Item) -> Generator[None, object, object
 @pytest.fixture
 def database() -> Database:
     """A fresh in-memory substrate, seeded as the development loop seeds it."""
-    return MemoryDatabase(seed_tenant=SENTINEL_TENANT)
+    return MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=KINDS)
 
 
 @pytest.fixture

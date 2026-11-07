@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
+from app.jobs import KINDS
 from app.store import Connections
 from app.store.budget import Draws, OverBudget
 from app.store.conn import SCHEMA_ENV
@@ -36,6 +37,7 @@ async def one_connection_under(provisioned: Provisioned) -> AsyncIterator[Bounde
             dsn=provisioned.app_dsn,
             schema=provisioned.schema,
             draws=Draws(instances=1, in_process={}, outside={}, pool=1),
+            kinds=KINDS,
             timeouts=timeouts,
         )
         opened.append(database)
@@ -207,6 +209,7 @@ async def test_the_pool_takes_what_remains_of_the_process_s_share_of_the_server(
         dsn=provisioned.app_dsn,
         schema=provisioned.schema,
         draws=Draws(instances=2, in_process={"a feed": 3}, outside={"the release step": 1}),
+        kinds=KINDS,
     )
     try:
         pool = await database.pool()
@@ -224,6 +227,7 @@ async def test_draws_the_server_cannot_hold_refuse_to_open(provisioned: Provisio
         dsn=provisioned.app_dsn,
         schema=provisioned.schema,
         draws=Draws(instances=most, in_process={}, outside={}),
+        kinds=KINDS,
     )
 
     with pytest.raises(OverBudget, match=f"each of {most} processes"):
@@ -242,6 +246,7 @@ async def test_a_connection_the_server_refuses_is_a_refusal_of_one_request(
         dsn=provisioned.app_dsn,
         schema=provisioned.schema,
         draws=Draws(instances=1, in_process={}, outside={}, pool=2),
+        kinds=KINDS,
     )
     timed: list[float] = []
     try:

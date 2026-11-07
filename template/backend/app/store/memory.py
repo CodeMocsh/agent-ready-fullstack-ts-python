@@ -9,11 +9,26 @@ infrastructure and so `make test` needs no database. Do not delete it when Postg
 real enough — the fast tier and the frontend's zero-backend mode both stand on it.
 """
 
+import asyncio
+from contextvars import Context
+from copy import deepcopy
 from datetime import UTC, datetime
 
-from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent
-from app.models import PAGE_MAX, CreateTaskBody, Task, TaskPage, UpdateTaskBody
-from app.store import AuditEvents, NoSuchAuditEvent, TaskStore, TenantUnset, numbered
+from app import log
+from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, acting_as
+from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
+from app.store import AuditEvents, Jobs, NoSuchAuditEvent, TaskStore, TenantUnset, numbered
+from app.store.jobs import (
+    MAX_ATTEMPTS,
+    Asked,
+    Failed,
+    Handler,
+    Kinds,
+    asker,
+    attempted,
+    handler_of,
+    store_of_the_job,
+)
 from app.store.migrate import known_version
 
 SEED: tuple[tuple[str, str, bool], ...] = (
@@ -118,6 +133,20 @@ class MemoryAuditEvents:
         return number
 
 
+class MemoryJobs:
+    """`Jobs` over one tenant's dictionary. The substrate runs each job it is asked for."""
+
+    def __init__(self, database: "MemoryDatabase", tenant_id: str) -> None:
+        self._database: MemoryDatabase = database
+        self._tenant_id: str = tenant_id
+
+    async def ask(self, kind: str, input: JsonObject) -> Job:
+        return self._database.asked(self._tenant_id, kind, input)
+
+    async def read(self, id: str) -> Job | None:
+        return self._database.job(self._tenant_id, id)
+
+
 def _refuse_unset(tenant_id: str) -> None:
     if tenant_id.strip() == "":
         raise TenantUnset(
@@ -133,17 +162,26 @@ class MemoryDatabase:
     Exactly one tenant is seeded — the one a deployment with no identity resolver serves. Any
     other starts empty, which is what makes `two tenants do not see each other` a real
     assertion here and not a coincidence of both being handed the same rows.
+
+    It runs each job it is asked for, in this process, through the handler `kinds` names: no
+    other process can see its rows, so no worker could claim one. A job runs outside every
+    request, as the actor that asked, and is tried again at once when it fails.
+    `docs/adr/template/0027`.
     """
 
     name: str = "memory"
 
-    def __init__(self, seed_tenant: str) -> None:
+    def __init__(self, seed_tenant: str, *, kinds: Kinds) -> None:
         self._tenants: dict[str, list[Task]] = {
             seed_tenant: [Task(id=id, title=title, done=done) for id, title, done in SEED]
         }
         self._events: dict[str, list[tuple[int, RecordedAuditEvent]]] = {}
         self._counter: list[int] = [len(SEED)]
         self._recorded: list[int] = [0]
+        self._kinds: Kinds = kinds
+        self._jobs: dict[str, dict[str, Job]] = {}
+        self._asked: list[int] = [0]
+        self._running: set[asyncio.Task[None]] = set()
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)
@@ -152,6 +190,62 @@ class MemoryDatabase:
     def audit_events(self, tenant_id: str) -> AuditEvents:
         _refuse_unset(tenant_id)
         return MemoryAuditEvents(tenant_id, self._events.setdefault(tenant_id, []), self._recorded)
+
+    def jobs(self, tenant_id: str) -> Jobs:
+        _refuse_unset(tenant_id)
+        return MemoryJobs(self, tenant_id)
+
+    def asked(self, tenant_id: str, kind: str, input: JsonObject) -> Job:
+        """Write a job of `kind` in `tenant_id`, and start it in this process, outside every
+        request, as the actor that asked. Returns the job, `pending`."""
+        handler = handler_of(self._kinds, kind)
+        actor = asker()
+        self._asked[0] += 1
+        job = Job(id=str(self._asked[0]), kind=kind, state="pending", outcome=None, failure=None)
+        self._jobs.setdefault(tenant_id, {})[job.id] = job
+        run = self._run(tenant_id, job, handler, Asked(input=deepcopy(input), actor=actor))
+        task = asyncio.get_running_loop().create_task(run, name=f"job {kind}", context=Context())
+        self._running.add(task)
+        task.add_done_callback(self._running.discard)
+        return job.model_copy(deep=True)
+
+    def job(self, tenant_id: str, id: str) -> Job | None:
+        """The job `id` of `tenant_id`, or `None`."""
+        held = self._jobs.get(tenant_id, {}).get(id)
+        return None if held is None else held.model_copy(deep=True)
+
+    async def drained(self) -> None:
+        """Wait until every job this substrate started has ended, the jobs those started
+        included."""
+        while self._running:
+            await asyncio.gather(*self._running)
+
+    async def _run(self, tenant_id: str, job: Job, handler: Handler, asked: Asked) -> None:
+        with acting_as(asked.actor):
+            attempt, result = await self._attempts(tenant_id, job, handler, asked)
+        if isinstance(result, Failed):
+            job.state, job.failure = "dead", result.failure
+            log.job_dead(kind=job.kind, job=job.id, attempts=attempt, failure=result.failure)
+        else:
+            job.state, job.outcome = "done", result
+            log.job_done(kind=job.kind, job=job.id, attempt=attempt)
+
+    async def _attempts(
+        self, tenant_id: str, job: Job, handler: Handler, asked: Asked
+    ) -> tuple[int, JsonObject | Failed]:
+        attempt = 1
+        while True:
+            result = await attempted(
+                handler,
+                store_of_the_job(self, tenant_id),
+                asked,
+                job=job.id,
+                kind=job.kind,
+                attempt=attempt,
+            )
+            if not isinstance(result, Failed) or attempt == MAX_ATTEMPTS:
+                return attempt, result
+            attempt += 1
 
     async def check(self) -> str:
         """A no-op that reports the current version: this substrate has no schema to be
@@ -163,4 +257,9 @@ class MemoryDatabase:
         return known_version()
 
     async def close(self) -> None:
-        return None
+        """Cancel each job that still runs, and wait until each has ended."""
+        running = list(self._running)
+        for task in running:
+            _ = task.cancel()
+        if running:
+            _ = await asyncio.wait(running)

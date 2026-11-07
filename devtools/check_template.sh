@@ -609,7 +609,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
-              log main models observe routes serve started store telemetry waits wiring"
+              log main models observe routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -983,8 +983,10 @@ for name in ('Task', 'CreateTaskBody', 'UpdateTaskBody', 'ErrorBody'):
 split = [n for n in schemas if n.endswith('-Input') or n.endswith('-Output')]
 assert not split, f'input/output schemas split: {split}. The aliases in src/api/types.ts import each schema by name.'
 paths = spec['paths']
-assert sorted(paths) == ['/client-events', '/tasks', '/tasks/{id}'], sorted(paths)
+assert sorted(paths) == ['/client-events', '/jobs/{id}', '/tasks', '/tasks/{id}', '/tasks/{id}/close'], sorted(paths)
 assert '201' in paths['/tasks']['post']['responses']
+assert '202' in paths['/tasks/{id}/close']['post']['responses'], 'a route that asks for a job answers 202 and does nothing more (docs/adr/template/0027)'
+assert 'content' in paths['/jobs/{id}']['get']['responses']['404'], 'GET /jobs/{id} 404 declares no body, and the typed handlers cannot mock a response with no model.'
 assert schemas['ClientEvent']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvent must refuse an undeclared field'
 assert schemas['ClientEvents']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvents must refuse an undeclared field'
 assert '204' in paths['/tasks/{id}']['delete']['responses']

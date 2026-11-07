@@ -29,7 +29,7 @@ from app.deployment import (
     TRUST_INBOUND_CONTEXT_ENV,
 )
 from app.migrate import OWNER_URL_ENV
-from app.store.budget import Draws
+from app.store.budget import TEMPLATE_IN_PROCESS, Draws
 from app.store.pg import TIMEOUTS, Timeouts
 from app.wiring import (
     AdmissionMisconfigured,
@@ -234,10 +234,12 @@ def test_a_process_that_can_see_the_owner_credential_refuses_to_start(
         build()
 
 
-def test_the_development_loop_is_one_process_holding_what_the_project_declares() -> None:
+def test_the_development_loop_is_two_processes_holding_what_the_template_and_project_declare() -> (
+    None
+):
     assert build_draws() == Draws(
-        instances=1,
-        in_process=connection_budget.IN_PROCESS,
+        instances=2,
+        in_process={**TEMPLATE_IN_PROCESS, **connection_budget.IN_PROCESS},
         outside=connection_budget.OUTSIDE,
     )
 

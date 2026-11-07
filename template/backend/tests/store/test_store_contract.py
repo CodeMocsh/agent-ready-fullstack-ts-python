@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 import pytest
 
 from app.identity.shared import SENTINEL_TENANT
+from app.jobs import KINDS
 from app.store import Database
 from app.store.memory import MemoryDatabase
 from tests.store_contract import TaskStoreContract
@@ -20,6 +21,6 @@ class TestTheMemorySubstrate(TaskStoreContract):
 
     @pytest.fixture
     async def database(self) -> AsyncIterator[Database]:
-        memory = MemoryDatabase(seed_tenant=SENTINEL_TENANT)
+        memory = MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=KINDS)
         yield memory
         await memory.close()
