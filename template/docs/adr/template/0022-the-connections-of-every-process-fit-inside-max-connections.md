@@ -45,10 +45,15 @@ covered a full pool, not a server that refuses.
   `test_the_pool_takes_what_remains_of_the_process_s_share_of_the_server` and
   `test_draws_the_server_cannot_hold_refuse_to_open` hold this on Postgres.
 - **`DATABASE_INSTANCES` is the most processes that hold connections at once.** It counts the
-  processes of a revision that drains during a rollout. It is not the platform's most
-  instances. `wiring.build_draws` reads it. Production refuses to start without it, and on a
-  value that is not a whole number of at least one. The development loop is one process, so
-  there an unset value is one. `tests/wiring/test_wiring.py` holds this.
+  processes of a revision that drains during a rollout, and each worker process. It is not the
+  platform's most instances. `wiring.build_draws` reads it. Production refuses to start without
+  it, and on a value that is not a whole number of at least one. The development loop on
+  Postgres is two processes, the web process and the worker, so there an unset value is two.
+  `tests/wiring/test_wiring.py` holds this.
+- **Each process holds `TEMPLATE_IN_PROCESS` beside the template's pool.** It is the worker's
+  `LISTEN` connection, in `app/store/budget.py`. Every process takes the same share, so the web
+  process keeps it and does not use it.
+  [0027](0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
 - **`Draws.pool` fixes the size of the template's pool.** The budget still holds it to the
   share. `wiring.build_draws` never sets it; a test sets it for a pool of one.
 - **The budget is visible.** `PostgresDatabase.budget()` returns it once the pool is open, and the

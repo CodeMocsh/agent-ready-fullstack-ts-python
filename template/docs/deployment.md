@@ -22,7 +22,9 @@ after a deploy makes each tab that reloaded report the same kind.
 [adr/template/0025](adr/template/0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md)
 says why.
 
-The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --port 8000`.
+The backend runs under any ASGI server: `uvicorn app.main:app --host 0.0.0.0 --port 8000`. On
+Postgres the worker runs beside it as a process of its own, `python -m app.worker`: see
+[The worker](#the-worker).
 
 **An unset `APP_ENV` is production**, and production refuses to start without `DATABASE_URL`,
 because the in-memory substrate loses every row when the process exits. `make dev`, the
@@ -320,13 +322,16 @@ pool  = share - IN_PROCESS
   platform's most instances. During a rollout, the old revision serves its open requests while
   the new one starts, so a rollout that overlaps every instance doubles it. Cloud Run with
   `--max-instances=6`, one process in each instance, therefore sets `DATABASE_INSTANCES=12`.
-  Nothing can check this number against your platform. Production refuses to start without it, and the development loop is
-  one process.
-- `IN_PROCESS` in `app/connection_budget.py` names each pool or connection one process holds
-  beside the template's pool, such as a second pool or a `LISTEN` connection. Size each from its
-  entry there.
-- `OUTSIDE` names each holder that is not one of the processes: the release step, a worker that
-  runs as its own service, an operator's session.
+  Count each worker process too: they hold pools of the same size. Nothing can check this number
+  against your platform. Production refuses to start without it, and the development loop on
+  Postgres is two processes.
+- `IN_PROCESS` is `TEMPLATE_IN_PROCESS` in `app/store/budget.py`, the worker's `LISTEN`
+  connection, and what `app/connection_budget.py` names: each pool or connection one process
+  holds beside the template's pool, such as a second pool. Size each from its entry there. Both
+  processes take the same share, so the web process keeps the worker's `LISTEN` connection and
+  does not use it.
+- `OUTSIDE` names each holder that is not one of the processes: the release step, an operator's
+  session.
 
 The line `connections budgeted` names each number. A pool that would get no connection refuses
 to start, and the message names what to lower.
@@ -339,13 +344,41 @@ because recording it would wait for a connection too.
 [adr/template/0022](adr/template/0022-the-connections-of-every-process-fit-inside-max-connections.md)
 says why.
 
+## The worker
+
+Work that may outlast the request budget is a job. A route asks for it and answers `202`, and the
+worker process, `python -m app.worker`, ends it. It claims jobs from Postgres and serves no
+request. The web process starts no job loop. `docs/backend.md` says how to write a job, and
+[adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
+says why.
+
+- **Run the worker as a service of its own,** with the image of the web process and the same
+  `DATABASE_URL`, `DB_SCHEMA` and `DATABASE_INSTANCES`. It needs no port and no ingress. On
+  Cloud Run, a worker pool. Two processes in one container share its CPU, and a platform that
+  scales on CPU then starts instances for requests because of the work of jobs.
+- **Give the worker CPU while no request is open.** It claims jobs while nobody has the app
+  open. On Cloud Run, instance-based billing. The web process no longer needs it.
+- **Keep one worker running at least.** When no worker runs, each job stays `pending`. Alert on
+  the age of the oldest job that is ready: `SELECT min(ready_at) FROM job_claims WHERE state =
+  'ready'`.
+- **A worker that stops loses no job.** SIGTERM and SIGINT stop each attempt. Its lease ends
+  after `Leases.lease`, and another worker claims the job. Each claim counts one attempt, so a
+  job that each of `MAX_ATTEMPTS` workers dies on is `dead`, with the failure `LeaseLost`.
+- **The worker skips the request budget's bound on a statement.** `DATABASE_STATEMENT_TIMEOUT`
+  of 9 s or more starts a worker, and refuses a web process.
+- **The worker refuses the in-memory substrate.** Without `DATABASE_URL`, the web process runs
+  each job itself, and no other process can see them.
+- **Watch the line `job dead`.** It names the kind, the job and the failure. Each attempt that
+  fails before it writes the WARNING line `job failed`, with its traceback, and an attempt whose
+  lease ended writes `lease lost`.
+
 ## Work beside the requests
 
 Each wait in a request on a system outside the process has a bound under the request budget.
 `app.waits.waiting` bounds each such wait, and refuses one in a request whose bound is not
-under the budget. Work that waits longer starts with `app.waits.beside`. The route answers
-`202`, and the work tells the browser its result when it ends. `docs/backend.md` says how to
-write it.
+under the budget. Work that waits longer is a job, as above. Work the caller does not wait for,
+and that ends within the budget, starts with `app.waits.beside(work, name=..., within=...)`.
+`docs/backend.md` says how to write it.
 
 - **Alert on a request slower than `REQUEST_BUDGET_SECONDS`, and keep the threshold equal to
   the constant.** The gate catches each wrapped wait that a route test runs. The alert catches
@@ -353,14 +386,15 @@ write it.
   bound under the budget and add up past it. Find the wait, and put it in `waiting` or beside the
   request.
 - **A platform that throttles CPU between requests starves the work.** Cloud Run with
-  request-based billing gives an instance CPU only while a request is open, so work that runs
-  after the `202` stalls. Run such a service with CPU always allocated (instance-based billing).
+  request-based billing gives an instance CPU only while a request is open, so work beside the
+  requests that runs after the response stalls until the next request. Keep it short, or make it
+  a job.
 - **Work beside the requests ends with its process.** At shutdown the lifespan cancels each task
   that still runs, and the WARNING line `work beside the requests cancelled` names it. A task
   that does not end within `CANCELLED_WITHIN_SECONDS` of the cancel fails the shutdown with
   `BesideOutlivedItsCancel`, which names it. The lifespan then closes the database within
-  `CLOSED_WITHIN_SECONDS`. The result of the work is lost. Record what the work is doing where a new process can find it, and settle an
-  unfinished record when the work starts again. A task that raises writes the ERROR line
+  `CLOSED_WITHIN_SECONDS`. The result of the work is lost. Work whose loss matters is a job. A
+  task that raises, or that outlasts `within`, writes the ERROR line
   `work beside the requests failed`, with its traceback.
 - **Shared work ends with its process too.** At shutdown the lifespan cancels each run still in
   flight, and each caller that awaits it is cancelled. The WARNING line `shared work cancelled`

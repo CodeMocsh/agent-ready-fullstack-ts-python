@@ -116,7 +116,7 @@ db:
 		uv run --no-sync python -m app.migrate
 	@echo ""
 	@echo "export DATABASE_URL=postgres://app_app:$(APP_DB_PASSWORD)@127.0.0.1:$(DB_PORT)/postgres"
-	@echo "# then: make dev-backend. That role holds DML and no CREATE, so the app verifies"
+	@echo "# then: make dev, which starts the worker beside the backend. That role holds DML and no CREATE, so the app verifies"
 	@echo "# the schema and cannot apply it -- run 'make migrate' when you add an entry."
 
 observe:

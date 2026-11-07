@@ -5,7 +5,8 @@ Date: 2026-11-04
 ## Status
 
 Accepted. [0027](0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
-proposes to replace its rule that sends work past the request budget to `beside`.
+replaces its rule for work past the request budget: that work is a job, and `beside` ends within
+the budget.
 
 ## Context
 
@@ -39,7 +40,8 @@ beside the requests: a request that joins it waits as long as the work.
   `WaitOutlastsTheRequest` before the call starts. `MarksRequests`, which `assemble` adds, marks
   each HTTP request, so a route test through `tests.routed.routed` is marked too. A WebSocket and
   the lifespan are not marked. The check compares each bound alone with the budget.
-- **`beside(work, name=...)` starts work outside every request.** It clears the mark, holds the
+- **`beside(work, name=..., within=...)` starts work outside every request.** `within` is under
+  the budget, as 0027 says. It clears the mark, holds the
   task, writes `work beside the requests failed` when the task raises and
   `work beside the requests cancelled` when it is cancelled. The task acts as the actor of the
   code that started it. The lifespan calls `cancel_beside` before it closes the database.
@@ -51,12 +53,12 @@ beside the requests: a request that joins it waits as long as the work.
   whoever starts it, because a request may join it. Each failure writes `shared work failed`, and
   each cancellation `shared work cancelled`. `cancel_beside` cancels a run still in flight.
 - **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's `BackgroundTasks`.**
-  Each is in `banned-api` in `pyproject.toml`, and each message names `beside`. The messages for
+  Each is in `banned-api` in `pyproject.toml`, and each message names jobs and `beside`. The messages for
   `create_task` and `ensure_future` also name `SharedWork` and `asyncio.TaskGroup`. A task they
   start is still in its request. A loop that the lifespan starts is in a module the project names
   in `per-file-ignores`, because the lifespan is not in a request.
-- **The template ships no record of the work, no settling and no stream.** A project has those,
-  and the template has no slow work to need them.
+- **The template ships no stream.** The record of the work and its settling are the jobs of
+  0027.
 - **Postgres is held at start, not through the seam.** `wiring.build_timeouts` refuses to start
   when the answer to a statement, or a connection, may take as long as the budget.
 - **The lifespan closes the database within `CLOSED_WITHIN_SECONDS`**, after the cancel, and also
@@ -91,8 +93,7 @@ beside the requests: a request that joins it waits as long as the work.
 - **A primitive for a loop the lifespan owns.** The order in which loops stop, and what a loop
   that dies does to the process, are the project's. A `TaskGroup` around the lifespan's `yield`
   ends the lifespan when a loop dies, and the server serves on with the database closed.
-- **A record of the work, its settling and a stream, in the template.** They would have no
-  caller here.
+- **A stream, in the template.** It would have no caller here.
 
 ## Consequences
 
@@ -106,17 +107,15 @@ beside the requests: a request that joins it waits as long as the work.
 - `waiting` does not stop a call in a thread. The driver gets the same bound as its own timeout,
   and nothing checks that the two are equal.
 - A `DATABASE_STATEMENT_TIMEOUT` of 9 s or more, or a `DATABASE_ACQUIRE_TIMEOUT` of 10 s or
-  more, refuses to start. A long statement beside the requests passes its own `timeout=` to
-  asyncpg, because the pool's bound applies to every call. Its transaction sets
-  `SET LOCAL statement_timeout`, and `SET LOCAL idle_in_transaction_session_timeout` when it stays
-  open across long work.
+  more, refuses a web process. A long statement goes in a job, and the worker, which serves no
+  request, starts with a longer bound.
 - Each caller of shared work gets the result of the work that the first caller started, in the
   context of the first caller: its actor, its request id and its trace. The key names everything
   the result depends on, and nothing checks that it does.
 - Two reports name a failure of shared work that a caller awaits: it raises in the caller, and
   `shared work failed` names it. The same holds for work beside the requests.
 - `cancel_beside` and `BesideOutlivedItsCancel` also cover shared work, which is in a request.
-- Work beside the requests ends with its process, and its result is lost. A project records its
-  work where a new process can find it.
+- Work beside the requests ends with its process, and its result is lost. Work whose loss
+  matters is a job.
 - On a platform that gives an instance CPU only while a request is open, a task beside the
-  requests stalls after the `202`.
+  requests stalls after the response.

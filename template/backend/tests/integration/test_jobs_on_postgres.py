@@ -25,8 +25,11 @@ from tests.integration.conftest import ONE_PROCESS, Provisioned
 from tests.jobs_contract import ASKER
 from tests.pages import every_task
 
-SHORT: Final = Leases(lease=0.5, renewal=0.1, retry=0.01)
-"""A lease that ends half a second after nobody renews it."""
+SHORT: Final = Leases(lease=1.0, renewal=0.2, retry=0.01)
+"""A lease that ends a second after nobody renews it."""
+
+LONG: Final = Leases(lease=60.0, renewal=20.0, retry=0.01)
+"""A lease that outlasts any test."""
 
 WITHIN: Final = 15.0
 """The longest a test waits for a job to end."""
@@ -191,12 +194,13 @@ async def test_a_job_whose_lease_ended_on_each_attempt_is_dead(
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:
     database = opened(ends_at_once)
-    claims = JobClaims(database, Leases(lease=0.05, renewal=0.01, retry=0.01))
+    ending = Leases(lease=0.05, renewal=0.01, retry=0.01)
     asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
     for _ in range(MAX_ATTEMPTS):
-        assert await claims.claim([A_KIND]) is not None
-        await elapse(0.1)
+        assert await JobClaims(database, ending).claim([A_KIND]) is not None
+        await elapse(ending.lease * 2)
 
+    claims = JobClaims(database, LONG)
     last = await claims.claim([A_KIND])
     assert last is not None
     await run(claims, kinds(ends_at_once), last)

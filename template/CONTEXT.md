@@ -193,8 +193,8 @@ _Avoid_: batch, chunk, slice. A screen is never a page.
 
 **Connection budget**:
 The share of the server's `max_connections` that each process may hold, and the template's pool
-inside it. `app/store/budget.py` calculates it from `DATABASE_INSTANCES` and
-`app/connection_budget.py`.
+inside it. Each web process and each worker gets one. `app/store/budget.py` calculates it from
+`DATABASE_INSTANCES` and `app/connection_budget.py`.
 _Avoid_: pool size (the pool is one holder inside the share), connection limit.
 
 **Admission**:
@@ -204,9 +204,32 @@ streams open at once. It enforces, or with `ADMISSION_MODE=evaluate` it only rep
 holds the numbers.
 _Avoid_: rate limit (the edge's limit is per address), throttle, quota.
 
+**Durable work**:
+Work that outlives the request that asks for it, and outlives the process that starts it. A
+worker runs it from Postgres. `docs/adr/template/0027`.
+_Avoid_: background work, async work.
+
+**Job**:
+One unit of durable work: a kind, an input, the actor that asked, and an outcome or a failure.
+Its state is `pending`, `done` or `dead`. `app/jobs.py` maps each kind to its handler, which runs
+at least once.
+_Avoid_: task (the example resource is a task), queue item, message.
+
+**Lease**:
+A worker's claim on a job, for a time. A claim takes a job and a new lease token, and counts one
+attempt. Each transaction of the job holds the claim, and fails with `LeaseLost` when the lease
+ended or another worker claimed the job.
+_Avoid_: lock (a lease ends on its own), reservation.
+
+**Worker**:
+The process that `python -m app.worker` starts. It claims jobs and serves no request. In
+`docs/frontend.md`, a worker is a process of vitest, which is another thing.
+_Avoid_: background process, consumer.
+
 **Work beside the requests**:
-A task that `app.waits.beside` started. It runs outside every request, so its waits may last
-past the request budget, and the lifespan cancels it at shutdown.
+A task that `app.waits.beside` started, for work the caller does not wait for. It runs outside
+every request, ends within the request budget, ends with its process, and the lifespan cancels
+it at shutdown. Work whose loss matters is a job.
 _Avoid_: background task (FastAPI's `BackgroundTasks` run inside the request).
 
 **Shared work**:

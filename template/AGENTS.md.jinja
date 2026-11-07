@@ -177,7 +177,7 @@ fans out to both. Each half works without the other's toolchain.
 ```bash
 make install        # the git hooks, both halves, then the browser
 make pre-commit     # the gate, once per tree
-make dev            # both halves: backend :8000, frontend :5173, live mode
+make dev            # both halves, live mode; with DATABASE_URL, the worker too
 make dev-frontend   # frontend only, mock mode
 make lint           # auto-fix and lint both halves
 make test           # both halves, then the contract suite against the real backend

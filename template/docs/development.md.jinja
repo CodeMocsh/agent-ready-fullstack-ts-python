@@ -26,6 +26,10 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   put `VAR=value` in front of the recipe line instead: a password that holds a quote or a space
   breaks the command. The `DATABASE_URL` that `make db` prints does not percent-encode the
   password.
+- **`make dev` with a `DATABASE_URL` starts three processes:** the backend, the worker
+  (`python -m app.worker`) and the frontend. Ctrl-C stops each. Without a `DATABASE_URL` it
+  starts no worker, because the in-memory substrate runs each job in the backend. A job asked for
+  on Postgres stays `pending` while no worker runs.
 - **The `Makefile` sets `UV_EXCLUDE_NEWER` as well as `backend/pyproject.toml`.** `uvx` runs
   outside the project and does not read the pyproject.
 - **`make install` fetches what the gate and the browser tiers need.** It arms the hooks first,

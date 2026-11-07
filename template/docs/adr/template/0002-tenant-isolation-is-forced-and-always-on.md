@@ -53,8 +53,12 @@ silent.
 - Every table is in `TENANT_TABLES` or in `EXEMPT_FROM_ISOLATION`.
   `tests/store/test_schema.py::test_every_table_is_isolated_or_explicitly_exempt` fails on a table
   in neither. Such a table gets no policy and no `FORCE`, and every tenant can read it.
-- The migration ledger, `applied_once`, is the one exemption. The schema version is nobody's
-  data. A policy on it hides it from the role whose only job is to read it.
+- The migration ledger, `applied_once`, is an exemption. The schema version is nobody's data. A
+  policy on it hides it from the role whose only job is to read it.
+- `job_claims` is the other exemption. A worker claims the next job of any tenant, so the claim
+  cannot be scoped to one tenant first. It holds no input and no outcome, which are in `jobs`, a
+  tenant table. [0027](0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
+  says why.
 - No role that the application uses holds `BYPASSRLS`, and the schema has no `SECURITY DEFINER`
   function. `test_the_application_role_holds_no_bypass` and
   `test_no_security_definer_function_exists_in_the_schema` assert the absence.

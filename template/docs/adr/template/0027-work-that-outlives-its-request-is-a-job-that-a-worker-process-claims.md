@@ -4,7 +4,7 @@ Date: 2026-11-06
 
 ## Status
 
-Proposed. It replaces the rule of
+Accepted. It replaces the rule of
 [0021](0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) that sends work past
 the request budget to `beside`. It amends
 [0022](0022-the-connections-of-every-process-fit-inside-max-connections.md), and it makes one
