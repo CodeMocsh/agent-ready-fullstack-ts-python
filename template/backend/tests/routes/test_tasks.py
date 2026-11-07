@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.identity.shared import SENTINEL_PRINCIPAL, SENTINEL_TENANT
 from app.routes import tenant
 from app.store import Database
+from tests.pages import every_event
 from tests.routed import routed
 
 
@@ -28,7 +29,8 @@ def client(database: Database) -> Iterator[TestClient]:
 def test_lists_seed_tasks(client: TestClient) -> None:
     response = client.get("/tasks")
     assert response.status_code == 200
-    assert len(response.json()) == 3
+    assert len(response.json()["tasks"]) == 3
+    assert response.json()["next"] is None
 
 
 def test_creates_a_task(client: TestClient) -> None:
@@ -50,7 +52,27 @@ def test_missing_task_is_404(client: TestClient) -> None:
 
 def test_deletes_a_task(client: TestClient) -> None:
     assert client.delete("/tasks/1").status_code == 204
-    assert len(client.get("/tasks").json()) == 2
+    assert len(client.get("/tasks").json()["tasks"]) == 2
+
+
+def test_lists_the_newest_task_first(client: TestClient) -> None:
+    created = client.post("/tasks", json={"title": "The newest"}).json()
+
+    assert client.get("/tasks").json()["tasks"][0] == created
+
+
+def test_the_next_page_starts_after_the_task_it_names(client: TestClient) -> None:
+    response = client.get("/tasks", params={"after": "2"})
+
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()["tasks"]] == ["1"]
+
+
+def test_a_page_after_a_task_that_is_not_there_is_404(client: TestClient) -> None:
+    response = client.get("/tasks", params={"after": "999"})
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Task not found"}
 
 
 def test_a_trailing_slash_is_a_404_and_never_a_redirect(client: TestClient) -> None:
@@ -72,7 +94,7 @@ def test_a_request_records_who_it_served_and_which_request_it_was(
     an auditor can join the event to the request's log line."""
     answered = client.patch("/tasks/does-not-exist", json={"done": True})
     assert client.portal is not None
-    events = client.portal.call(database.audit_events(SENTINEL_TENANT).list)
+    events = client.portal.call(every_event, database.audit_events(SENTINEL_TENANT))
 
     [event] = events
     assert event.actor == SENTINEL_PRINCIPAL.actor

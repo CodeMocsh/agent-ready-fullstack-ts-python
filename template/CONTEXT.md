@@ -186,6 +186,11 @@ slow-request alert uses it as its threshold. Each wait in a request on a system 
 process has a bound under it.
 _Avoid_: request timeout, deadline.
 
+**Page**:
+At most `PAGE_MAX` rows of a list, and `next`: the cursor where the page after it starts, or
+`None` on the last page. Every list a store answers is a page. `docs/adr/template/0026`.
+_Avoid_: batch, chunk, slice. A screen is never a page.
+
 **Connection budget**:
 The share of the server's `max_connections` that each process may hold, and the template's pool
 inside it. `app/store/budget.py` calculates it from `DATABASE_INSTANCES` and

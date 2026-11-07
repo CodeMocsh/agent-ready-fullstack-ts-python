@@ -94,6 +94,16 @@ class RecordedAuditEvent(BaseModel):
     trace_id: str | None
 
 
+class AuditEventPage(BaseModel):
+    """One page of a tenant's audit events. `next` reads the page after this one, and is `None`
+    on the last page."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    events: tuple[RecordedAuditEvent, ...]
+    next: str | None
+
+
 def recordable(actor: Actor) -> Actor:
     """`actor`. Raises `UnrecordableActor` for an actor whose `on_behalf_of` acted for somebody
     else."""

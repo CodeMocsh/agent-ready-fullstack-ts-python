@@ -25,13 +25,15 @@ which -- only that neither can be talked into answering for a tenant it was not 
 """
 
 from collections.abc import AsyncIterator
+from uuid import uuid4
 
 import pytest
 
 from app.audit_events import RequestEvent, acting_as
 from app.identity.shared import SENTINEL_TENANT, Actor
-from app.models import CreateTaskBody, UpdateTaskBody
-from app.store import Database, TenantUnset
+from app.models import PAGE_MAX, CreateTaskBody, UpdateTaskBody
+from app.store import Database, NoSuchAuditEvent, TenantUnset
+from tests.pages import every_event, every_task
 
 OTHER_TENANT = "a-second-tenant"
 
@@ -78,13 +80,13 @@ class TaskStoreContract:
         self, database: Database
     ) -> None:
         store = database.store(SENTINEL_TENANT)
-        before = len(await store.list())
+        before = len(await every_task(store))
 
         created = await store.create(CreateTaskBody(title="Write the contract suite"))
 
         assert created.done is False
         assert created.title == "Write the contract suite"
-        listed = await store.list()
+        listed = await every_task(store)
         assert len(listed) == before + 1
         assert created.id in {task.id for task in listed}
 
@@ -96,15 +98,14 @@ class TaskStoreContract:
 
         assert first.id != second.id
 
-    async def test_the_list_is_in_the_order_they_were_created(self, database: Database) -> None:
+    async def test_the_list_is_newest_first(self, database: Database) -> None:
         store = database.store(SENTINEL_TENANT)
-        titles = ["first", "second", "third"]
 
-        for title in titles:
+        for title in ["first", "second", "third"]:
             await store.create(CreateTaskBody(title=title))
 
-        listed = await store.list()
-        assert [task.title for task in listed[-3:]] == titles
+        listed = await every_task(store)
+        assert [task.title for task in listed[:3]] == ["third", "second", "first"]
 
     async def test_update_flips_done_and_returns_the_task(self, database: Database) -> None:
         store = database.store(SENTINEL_TENANT)
@@ -115,7 +116,7 @@ class TaskStoreContract:
         assert updated is not None
         assert updated.id == created.id
         assert updated.done is True
-        assert {task.id: task.done for task in await store.list()}[created.id] is True
+        assert {task.id: task.done for task in await every_task(store)}[created.id] is True
 
     async def test_update_of_an_absent_task_reports_it_rather_than_raising(
         self, database: Database
@@ -127,11 +128,11 @@ class TaskStoreContract:
     async def test_remove_reports_success_and_the_task_is_gone(self, database: Database) -> None:
         store = database.store(SENTINEL_TENANT)
         created = await store.create(CreateTaskBody(title="remove me"))
-        before = len(await store.list())
+        before = len(await every_task(store))
 
         assert await store.remove(created.id) is True
 
-        listed = await store.list()
+        listed = await every_task(store)
         assert len(listed) == before - 1
         assert created.id not in {task.id for task in listed}
 
@@ -152,12 +153,50 @@ class TaskStoreContract:
     async def test_two_tenants_do_not_see_each_others_tasks(self, database: Database) -> None:
         mine = database.store(SENTINEL_TENANT)
         theirs = database.store(OTHER_TENANT)
-        before = len(await theirs.list())
+        before = len(await every_task(theirs))
 
         created = await mine.create(CreateTaskBody(title="Not yours"))
 
-        assert created.id not in {task.id for task in await theirs.list()}
-        assert len(await theirs.list()) == before
+        assert created.id not in {task.id for task in await every_task(theirs)}
+        assert len(await every_task(theirs)) == before
+
+    async def test_a_list_answers_one_page_and_its_next_reads_the_rest(
+        self, database: Database
+    ) -> None:
+        store = database.store(f"paged-{uuid4().hex}")
+        created = [await store.create(CreateTaskBody(title=f"{n}")) for n in range(PAGE_MAX + 1)]
+
+        first = await store.list(None)
+        assert first is not None
+        assert first.next == first.tasks[-1].id
+        rest = await store.list(first.next)
+
+        assert len(first.tasks) == PAGE_MAX
+        assert rest is not None
+        assert rest.next is None
+        assert [task.id for task in first.tasks + rest.tasks] == [task.id for task in created[::-1]]
+
+    async def test_the_last_page_names_no_next(self, database: Database) -> None:
+        store = database.store(f"paged-{uuid4().hex}")
+        created = [await store.create(CreateTaskBody(title=f"{n}")) for n in range(PAGE_MAX)]
+
+        page = await store.list(None)
+
+        assert page is not None
+        assert page.next is None
+        assert [task.id for task in page.tasks] == [task.id for task in created[::-1]]
+
+    async def test_a_list_after_a_task_that_is_not_there_reports_it_rather_than_raising(
+        self, database: Database
+    ) -> None:
+        store = database.store(SENTINEL_TENANT)
+        removed = await store.create(CreateTaskBody(title="gone before the next page"))
+        await store.remove(removed.id)
+        theirs = await database.store(OTHER_TENANT).create(CreateTaskBody(title="not yours"))
+
+        assert await store.list(NOT_A_TASK_ID) is None
+        assert await store.list(removed.id) is None
+        assert await store.list(theirs.id) is None
 
     async def test_a_store_cannot_be_had_without_a_tenant(self, database: Database) -> None:
         """On both substrates, and at construction. There is no unscoped store to hold, which
@@ -169,11 +208,11 @@ class TaskStoreContract:
 
     async def test_a_request_event_reads_back_as_it_was_recorded(self, database: Database) -> None:
         events = database.audit_events(SENTINEL_TENANT)
-        before = len(await events.list())
+        before = len(await every_event(events))
 
         await events.record(A_REQUEST)
 
-        [recorded] = (await events.list())[before:]
+        [recorded] = (await every_event(events))[before:]
         assert (
             recorded.tenant_id,
             recorded.actor,
@@ -204,22 +243,56 @@ class TaskStoreContract:
         self, database: Database
     ) -> None:
         events = database.audit_events(SENTINEL_TENANT)
-        before = len(await events.list())
+        before = len(await every_event(events))
 
         for status in (200, 404, 500):
             await events.record(A_REQUEST.model_copy(update={"status": status}))
 
-        assert [event.status for event in (await events.list())[before:]] == [200, 404, 500]
+        assert [event.status for event in (await every_event(events))[before:]] == [200, 404, 500]
 
     async def test_two_tenants_do_not_see_each_others_audit_events(
         self, database: Database
     ) -> None:
         theirs = database.audit_events(OTHER_TENANT)
-        before = len(await theirs.list())
+        before = len(await every_event(theirs))
 
         await database.audit_events(SENTINEL_TENANT).record(A_REQUEST)
 
-        assert len(await theirs.list()) == before
+        assert len(await every_event(theirs)) == before
+
+    async def test_audit_events_answer_one_page_and_its_next_reads_the_rest(
+        self, database: Database
+    ) -> None:
+        events = database.audit_events(f"paged-{uuid4().hex}")
+        statuses = [200 + n for n in range(PAGE_MAX + 1)]
+        for status in statuses:
+            await events.record(A_REQUEST.model_copy(update={"status": status}))
+
+        first = await events.list(None)
+        assert first.next is not None
+        rest = await events.list(first.next)
+
+        assert len(first.events) == PAGE_MAX
+        assert rest.next is None
+        assert [event.status for event in first.events + rest.events] == statuses
+
+    async def test_audit_events_after_an_event_that_is_not_there_are_refused(
+        self, database: Database
+    ) -> None:
+        theirs = database.audit_events(f"paged-{uuid4().hex}")
+        mine = database.audit_events(f"paged-{uuid4().hex}")
+        for status in range(200, 201 + PAGE_MAX):
+            await theirs.record(A_REQUEST.model_copy(update={"status": status}))
+            await mine.record(A_REQUEST.model_copy(update={"status": status}))
+        their_next = (await theirs.list(None)).next
+        my_next = (await mine.list(None)).next
+        assert their_next is not None
+        assert my_next is not None
+        in_other_digits = "".join(chr(0x660 + int(digit)) for digit in my_next)
+
+        for after in ("not-a-next", "-1", "0", in_other_digits, "9" * 20, "1" * 5000, their_next):
+            with pytest.raises(NoSuchAuditEvent):
+                await mine.list(after)
 
     async def test_audit_events_cannot_be_had_without_a_tenant(self, database: Database) -> None:
         for empty in ("", "   "):

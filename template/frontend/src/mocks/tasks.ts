@@ -6,7 +6,12 @@ export function resetTasks(): void {
 }
 
 export const taskHandlers = [
-  http.get("/tasks", ({ response }) => response(200).json(taskStore.list())),
+  http.get("/tasks", ({ query, response }) => {
+    const page = taskStore.list(query.get("after"));
+    return page === null
+      ? response(404).json({ detail: "Task not found" })
+      : response(200).json(page);
+  }),
 
   http.post("/tasks", async ({ request, response }) => {
     const body = await request.json();

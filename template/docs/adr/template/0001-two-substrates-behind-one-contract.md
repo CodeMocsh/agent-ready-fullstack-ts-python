@@ -17,7 +17,7 @@ the ones that one implementation keeps by accident:
 
 - A missing task is reported, not raised.
 - An id that cannot exist is a `404`, not a `500`.
-- `list()` returns tasks in creation order.
+- `list()` answers a page, newest first.
 
 Only a second implementation that runs the same suite makes these rules a contract.
 

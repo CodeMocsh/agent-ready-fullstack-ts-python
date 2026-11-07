@@ -1,7 +1,7 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions, useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { type Task, tasksApi } from "@/api/tasks";
+import { type Task, type TaskPage, tasksApi } from "@/api/tasks";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,6 +15,13 @@ import {
 
 const TASKS_KEY = ["tasks"] as const;
 
+const TASK_PAGES = infiniteQueryOptions({
+  queryKey: TASKS_KEY,
+  queryFn: ({ pageParam }: { pageParam: string | null }) => tasksApi.list(pageParam),
+  initialPageParam: null,
+  getNextPageParam: (page: TaskPage) => page.next,
+});
+
 const SERVED_BY =
   import.meta.env.VITE_ENABLE_MSW === "true"
     ? "Mock mode — Mock Service Worker is answering. No backend is running."
@@ -23,7 +30,7 @@ const SERVED_BY =
 export function TaskList() {
   const [title, setTitle] = useState("");
 
-  const tasks = useQuery({ queryKey: TASKS_KEY, queryFn: tasksApi.list });
+  const tasks = useInfiniteQuery(TASK_PAGES);
 
   const changesTasks = { invalidates: [TASKS_KEY] };
 
@@ -83,33 +90,49 @@ export function TaskList() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {tasks.data.map((task) => (
-              <TableRow key={task.id}>
-                <TableCell>
-                  <input
-                    type="checkbox"
-                    aria-label={`Mark "${task.title}" as done`}
-                    checked={task.done}
-                    onChange={(event) => toggle.mutate({ id: task.id, done: event.target.checked })}
-                  />
-                </TableCell>
-                <TableCell className={task.done ? "text-muted-foreground line-through" : ""}>
-                  {task.title}
-                </TableCell>
-                <TableCell>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Delete "${task.title}"`}
-                    onClick={() => remove.mutate(task.id)}
-                  >
-                    <Trash2 />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {tasks.data.pages
+              .flatMap((page) => page.tasks)
+              .map((task) => (
+                <TableRow key={task.id}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      aria-label={`Mark "${task.title}" as done`}
+                      checked={task.done}
+                      onChange={(event) =>
+                        toggle.mutate({ id: task.id, done: event.target.checked })
+                      }
+                    />
+                  </TableCell>
+                  <TableCell className={task.done ? "text-muted-foreground line-through" : ""}>
+                    {task.title}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Delete "${task.title}"`}
+                      onClick={() => remove.mutate(task.id)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
           </TableBody>
         </Table>
+      ) : null}
+
+      {tasks.hasNextPage ? (
+        <Button
+          variant="outline"
+          disabled={tasks.isFetching}
+          onClick={() =>
+            void (tasks.isFetchNextPageError ? tasks.refetch() : tasks.fetchNextPage())
+          }
+        >
+          Load more
+        </Button>
       ) : null}
     </main>
   );

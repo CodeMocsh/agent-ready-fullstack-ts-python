@@ -1,21 +1,33 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { API_BASE_URL } from "@/api/base";
-import { tasksApi } from "@/api/tasks";
+import { type Task, tasksApi } from "@/api/tasks";
 import { againstLiveBackend } from "./target";
+
+async function everyTask(): Promise<Task[]> {
+  const tasks: Task[] = [];
+  let after: string | null = null;
+  do {
+    const page = await tasksApi.list(after);
+    tasks.push(...page.tasks);
+    after = page.next;
+  } while (after !== null);
+  return tasks;
+}
 
 describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers"})`, () => {
   if (againstLiveBackend) {
     afterEach(async () => {
-      for (const task of await tasksApi.list()) {
+      for (const task of await everyTask()) {
         await tasksApi.remove(task.id);
       }
     });
   }
 
-  it("lists tasks", async () => {
-    const tasks = await tasksApi.list();
-    expect(Array.isArray(tasks)).toBe(true);
-    for (const task of tasks) {
+  it("lists a page of tasks", async () => {
+    const page = await tasksApi.list(null);
+    expect(Array.isArray(page.tasks)).toBe(true);
+    expect(page.next === null || typeof page.next === "string").toBe(true);
+    for (const task of page.tasks) {
       expect(typeof task.id).toBe("string");
       expect(typeof task.title).toBe("string");
       expect(typeof task.done).toBe("boolean");
@@ -26,7 +38,7 @@ describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers
     const created = await tasksApi.create({ title: "Prove the contract" });
     expect(created.title).toBe("Prove the contract");
     expect(created.done).toBe(false);
-    expect((await tasksApi.list()).some((task) => task.id === created.id)).toBe(true);
+    expect((await everyTask()).some((task) => task.id === created.id)).toBe(true);
   });
 
   it("updates a task's done flag", async () => {
@@ -39,7 +51,26 @@ describe(`tasks contract (${againstLiveBackend ? "live backend" : "mock handlers
   it("removes a task", async () => {
     const created = await tasksApi.create({ title: "Delete me" });
     await tasksApi.remove(created.id);
-    expect((await tasksApi.list()).some((task) => task.id === created.id)).toBe(false);
+    expect((await everyTask()).some((task) => task.id === created.id)).toBe(false);
+  });
+
+  it("lists the newest task first", async () => {
+    await tasksApi.create({ title: "Older" });
+    const newest = await tasksApi.create({ title: "Newer" });
+    expect((await tasksApi.list(null)).tasks[0]).toEqual(newest);
+  });
+
+  it("starts the next page after the task it names", async () => {
+    const older = await tasksApi.create({ title: "Older of two" });
+    const newer = await tasksApi.create({ title: "Newer of two" });
+    const page = await tasksApi.list(newer.id);
+    expect(page.tasks[0]?.id).toBe(older.id);
+  });
+
+  it("refuses a page after a task that is not there with a 404 and an ErrorBody", async () => {
+    const answered = await fetch(`${API_BASE_URL}/tasks?after=does-not-exist`);
+    expect(answered.status).toBe(404);
+    expect(await answered.json()).toEqual({ detail: "Task not found" });
   });
 
   it("refuses a missing task with a 404 and an ErrorBody", async () => {
