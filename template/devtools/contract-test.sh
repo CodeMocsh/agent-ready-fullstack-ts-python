@@ -37,10 +37,11 @@ set +a
 base_url="${CONTRACT_BASE_URL:-http://localhost:$FRONTEND_PORT/api}"
 backend_pid=""
 frontend_pid=""
+worker_pid=""
 log="$(mktemp)"
 
 signal_halves() {
-    for pid in $frontend_pid $backend_pid; do
+    for pid in $frontend_pid $worker_pid $backend_pid; do
         kill -"$1" "-$pid" 2>/dev/null || true
     done
 }
@@ -71,7 +72,7 @@ cleanup() {
     signal_halves TERM
     sleep 1
     signal_halves KILL
-    for pid in $frontend_pid $backend_pid; do
+    for pid in $frontend_pid $worker_pid $backend_pid; do
         wait "$pid" 2>/dev/null || true
     done
     rm -f "$log"
@@ -92,14 +93,22 @@ backend_pid=$!
 (cd "$here/frontend" && own_group pnpm dev:live --port "$FRONTEND_PORT" --strictPort) >>"$log" 2>&1 &
 frontend_pid=$!
 
+if [ -n "${DATABASE_URL:-}" ]; then
+    (cd "$here/backend" && own_group uv run python -m app.worker) >>"$log" 2>&1 &
+    worker_pid=$!
+fi
+
 deadline=$(($(date +%s) + 60))
 until curl -fsS --max-time 2 "$base_url/health" >/dev/null 2>&1; do
     kill -0 "$backend_pid" 2>/dev/null || fail "the backend exited during startup"
     kill -0 "$frontend_pid" 2>/dev/null || fail "the dev server exited during startup"
+    if [ -n "$worker_pid" ] && ! kill -0 "$worker_pid" 2>/dev/null; then
+        fail "the worker exited during startup"
+    fi
     [ "$(date +%s)" -ge "$deadline" ] && fail "$base_url/health did not answer within 60s"
     sleep 0.5
 done
 
-echo "==> both halves up; $base_url reachable"
+echo "==> both halves up; $base_url reachable${worker_pid:+; a worker beside the backend}"
 cd "$here/frontend"
 CONTRACT_TARGET=live VITE_API_BASE_URL="$base_url" pnpm exec vitest run contract.test

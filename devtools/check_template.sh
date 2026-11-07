@@ -784,6 +784,9 @@ done
 need_grep 'BACKEND_PORT' devtools/dev.sh "Each port comes from the environment, so two checkouts can run at once."
 need_grep 'FRONTEND_PORT' devtools/dev.sh
 need_grep 'BACKEND_PORT' devtools/contract-test.sh
+for loop in devtools/dev.sh devtools/contract-test.sh; do
+    need_grep 'python -m app.worker' "$loop" "On Postgres a job is ended by the worker process. A loop without one leaves every job pending, and only two processes show a coupling to the memory of one (docs/adr/template/0027)."
+done
 need_grep 'process.env.BACKEND_PORT' frontend/vite.config.ts
 need_grep 'process.env.PREVIEW_PORT' frontend/playwright.config.ts "No gate runs the Playwright configs, so a hard-coded port fails nowhere."
 need_grep 'process.env.FRONTEND_PORT' frontend/playwright.live.config.ts
@@ -1668,6 +1671,10 @@ if docker info >/dev/null 2>&1; then
     run "make db-test" env -u TEST_DATABASE_URL make db-test
     POSTGRES_RAN=yes
     echo "    postgres: yes (container) -- store contract and migration suites ran"
+    run "contract suite (live backend on Postgres, a worker beside it)" \
+        env -u BACKEND_PORT -u FRONTEND_PORT -u DATABASE_URL make test-contract-db
+    need_nothing_outlived "the contract suite on Postgres"
+    echo "    postgres: yes (container) -- the contract suite crossed two processes"
 else
     echo "    postgres: NO DOCKER -- the container that make db-test starts did not run."
 fi

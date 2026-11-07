@@ -100,11 +100,14 @@ More CPU for the same process does not help. One event loop uses one core.
   requests. `python -m app.worker` claims jobs and serves no request. No variable chooses a
   role. The web process starts no job loop, and a test asserts that a started app runs none.
 - **Every development loop on Postgres runs two processes.** `make dev` with a `DATABASE_URL`
-  starts both, and so does `make test-contract-db`. In `make db-test`, which the gate runs,
-  `test_a_task_closes_through_a_job_that_the_worker_process_ends` serves the app in the test and
-  starts `python -m app.worker` beside it. It asks for a job through the API, and reads its
-  outcome through the API. The gate's live contract runs are on the memory substrate, which runs
-  its own jobs.
+  starts both, and so does `make test-contract-db`. The gate runs each of these on Postgres:
+  - `make test-contract-db`: the live contract suite, through the dev proxy, with a worker
+    beside the backend. Its job test asks for a job through the API, and reads its outcome
+    through the API. Without the worker it fails.
+  - `make db-test`: `test_a_task_closes_through_a_job_that_the_worker_process_ends` serves the
+    app in the test and starts `python -m app.worker` beside it.
+  The other live contract runs are on the memory substrate, which runs its own jobs. On a
+  machine with no Docker, the gate runs neither, and says so.
 - **The memory substrate runs its own jobs.** `MemoryDatabase` holds its rows in the memory of
   one process, so no other process can claim them. It runs each job after the write that asks
   for it, in that process, through the handler in `app/jobs.py`. A route test waits for each job
