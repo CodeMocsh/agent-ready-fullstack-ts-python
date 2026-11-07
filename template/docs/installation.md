@@ -97,8 +97,9 @@ What to expect, because it is not all free:
   update. From then on an update leaves the example resource's own files alone, and does not
   re-add any you deleted. Everything else keeps updating. **Do not give the answer on the update
   itself**, with `--data example_resource=false` or at the prompt: Copier then deletes the
-  example's files, your edits included. The file says never to edit it by hand. This one edit
-  is expected, and Copier keeps the value when it writes the file again.
+  example's files and `app/jobs.py`, your edits and your own kinds of job included.
+  `.copier-answers.yml` says never to edit it by hand. This one edit is expected, and Copier
+  keeps the value when it writes the file again.
 - **Drop the GitHub workflow if your checks run somewhere else.** Answer once, on the update
   itself: `uvx --exclude-newer "7 days" copier@9.17.1 update --data github_ci=false`. On this
   question the update is meant to delete: it removes the workflow and
@@ -445,6 +446,30 @@ What to expect, because it is not all free:
     template's copy. A test that polls runs TanStack's timer: with the real clock, or with `Date`
     and the timers faked and advanced together.
   [adr/template/0024](adr/template/0024-every-read-has-an-outside-cause.md) says why.
+- **From 0.65.0 a job's handler takes the job's tenant, and `PAGE_MAX` is in `app/models/shared.py`.**
+  - `app/jobs.py` exports `kinds(database)` in place of `KINDS`. It returns the map of each kind
+    to its handler. A handler takes the job's tenant and the job's input. Take each store in
+    `kinds`, for that tenant, and hand it to the code that does the work:
+    `lambda tenant_id, input: close_a_task(database.store(tenant_id), input)`. The update does
+    not change `app/jobs.py`, so make the change by hand.
+  - `MemoryDatabase` and `PostgresDatabase` take `kinds=kinds`, the function, and call it with
+    themselves. `PostgresDatabase.kinds` holds the map, and `work` and `run` in `app/worker.py`
+    read it there: drop the map from each call. `store_of_the_job` is gone, and `attempted`
+    takes the tenant in place of a store.
+  - `app/models/tasks.py` imports `PAGE_MAX` from `app.models.shared`. In
+    `tests/models/layers.py`, give `tasks` the layer `shared`, or `make test` names the import.
+  - In `docs/backend.md`, take the template's bullet that starts "Make a wait past the budget a
+    job".
+  - With `example_resource: false`, an update neither writes nor changes `app/jobs.py`, as for
+    the example's own files. Its first render imports `app.task_jobs`. If your `app/jobs.py`
+    imports it, or you have no `app/jobs.py`, write one with
+    `def kinds(database: Database) -> Kinds: return {}`, with `Database` from `app.store` and
+    `Kinds` from `app.store.jobs`. Also take `PAGE_MAX` into `app/models/__init__.py` from
+    `app.models.shared`, and import it from `app.models.shared` in your own `app/models/tasks.py`
+    if you kept one. In your own `tests/routes/test_tenant_scoping.py`, take three things from the
+    template's copy: `kinds` in `app/jobs.py` in `SCOPING_FUNCTIONS`, a `Site` named by its path
+    under `app/`, and `test_a_job_obtains_a_store_only_for_the_tenant_of_the_job`.
+  [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

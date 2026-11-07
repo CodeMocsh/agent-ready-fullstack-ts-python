@@ -9,13 +9,13 @@ import pytest
 
 from app.identity.shared import SENTINEL_TENANT
 from app.store.memory import MemoryDatabase
-from tests.jobs_contract import CONTRACT_KINDS, Finish, JobsContract
+from tests.jobs_contract import Finish, JobsContract, contract_kinds
 
 
 class TestTheMemorySubstrate(JobsContract):
     @pytest.fixture
     async def database(self) -> AsyncIterator[MemoryDatabase]:
-        memory = MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=CONTRACT_KINDS)
+        memory = MemoryDatabase(seed_tenant=SENTINEL_TENANT, kinds=contract_kinds)
         yield memory
         await memory.close()
 

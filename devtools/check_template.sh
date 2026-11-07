@@ -285,6 +285,45 @@ for line in found:
 sys.exit(1 if found else 0)
 PY
 
+echo "==> assert a backend module in _skip_if_exists imports the example only when the example's _exclude names it"
+KEPT_STATUS=0
+python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || KEPT_STATUS=$?
+import ast
+import re
+import sys
+from pathlib import Path
+
+copier, backend = Path(sys.argv[1]).read_text(), Path(sys.argv[2])
+example = set(re.findall(r"not example_resource and _copier_operation == 'update' %\}backend/([^{]+\.py)\{%", copier))
+kept = re.findall(r"^  - backend/(\S+\.py)$", copier.split("\n_skip_if_exists:\n", 1)[1].split("\n\n", 1)[0], re.MULTILINE)
+if "app/task_jobs.py" not in example or "app/jobs.py" not in kept:
+    print("check: copier.yml no longer names app/task_jobs.py in the example's _exclude lines, or app/jobs.py in _skip_if_exists, so the check below would pass over nothing", file=sys.stderr)
+    sys.exit(2)
+modules = {path.removesuffix(".py").replace("/", ".") for path in example - set(kept)}
+def under(name):
+    return any(name == module or name.startswith(module + ".") for module in modules)
+found = []
+for path in kept:
+    if path in example:
+        continue
+    if not (backend / path).is_file():
+        print(f"check: copier.yml keeps backend/{path}, which the render does not have", file=sys.stderr)
+        sys.exit(2)
+    for node in ast.walk(ast.parse((backend / path).read_text())):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            names = [node.module, *(f"{node.module}.{one.name}" for one in node.names)]
+        elif isinstance(node, ast.Import):
+            names = [one.name for one in node.names]
+        else:
+            continue
+        found += [f"{path}:{node.lineno} imports {name}" for name in names if under(name)][:1]
+for line in found:
+    print(f"check: {line}, which a project without the example does not have", file=sys.stderr)
+sys.exit(3 if found else 0)
+PY
+[ "$KEPT_STATUS" -ne 3 ] || fail "a backend module in _skip_if_exists imports the example. An update writes its first render into a project without the example, which keeps it, and its import fails. Name the module in the example's _exclude lines."
+[ "$KEPT_STATUS" -eq 0 ] || fail "the check of the modules in _skip_if_exists could not read copier.yml or the render"
+
 echo "==> assert every workflow is valid, here and in what ships"
 ACTIONLINT_VERSION=1.7.12
 case "$(uname -s)/$(uname -m)" in

@@ -25,7 +25,7 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
 ## Decision
 
 - **No store method answers more than `PAGE_MAX` rows.** `PAGE_MAX` is 100, in
-  `app/models/tasks.py`. A list takes `after`, and answers a page: at most `PAGE_MAX` rows and
+  `app/models/shared.py`. A list takes `after`, and answers a page: at most `PAGE_MAX` rows and
   `next`. `next` names where the page after this one starts, and is `None` on the last page.
   `TaskPage.tasks` has `max_length=PAGE_MAX`, so `openapi.json` carries the bound as `maxItems`,
   and a route that answers more fails with a `500`.

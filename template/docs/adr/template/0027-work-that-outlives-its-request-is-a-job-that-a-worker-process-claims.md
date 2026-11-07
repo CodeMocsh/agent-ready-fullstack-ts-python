@@ -50,7 +50,9 @@ More CPU for the same process does not help. One event loop uses one core.
   maps each kind of job to its handler, as
   [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says. The
   template ships that map with the one kind of the example resource, `close a task`, which
-  `app/task_jobs.py` holds and `POST /tasks/{id}/close` asks for.
+  `app/task_jobs.py` holds and `POST /tasks/{id}/close` asks for. That first render imports the
+  example, so `copier.yml` excludes `app/jobs.py` with the example on an update. A project that
+  declines the example writes its own map.
 - **Two tables hold a job.** `job_claims` holds only what a claim and a sweep read: the id, the
   tenant, the kind, the state, the lease token, the end of the lease, the attempts, and the time
   the job is ready. `jobs` is a tenant table. It holds the input, the actor that asked, and the
@@ -76,14 +78,16 @@ More CPU for the same process does not help. One event loop uses one core.
   `FOR UPDATE` of a claim skips the row, so a check at the start of the transaction is enough. A
   renewal does not wait for the lock, because it updates no key. This is the fence. A worker that
   was slow writes nothing after another worker claims the job.
-- **A handler gets a fenced store, and no `Database`.** The mechanism opens the store with the
-  tenant of the claim, through `store_of_the_job`, runs the handler in `acting_as` the actor in
-  `jobs`, and puts the fence in each transaction of that store.
-  `tests/routes/test_tenant_scoping.py` allows a store only from `deps.get_store` and
-  `store_of_the_job`. So
-  [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) records
-  each write of a job under the actor that asked for it. A handler cannot open a transaction
-  that the fence does not check.
+- **A handler gets the job's tenant and input, and `app/jobs.py` scopes what it uses.** The
+  mechanism knows the claim and no store, so it names no type of the project's. `kinds(database)`
+  in `app/jobs.py` builds each handler, and is the one place a job's tenant becomes a store, as
+  `deps.get_store` is for a request. `tests/routes/test_tenant_scoping.py` allows a store only
+  from those two. Each `Database` is built with `kinds`, and calls it with itself: the memory
+  substrate runs the handlers, and `Jobs.ask` refuses a kind with none. The mechanism runs the
+  handler in `acting_as` the actor in `jobs`, and puts the fence in each transaction of the job.
+  So [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md)
+  records each write of a job under the actor that asked for it. The fence also holds the
+  tenant: a transaction of a job for another tenant raises `LeaseLost` and rolls back.
 - **Each end of an attempt is a fenced write.** The transaction that writes the outcome or the
   failure to `jobs` also marks the claim `ended`, and the one that makes a job ready again
   clears its token. A worker whose lease ended can do none of them.
@@ -131,10 +135,8 @@ More CPU for the same process does not help. One event loop uses one core.
   for it, in that process, through the handler in `app/jobs.py`. A route test waits for each job
   with `MemoryDatabase.drained()`. No variable chooses this. The substrate does.
 - **`JobsContract` in `tests/jobs_contract.py` holds the contract once.** Each binding runs it,
-  as `TaskStoreContract` does for the stores. On Postgres,
-  `tests/integration/test_jobs_on_postgres.py` also runs the kill, the reclaim, the renewal, the
-  wake, the delay before a retry and the fence: a slow attempt's write fails with `LeaseLost`
-  after another worker claims the job, whether it writes a tenant table or ends the job.
+  as `TaskStoreContract` does for the stores. What only Postgres keeps, the lease, the wake and
+  the fence, is in `tests/integration/test_jobs_on_postgres.py`.
 - **`DATABASE_INSTANCES` counts the worker processes too.** Each process holds
   `TEMPLATE_IN_PROCESS` in `app/store/budget.py` beside the template's pool: the worker's
   `LISTEN` connection. In the development loop on Postgres, an unset `DATABASE_INSTANCES` is two.
@@ -166,6 +168,9 @@ More CPU for the same process does not help. One event loop uses one core.
 - **Keep long work in `beside`, and let the project record it.** That is 0021 today. The project
   that measured the cost rebuilt the record for each kind of work, and still lost the work at
   each swap of an instance.
+- **The mechanism hands each handler the store of the job's tenant.** That was 0.63.0 and 0.64.0, through
+  `store_of_the_job`. The mechanism then names `TaskStore`, a type of the example. A project
+  without the example has no such type, and a handler that needs several stores gets one.
 - **A library as the Postgres adapter: `procrastinate` or `pgqueuer`.** Neither has a fence for
   each claim. `procrastinate` 3.10.0 ends a job by its id and its state, and it names the holder
   by worker, not by claim. `pgqueuer` 1.6.0 deletes a finished job by its id, with no check of

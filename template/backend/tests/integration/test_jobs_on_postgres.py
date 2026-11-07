@@ -20,12 +20,12 @@ import pytest
 from app.audit_events import acting_as
 from app.identity.shared import SENTINEL_TENANT, Actor
 from app.models import CreateTaskBody, Job, JsonObject
-from app.store import TaskStore
 from app.store.jobs import (
     ATTEMPTS_SPENT,
     MAX_ATTEMPTS,
     Claim,
     Handler,
+    Kinds,
     LeaseLost,
     Leases,
     fenced,
@@ -35,7 +35,7 @@ from app.store.pg_jobs import JobClaims, WakesLost
 from app.worker import run, work
 from tests.clock import elapse
 from tests.integration.conftest import ONE_PROCESS, Provisioned, connect
-from tests.jobs_contract import ASKER, CONTRACT_KINDS
+from tests.jobs_contract import ASKER, OTHER_TENANT, contract_kinds
 from tests.pages import every_task
 
 SHORT: Final = Leases(lease=1.0, renewal=0.2, retry=0.01)
@@ -51,22 +51,22 @@ STARTED: Final[dict[str, asyncio.Event]] = {}
 """Set when an attempt of the job with the key in its input starts."""
 
 
-async def starts_and_waits(_store: TaskStore, input: JsonObject) -> JsonObject:
+async def starts_and_waits(_tenant_id: str, input: JsonObject) -> JsonObject:
     STARTED.setdefault(str(input["key"]), asyncio.Event()).set()
     _ = await asyncio.Event().wait()
     return {}
 
 
-async def ends_at_once(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def ends_at_once(_tenant_id: str, _input: JsonObject) -> JsonObject:
     return {"ended": True}
 
 
-async def waits_past_its_lease(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def waits_past_its_lease(_tenant_id: str, _input: JsonObject) -> JsonObject:
     await elapse(SHORT.lease * 2.5)
     return {"ended": True}
 
 
-async def fails_once(_store: TaskStore, input: JsonObject) -> JsonObject:
+async def fails_once(_tenant_id: str, input: JsonObject) -> JsonObject:
     key = str(input["key"])
     if key not in STARTED:
         STARTED[key] = asyncio.Event()
@@ -74,12 +74,8 @@ async def fails_once(_store: TaskStore, input: JsonObject) -> JsonObject:
     return {"ended": True}
 
 
-async def answers_what_cannot_be_stored(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def answers_what_cannot_be_stored(_tenant_id: str, _input: JsonObject) -> JsonObject:
     return {"ratio": math.nan}
-
-
-async def creates_a_task(store: TaskStore, _input: JsonObject) -> JsonObject:
-    return {"id": (await store.create(CreateTaskBody(title="from a job"))).id}
 
 
 A_KIND: Final = "a kind"
@@ -87,8 +83,8 @@ A_KIND: Final = "a kind"
 BACKEND: Final = Path(__file__).resolve().parents[2]
 
 
-def kinds(handler: Handler) -> dict[str, Handler]:
-    return {A_KIND: handler}
+def kinds(handler: Handler) -> Callable[[PostgresDatabase], Kinds]:
+    return lambda _database: {A_KIND: handler}
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +135,7 @@ async def until(condition: Callable[[], Awaitable[bool]]) -> None:
 async def test_an_attempt_whose_lease_ended_writes_nothing_after_another_worker_claims_the_job(
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:
-    database = opened(creates_a_task)
+    database = opened(ends_at_once)
     claims = JobClaims(database, SHORT)
     _ = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
     slow = await claims.claim([A_KIND])
@@ -155,10 +151,23 @@ async def test_an_attempt_whose_lease_ended_writes_nothing_after_another_worker_
     assert await every_task(database.store(SENTINEL_TENANT)) == []
 
 
+async def test_a_transaction_of_a_job_for_another_tenant_writes_nothing(
+    opened: Callable[[Handler], PostgresDatabase],
+) -> None:
+    database = opened(ends_at_once)
+    _ = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
+    held = await JobClaims(database, LONG).claim([A_KIND])
+    assert held is not None
+
+    with fenced(held), pytest.raises(LeaseLost):
+        _ = await database.store(OTHER_TENANT).create(CreateTaskBody(title="another tenant's"))
+    assert await every_task(database.store(OTHER_TENANT)) == []
+
+
 async def test_a_job_whose_transaction_is_open_is_not_claimed_when_its_lease_ends(
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:
-    database = opened(creates_a_task)
+    database = opened(ends_at_once)
     claims = JobClaims(database, SHORT)
     _ = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
     held = await claims.claim([A_KIND])
@@ -180,16 +189,14 @@ async def test_a_job_whose_worker_died_is_ended_by_another_worker(
     key = "died"
     dies = opened(starts_and_waits)
     asked = await dies.jobs(SENTINEL_TENANT).ask(A_KIND, {"key": key})
-    dying = asyncio.get_running_loop().create_task(
-        work(JobClaims(dies, SHORT), kinds(starts_and_waits), at_once=1)
-    )
+    dying = asyncio.get_running_loop().create_task(work(JobClaims(dies, SHORT), at_once=1))
     await until(lambda: _started(key))
     _ = dying.cancel()
     _ = await asyncio.wait([dying])
 
     lives = opened(ends_at_once)
     living = asyncio.get_running_loop().create_task(
-        work(JobClaims(lives, SHORT), kinds(ends_at_once), at_once=1, sweep=0.1)
+        work(JobClaims(lives, SHORT), at_once=1, sweep=0.1)
     )
     try:
         job = await ended(lives, asked.id)
@@ -209,7 +216,7 @@ async def test_a_job_wakes_a_worker_that_waits_for_one(
 ) -> None:
     database = opened(ends_at_once)
     waiting = asyncio.get_running_loop().create_task(
-        work(JobClaims(database, SHORT), kinds(ends_at_once), at_once=1, sweep=3600.0)
+        work(JobClaims(database, SHORT), at_once=1, sweep=3600.0)
     )
     try:
         await elapse(0.5)
@@ -235,18 +242,16 @@ async def test_a_job_whose_attempts_are_spent_with_no_outcome_is_dead(
     claims = JobClaims(database, LONG)
     last = await claims.claim([A_KIND])
     assert last is not None
-    await run(claims, kinds(ends_at_once), last)
+    await run(claims, last)
 
     job = await database.jobs(SENTINEL_TENANT).read(asked.id)
     assert job is not None
     assert (job.state, job.failure) == ("dead", ATTEMPTS_SPENT)
 
 
-async def _working(
-    database: PostgresDatabase, handler: Handler, leases: Leases = SHORT
-) -> asyncio.Task[None]:
+async def _working(database: PostgresDatabase, leases: Leases = SHORT) -> asyncio.Task[None]:
     task = asyncio.get_running_loop().create_task(
-        work(JobClaims(database, leases), kinds(handler), at_once=1, sweep=3600.0)
+        work(JobClaims(database, leases), at_once=1, sweep=3600.0)
     )
     await elapse(0.3)
     return task
@@ -261,7 +266,7 @@ async def test_a_handler_that_runs_past_its_lease_keeps_its_claim(
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:
     database = opened(waits_past_its_lease)
-    working = await _working(database, waits_past_its_lease)
+    working = await _working(database)
     try:
         asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
         await elapse(SHORT.lease * 1.5)
@@ -307,7 +312,7 @@ async def test_a_job_that_failed_is_tried_again_once_its_delay_has_passed(
 ) -> None:
     database = opened(fails_once)
     delayed = Leases(lease=5.0, renewal=1.0, retry=0.5)
-    working = await _working(database, fails_once, delayed)
+    working = await _working(database, delayed)
     try:
         asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {"key": "tried again"})
         started = asyncio.get_running_loop().time()
@@ -324,7 +329,7 @@ async def test_an_outcome_that_cannot_be_stored_fails_its_attempt_and_not_the_wo
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:
     database = opened(answers_what_cannot_be_stored)
-    working = await _working(database, answers_what_cannot_be_stored)
+    working = await _working(database)
     try:
         asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
         job = await ended(database, asked.id)
@@ -339,7 +344,7 @@ async def test_an_outcome_that_cannot_be_stored_fails_its_attempt_and_not_the_wo
 async def test_a_worker_whose_wakes_end_stops(
     opened: Callable[[Handler], PostgresDatabase], provisioned: Provisioned
 ) -> None:
-    working = await _working(opened(ends_at_once), ends_at_once)
+    working = await _working(opened(ends_at_once))
     admin = await connect(provisioned.admin_dsn)
     try:
         ended_backends = await admin.fetchval(
@@ -360,7 +365,7 @@ async def test_a_worker_in_another_process_ends_a_job_that_this_process_asked_fo
     provisioned: Provisioned,
 ) -> None:
     database = PostgresDatabase(
-        dsn=provisioned.app_dsn, schema=provisioned.schema, draws=ONE_PROCESS, kinds=CONTRACT_KINDS
+        dsn=provisioned.app_dsn, schema=provisioned.schema, draws=ONE_PROCESS, kinds=contract_kinds
     )
     worker = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -370,10 +375,10 @@ async def test_a_worker_in_another_process_ends_a_job_that_this_process_asked_fo
         "from app.store.pg_jobs import JobClaims\n"
         "from app.worker import work\n"
         "from tests.integration.conftest import ONE_PROCESS\n"
-        "from tests.jobs_contract import CONTRACT_KINDS\n"
+        "from tests.jobs_contract import contract_kinds\n"
         "database = PostgresDatabase(dsn=sys.argv[1], schema=sys.argv[2], draws=ONE_PROCESS, "
-        "kinds=CONTRACT_KINDS)\n"
-        "asyncio.run(work(JobClaims(database), CONTRACT_KINDS, sweep=3600.0))\n",
+        "kinds=contract_kinds)\n"
+        "asyncio.run(work(JobClaims(database), sweep=3600.0))\n",
         provisioned.app_dsn,
         provisioned.schema,
         cwd=BACKEND,

@@ -1,7 +1,7 @@
 """The jobs contract, written once, run by every substrate that claims to keep it.
 
 `JobsContract` is not collected, as `TaskStoreContract` is not. A substrate runs it by
-subclassing it and supplying two fixtures: `database`, built with `CONTRACT_KINDS`, and `finish`,
+subclassing it and supplying two fixtures: `database`, built with `contract_kinds`, and `finish`,
 which runs every job that is asked for to its end. `tests/store/test_jobs_contract.py` runs it on
 memory, and `tests/integration/test_jobs_contract.py` on Postgres, where a worker ends the job.
 Postgres alone also runs the kill, the reclaim and the fence, in
@@ -23,7 +23,7 @@ from app.audit_events import acting_as, current_actor
 from app.identity.shared import SENTINEL_TENANT, Actor
 from app.models import CreateTaskBody, JsonObject
 from app.store import Database, TaskStore
-from app.store.jobs import MAX_ATTEMPTS, AskedByNobody, Handler, UnknownKind, UnstorableJson
+from app.store.jobs import MAX_ATTEMPTS, AskedByNobody, Kinds, UnknownKind, UnstorableJson
 from tests.conftest import Logged
 from tests.pages import every_task
 
@@ -36,7 +36,7 @@ ATTEMPTS: Final[dict[str, int]] = {}
 """How many attempts each job of the flaky kind has had, by the key in its input."""
 
 
-async def answers_who_asked(_store: TaskStore, input: JsonObject) -> JsonObject:
+async def answers_who_asked(_tenant_id: str, input: JsonObject) -> JsonObject:
     actor = current_actor()
     if actor is None or actor.on_behalf_of is None:
         raise RuntimeError("the job runs as no actor, or as one for nobody")
@@ -50,15 +50,15 @@ async def creates_a_task(store: TaskStore, input: JsonObject) -> JsonObject:
     return {"id": (await store.create(CreateTaskBody(title=title))).id}
 
 
-async def always_fails(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def always_fails(_tenant_id: str, _input: JsonObject) -> JsonObject:
     raise ValueError("this kind never ends")
 
 
-async def answers_what_cannot_be_stored(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def answers_what_cannot_be_stored(_tenant_id: str, _input: JsonObject) -> JsonObject:
     return {"ratio": math.inf}
 
 
-async def fails_once(_store: TaskStore, input: JsonObject) -> JsonObject:
+async def fails_once(_tenant_id: str, input: JsonObject) -> JsonObject:
     key = str(input["key"])
     ATTEMPTS[key] = ATTEMPTS.get(key, 0) + 1
     if ATTEMPTS[key] == 1:
@@ -66,13 +66,15 @@ async def fails_once(_store: TaskStore, input: JsonObject) -> JsonObject:
     return {"attempts": ATTEMPTS[key]}
 
 
-CONTRACT_KINDS: Final[dict[str, Handler]] = {
-    "answers who asked": answers_who_asked,
-    "creates a task": creates_a_task,
-    "always fails": always_fails,
-    "fails once": fails_once,
-    "answers what cannot be stored": answers_what_cannot_be_stored,
-}
+def contract_kinds(database: Database) -> Kinds:
+    return {
+        "answers who asked": answers_who_asked,
+        "creates a task": lambda tenant_id, input: creates_a_task(database.store(tenant_id), input),
+        "always fails": always_fails,
+        "fails once": fails_once,
+        "answers what cannot be stored": answers_what_cannot_be_stored,
+    }
+
 
 Finish = Callable[[], Awaitable[None]]
 """Runs every job that is asked for to its end: done or dead."""

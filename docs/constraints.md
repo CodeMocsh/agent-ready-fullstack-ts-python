@@ -37,6 +37,23 @@ regenerates in the same commit.
 **A new question needs a behavior-preserving default**, because `copier update --defaults` has
 to be a no-op for an existing project.
 
+## A project without the example still imports
+
+`copier.yml` drops the example's files on an update for a project that answers
+`example_resource: false`. Every other file still comes. A few files join the example to the
+rest, such as `app/models/__init__.py` and `app/store/pg.py`. A project edits the example out of
+them, and meets it again in each update
+([adr/0004](adr/0004-the-example-is-declined-on-update-and-never-on-copy.md)). Any
+other name that the rest of the code needs lives in a module the example does not own. `PAGE_MAX`
+bounds every page, so it is in `app/models/shared.py` and not in `app/models/tasks.py`.
+
+A file in `_skip_if_exists` keeps its first render. A first render that imports the example is
+in the example's `_exclude` lines too, as `app/jobs.py` is. Otherwise an update writes it into a
+project without the example, and its import fails. `check_template.sh` refuses such a backend
+module.
+Copier gives `_copier_operation` to `_exclude` and to tasks, and not to a file's name or
+contents, so no render can tell that update from a copy.
+
 ## The gate downloads actionlint, so it needs a network
 
 `check_template.sh` fetches a pinned actionlint and verifies its hash before linting the

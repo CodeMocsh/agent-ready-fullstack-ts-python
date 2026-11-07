@@ -7,10 +7,8 @@ import pytest
 
 from app.identity.shared import Actor
 from app.models import JsonObject
-from app.store import DatabaseBusy, TaskStore
+from app.store import DatabaseBusy
 from app.store.jobs import Asked, Deferred, Failed, Leases, UnstorableJson, attempted, encoded
-from app.store.memory import MemoryDatabase
-from tests.jobs_contract import CONTRACT_KINDS
 
 ASKED = Asked(input={}, actor=Actor(issuer="a-test", subject="the-asker", name="The asker"))
 
@@ -55,24 +53,17 @@ def test_a_character_past_the_surrogates_is_stored() -> None:
     assert encoded({"text": "\U0001f600"}) == '{"text": "\\ud83d\\ude00"}'
 
 
-@pytest.fixture
-def store() -> TaskStore:
-    return MemoryDatabase(seed_tenant="a-tenant", kinds=CONTRACT_KINDS).store("a-tenant")
-
-
-async def test_an_attempt_that_gets_no_connection_is_deferred_by_the_refusal(
-    store: TaskStore,
-) -> None:
-    async def busy(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def test_an_attempt_that_gets_no_connection_is_deferred_by_the_refusal() -> None:
+    async def busy(_tenant_id: str, _input: JsonObject) -> JsonObject:
         raise DatabaseBusy("no connection", retry_after=7)
 
-    assert await attempted(busy, store, ASKED, job="1", kind="busy", attempt=1) == Deferred(7)
+    assert await attempted(busy, "a-tenant", ASKED, job="1", kind="busy", attempt=1) == Deferred(7)
 
 
-async def test_an_attempt_that_answers_what_cannot_be_stored_fails(store: TaskStore) -> None:
-    async def answers_nan(_store: TaskStore, _input: JsonObject) -> JsonObject:
+async def test_an_attempt_that_answers_what_cannot_be_stored_fails() -> None:
+    async def answers_nan(_tenant_id: str, _input: JsonObject) -> JsonObject:
         return {"ratio": math.nan}
 
-    assert await attempted(answers_nan, store, ASKED, job="1", kind="nan", attempt=1) == Failed(
-        failure="UnstorableJson"
-    )
+    assert await attempted(
+        answers_nan, "a-tenant", ASKED, job="1", kind="nan", attempt=1
+    ) == Failed(failure="UnstorableJson")
