@@ -919,7 +919,8 @@ need_only f docs/adr/template \
     0023-the-server-admits-each-actor-s-requests-within-a-bound.md \
     0024-every-read-has-an-outside-cause.md \
     0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md \
-    0026-every-store-read-is-a-page.md
+    0026-every-store-read-is-a-page.md \
+    0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

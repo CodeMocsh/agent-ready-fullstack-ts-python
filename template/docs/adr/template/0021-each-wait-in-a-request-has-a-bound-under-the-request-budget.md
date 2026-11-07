@@ -4,7 +4,8 @@ Date: 2026-11-04
 
 ## Status
 
-Accepted.
+Accepted. [0027](0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
+proposes to replace its rule that sends work past the request budget to `beside`.
 
 ## Context
 
