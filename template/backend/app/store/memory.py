@@ -11,9 +11,9 @@ real enough — the fast tier and the frontend's zero-backend mode both stand on
 
 from datetime import UTC, datetime
 
-from app.audit_events import RecordedAuditEvent, RequestEvent
-from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import AuditEvents, TaskStore, TenantUnset
+from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent
+from app.models import PAGE_MAX, CreateTaskBody, Task, TaskPage, UpdateTaskBody
+from app.store import AuditEvents, NoSuchAuditEvent, TaskStore, TenantUnset, numbered
 from app.store.migrate import known_version
 
 SEED: tuple[tuple[str, str, bool], ...] = (
@@ -37,8 +37,15 @@ class MemoryTaskStore:
         self._tasks: list[Task] = tasks
         self._counter: list[int] = counter
 
-    async def list(self) -> list[Task]:
-        return list(self._tasks)
+    async def list(self, after: str | None) -> TaskPage | None:
+        newest = self._tasks[::-1]
+        ids = [task.id for task in newest]
+        if after is not None and after not in ids:
+            return None
+        start = 0 if after is None else ids.index(after) + 1
+        tasks = newest[start : start + PAGE_MAX]
+        more = start + PAGE_MAX < len(newest)
+        return TaskPage(tasks=tasks, next=tasks[-1].id if more else None)
 
     async def create(self, body: CreateTaskBody) -> Task:
         self._counter[0] += 1
@@ -62,33 +69,53 @@ class MemoryTaskStore:
 
 
 class MemoryAuditEvents:
-    """`AuditEvents` over one tenant's list."""
+    """`AuditEvents` over one tenant's list. Each event holds a number from one counter for
+    every tenant, as `seq` is on Postgres, and a cursor is that number."""
 
-    def __init__(self, tenant_id: str, events: list[RecordedAuditEvent]) -> None:
+    def __init__(
+        self, tenant_id: str, events: list[tuple[int, RecordedAuditEvent]], counter: list[int]
+    ) -> None:
         self._tenant_id: str = tenant_id
-        self._events: list[RecordedAuditEvent] = events
+        self._events: list[tuple[int, RecordedAuditEvent]] = events
+        self._counter: list[int] = counter
 
     async def record(self, event: RequestEvent) -> None:
+        self._counter[0] += 1
         self._events.append(
-            RecordedAuditEvent(
-                tenant_id=self._tenant_id,
-                recorded_at=datetime.now(UTC),
-                actor=event.actor,
-                action=None,
-                outcome=None,
-                resource_type=None,
-                method=event.method,
-                route=event.route,
-                status=event.status,
-                resource_ids=event.resource_ids,
-                fields=(),
-                request_id=event.request_id,
-                trace_id=event.trace_id,
+            (
+                self._counter[0],
+                RecordedAuditEvent(
+                    tenant_id=self._tenant_id,
+                    recorded_at=datetime.now(UTC),
+                    actor=event.actor,
+                    action=None,
+                    outcome=None,
+                    resource_type=None,
+                    method=event.method,
+                    route=event.route,
+                    status=event.status,
+                    resource_ids=event.resource_ids,
+                    fields=(),
+                    request_id=event.request_id,
+                    trace_id=event.trace_id,
+                ),
             )
         )
 
-    async def list(self) -> list[RecordedAuditEvent]:
-        return list(self._events)
+    async def list(self, after: str | None) -> AuditEventPage:
+        start = 0 if after is None else self._number_of(after)
+        later = [(number, event) for number, event in self._events if number > start]
+        page = later[:PAGE_MAX]
+        more = len(later) > PAGE_MAX
+        return AuditEventPage(
+            events=tuple(event for _, event in page), next=str(page[-1][0]) if more else None
+        )
+
+    def _number_of(self, after: str) -> int:
+        number = numbered(after)
+        if number is None or all(held != number for held, _ in self._events):
+            raise NoSuchAuditEvent(f"no audit event {after!r} in this tenant")
+        return number
 
 
 def _refuse_unset(tenant_id: str) -> None:
@@ -114,8 +141,9 @@ class MemoryDatabase:
         self._tenants: dict[str, list[Task]] = {
             seed_tenant: [Task(id=id, title=title, done=done) for id, title, done in SEED]
         }
-        self._events: dict[str, list[RecordedAuditEvent]] = {}
+        self._events: dict[str, list[tuple[int, RecordedAuditEvent]]] = {}
         self._counter: list[int] = [len(SEED)]
+        self._recorded: list[int] = [0]
 
     def store(self, tenant_id: str) -> TaskStore:
         _refuse_unset(tenant_id)
@@ -123,7 +151,7 @@ class MemoryDatabase:
 
     def audit_events(self, tenant_id: str) -> AuditEvents:
         _refuse_unset(tenant_id)
-        return MemoryAuditEvents(tenant_id, self._events.setdefault(tenant_id, []))
+        return MemoryAuditEvents(tenant_id, self._events.setdefault(tenant_id, []), self._recorded)
 
     async def check(self) -> str:
         """A no-op that reports the current version: this substrate has no schema to be

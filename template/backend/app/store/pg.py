@@ -43,10 +43,18 @@ from typing import Any, Final
 from uuid import UUID, uuid4
 
 from app import log
-from app.audit_events import RecordedAuditEvent, RequestEvent, current_actor
+from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, current_actor
 from app.identity.shared import Actor
-from app.models import CreateTaskBody, Task, UpdateTaskBody
-from app.store import AuditEvents, Connections, DatabaseBusy, TaskStore, TenantUnset
+from app.models import PAGE_MAX, CreateTaskBody, Task, TaskPage, UpdateTaskBody
+from app.store import (
+    AuditEvents,
+    Connections,
+    DatabaseBusy,
+    NoSuchAuditEvent,
+    TaskStore,
+    TenantUnset,
+    numbered,
+)
 from app.store.acting import SET_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
 from app.store.conn import resolve_schema
@@ -54,7 +62,9 @@ from app.store.ddl import TENANT_GUC
 from app.store.migrate import check, schema_version
 
 _SET_TENANT = "SELECT set_config($1, $2, true)"
-_LIST = "SELECT id, title, done FROM tasks ORDER BY seq"
+_LIST = "SELECT id, title, done FROM tasks ORDER BY seq DESC LIMIT $1"
+_LIST_AFTER = "SELECT id, title, done FROM tasks WHERE seq < $1 ORDER BY seq DESC LIMIT $2"
+_SEQ_OF_TASK = "SELECT seq FROM tasks WHERE id = $1"
 _CREATE = "INSERT INTO tasks (id, tenant_id, title) VALUES ($1, $2, $3) RETURNING id, title, done"
 _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
 _REMOVE = "DELETE FROM tasks WHERE id = $1 RETURNING id"
@@ -65,10 +75,12 @@ _RECORD = (
     "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, '{}', $12, $13)"
 )
 _AUDIT_EVENTS = (
-    "SELECT tenant_id, recorded_at, actor_issuer, actor_subject, actor_name, on_behalf_of_issuer, "
-    "on_behalf_of_subject, on_behalf_of_name, action, outcome, resource_type, method, route, "
-    "status, resource_ids, fields, request_id, trace_id FROM audit_events ORDER BY seq"
+    "SELECT seq, tenant_id, recorded_at, actor_issuer, actor_subject, actor_name, "
+    "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name, action, outcome, "
+    "resource_type, method, route, status, resource_ids, fields, request_id, trace_id "
+    "FROM audit_events WHERE seq > $1 ORDER BY seq LIMIT $2"
 )
+_AN_AUDIT_EVENT = "SELECT EXISTS (SELECT 1 FROM audit_events WHERE seq = $1)"
 
 
 SMALLEST_BOUND: Final = 0.001
@@ -189,6 +201,10 @@ def _recorded(row: Any) -> RecordedAuditEvent:
     )
 
 
+def _no_such_event(after: str | None) -> NoSuchAuditEvent:
+    return NoSuchAuditEvent(f"no audit event {after!r} in this tenant")
+
+
 def _as_id(id: str) -> UUID | None:
     """The path parameter as a uuid, or `None` when it is not one.
 
@@ -214,9 +230,18 @@ class PostgresTaskStore:
         self._database: PostgresDatabase = database
         self._tenant_id: str = tenant_id
 
-    async def list(self) -> list[Task]:
+    async def list(self, after: str | None) -> TaskPage | None:
         async with self._database.scoped(self._tenant_id) as conn:
-            return [_task(row) for row in await conn.fetch(_LIST)]
+            if after is None:
+                rows = await conn.fetch(_LIST, PAGE_MAX + 1)
+            else:
+                parsed = _as_id(after)
+                seq = None if parsed is None else await conn.fetchval(_SEQ_OF_TASK, parsed)
+                if seq is None:
+                    return None
+                rows = await conn.fetch(_LIST_AFTER, seq, PAGE_MAX + 1)
+        tasks = [_task(row) for row in rows[:PAGE_MAX]]
+        return TaskPage(tasks=tasks, next=tasks[-1].id if len(rows) > PAGE_MAX else None)
 
     async def create(self, body: CreateTaskBody) -> Task:
         async with self._database.scoped(self._tenant_id) as conn:
@@ -265,9 +290,20 @@ class PostgresAuditEvents:
                 event.trace_id,
             )
 
-    async def list(self) -> list[RecordedAuditEvent]:
+    async def list(self, after: str | None) -> AuditEventPage:
+        seq = 0 if after is None else numbered(after)
+        if seq is None:
+            raise _no_such_event(after)
         async with self._database.scoped(self._tenant_id) as conn:
-            return [_recorded(row) for row in await conn.fetch(_AUDIT_EVENTS)]
+            if after is not None and not await conn.fetchval(_AN_AUDIT_EVENT, seq):
+                raise _no_such_event(after)
+            rows = await conn.fetch(_AUDIT_EVENTS, seq, PAGE_MAX + 1)
+        page = rows[:PAGE_MAX]
+        more = len(rows) > PAGE_MAX
+        return AuditEventPage(
+            events=tuple(_recorded(row) for row in page),
+            next=str(page[-1]["seq"]) if more else None,
+        )
 
 
 def _refuse_unset(tenant_id: str) -> None:

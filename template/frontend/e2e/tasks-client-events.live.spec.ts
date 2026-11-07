@@ -48,7 +48,7 @@ test("a mutation that fails is recorded", async ({ page }) => {
 });
 
 test("an error a boundary caught while rendering is recorded", async ({ page }) => {
-  await tasksAnswer(page, 200, { tasks: "not a list" });
+  await tasksAnswer(page, 200, { tasks: [null], next: null });
 
   const [posted] = await Promise.all([nextClientEvent(page), page.goto("./")]);
 

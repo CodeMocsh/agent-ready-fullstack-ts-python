@@ -30,10 +30,16 @@ is the only module that does.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Final, Protocol, runtime_checkable
 
-from app.audit_events import RecordedAuditEvent, RequestEvent
-from app.models import CreateTaskBody, Task, UpdateTaskBody
+from app.audit_events import AuditEventPage, RequestEvent
+from app.models import CreateTaskBody, Task, TaskPage, UpdateTaskBody
+
+BIGINT_DIGITS: Final = 19
+"""The most digits a `bigint` has."""
+
+BIGINT_MAX: Final = 2**63 - 1
+"""The largest `bigint`."""
 
 
 class TenantUnset(ValueError):
@@ -60,13 +66,18 @@ class DatabaseBusy(Exception):
 class TaskStore(Protocol):
     """Exactly what the routes call, and nothing speculative.
 
-    `update` and `remove` report a missing task by return value rather than by raising, and
-    that is not the droppable-return-value that `AGENTS.md` bans. Run it through the test:
+    `list`, `update` and `remove` report a missing task by return value rather than by raising,
+    and that is not the droppable-return-value that `AGENTS.md` bans. Run it through the test:
     the design plans for the condition, the contract names it — `404` with a model, in
     `openapi.json` — and the route reports it. Three out of three, so it stays.
     """
 
-    async def list(self) -> list[Task]: ...
+    async def list(self, after: str | None) -> TaskPage | None:
+        """At most `PAGE_MAX` tasks, newest first: the newest ones when `after` is `None`, else
+        the ones created before the task `after` names. `next` names the last task on the page
+        when more follow it, and is `None` on the last page. `None` when `after` names no task of
+        this tenant."""
+        ...
 
     async def create(self, body: CreateTaskBody) -> Task: ...
 
@@ -84,9 +95,25 @@ class AuditEvents(Protocol):
         """Record one request event in this tenant."""
         ...
 
-    async def list(self) -> list[RecordedAuditEvent]:
-        """Every event, in the order it was recorded."""
+    async def list(self, after: str | None) -> AuditEventPage:
+        """At most `PAGE_MAX` events, in the order they were recorded: the first ones when
+        `after` is `None`, else the ones after the event `after` names. `after` is the `next` of
+        an earlier page. Raises `NoSuchAuditEvent` when `after` names no event of this tenant."""
         ...
+
+
+class NoSuchAuditEvent(LookupError):
+    """`AuditEvents.list` was handed an `after` that names no event of its tenant: not the
+    `next` of one of its pages."""
+
+
+def numbered(after: str) -> int | None:
+    """The number that an audit event's `after` carries, or `None` when `after` is not one:
+    ASCII digits for a number from 1 to `BIGINT_MAX`. Both substrates read a cursor with it."""
+    if not (after.isascii() and after.isdecimal() and len(after) <= BIGINT_DIGITS):
+        return None
+    number = int(after)
+    return number if 0 < number <= BIGINT_MAX else None
 
 
 @dataclass(frozen=True)

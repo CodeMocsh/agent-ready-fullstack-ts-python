@@ -26,6 +26,7 @@ from tests.integration.conftest import (
     acting_on,
     connect,
 )
+from tests.pages import every_event
 
 ACME = "acme"
 GLOBEX = "globex"
@@ -341,7 +342,7 @@ async def test_a_database_from_before_request_events_is_repaired(
         )
     )
 
-    assert [(e.action, e.outcome, e.method, e.route) for e in await events.list()] == [
+    assert [(e.action, e.outcome, e.method, e.route) for e in await every_event(events)] == [
         ("update", "absent", None, None),
         (None, None, "GET", "/tasks"),
     ]

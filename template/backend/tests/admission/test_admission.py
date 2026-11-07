@@ -14,13 +14,14 @@ from starlette.types import Message
 from app import admission, log
 from app.admission import Admission, Limits, Policy
 from app.admission_limits import LIMITS
-from app.audit_events import RecordedAuditEvent, RequestEvent
+from app.audit_events import AuditEventPage, RequestEvent
 from app.deployment import ADMISSION_IN_FLIGHT_ENV, ADMISSION_MODE_ENV, ADMISSION_STREAMS_ENV
 from app.deps import admitted
 from app.identity.shared import Actor, Principal
 from app.refusal import SAID_OF_EACH_BOUND, TooManyRequests
 from app.store import AuditEvents, Database
 from tests.conftest import Logged
+from tests.pages import every_event
 from tests.routed import assembled
 
 WHO: str = "x-test-actor"
@@ -247,7 +248,7 @@ async def test_a_request_over_the_bound_is_refused_and_records_no_request_event(
         other = group.create_task(called(app, "/held", "bob"))
         await held.entered(LIMITS.in_flight + 1)
         held.go.set()
-    recorded = await database.audit_events(TENANT).list()
+    recorded = await every_event(database.audit_events(TENANT))
 
     assert (status_of(refused), retry_after_of(refused)) == (429, b"1")
     assert [status_of(task.result()) for task in [*holding, other]] == [200] * (
@@ -281,8 +282,8 @@ class HeldEvents:
         await self._held.go.wait()
         await self._events.record(event)
 
-    async def list(self) -> list[RecordedAuditEvent]:
-        return await self._events.list()
+    async def list(self, after: str | None) -> AuditEventPage:
+        return await self._events.list(after)
 
 
 async def test_a_request_holds_its_place_until_its_request_event_is_recorded(
@@ -324,7 +325,7 @@ async def test_an_open_stream_holds_a_stream_place_and_no_request_place(
         await held.entered(LIMITS.streams + LIMITS.in_flight)
         held.go.set()
 
-    recorded = await database.audit_events(TENANT).list()
+    recorded = await every_event(database.audit_events(TENANT))
 
     assert status_of(refused) == 429
     assert [status_of(task.result()) for task in [*streams, *requests]] == [200] * (

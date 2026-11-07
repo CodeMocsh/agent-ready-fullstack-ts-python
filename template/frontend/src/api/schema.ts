@@ -114,6 +114,13 @@ export interface components {
             /** Done */
             done: boolean;
         };
+        /** TaskPage */
+        TaskPage: {
+            /** Tasks */
+            tasks: components["schemas"]["Task"][];
+            /** Next */
+            next: string | null;
+        };
         /** UpdateTaskBody */
         UpdateTaskBody: {
             /** Done */
@@ -174,7 +181,9 @@ export interface operations {
     };
     list_tasks_tasks_get: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -187,7 +196,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Task"][];
+                    "application/json": components["schemas"]["TaskPage"];
+                };
+            };
+            /** @description Task not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Too many requests from this actor. Ask again after the seconds in Retry-After */

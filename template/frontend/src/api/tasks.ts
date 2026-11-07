@@ -2,11 +2,13 @@ import { request } from "@/api/client";
 import type { components } from "@/api/schema";
 
 export type Task = components["schemas"]["Task"];
+export type TaskPage = components["schemas"]["TaskPage"];
 export type CreateTaskBody = components["schemas"]["CreateTaskBody"];
 export type UpdateTaskBody = components["schemas"]["UpdateTaskBody"];
 
 export const tasksApi = {
-  list: () => request<Task[]>("/tasks"),
+  list: (after: string | null) =>
+    request<TaskPage>(after === null ? "/tasks" : `/tasks?after=${encodeURIComponent(after)}`),
   create: (body: CreateTaskBody) =>
     request<Task>("/tasks", { method: "POST", body: JSON.stringify(body) }),
   update: (id: string, body: UpdateTaskBody) =>

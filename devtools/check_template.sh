@@ -918,7 +918,8 @@ need_only f docs/adr/template \
     0022-the-connections-of-every-process-fit-inside-max-connections.md \
     0023-the-server-admits-each-actor-s-requests-within-a-bound.md \
     0024-every-read-has-an-outside-cause.md \
-    0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md
+    0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md \
+    0026-every-store-read-is-a-page.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -988,6 +989,12 @@ assert schemas['ClientEvents']['additionalProperties'] is False, 'the public rou
 assert '204' in paths['/tasks/{id}']['delete']['responses']
 for method in ('patch', 'delete'):
     assert 'content' in paths['/tasks/{id}'][method]['responses']['404'], f'{method} 404 declares no body. HTTPException returns one, and the typed handlers cannot mock a response with no model.'
+assert 'content' in paths['/tasks']['get']['responses']['404'], 'GET /tasks 404 declares no body. A cursor that names no task answers one, and the typed handlers cannot mock a response with no model.'
+import re
+page_max = schemas['TaskPage']['properties']['tasks']['maxItems']
+mocked = re.search(r'^export const PAGE_MAX = (\\d+);$', open('frontend/src/mocks/store.ts').read(), re.M)
+assert mocked, 'frontend/src/mocks/store.ts no longer says export const PAGE_MAX = <n>;, so nothing holds the mock page to the contract'
+assert int(mocked.group(1)) == page_max, f'the mock pages {mocked.group(1)} tasks and the contract {page_max}: set PAGE_MAX in frontend/src/mocks/store.ts to the maxItems of TaskPage.tasks in openapi.json'
 "
 need_grep '"/tasks"' openapi.json "The proxy strips the /api prefix, so the spec must not carry it."
 need_grep 'rewrite' frontend/vite.config.ts
@@ -1531,7 +1538,7 @@ run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
 echo "==> assert the read budget refuses a screen whose first draw reads twice"
 TASK_LIST=frontend/src/components/task-list.tsx
-ONE_READ='  const tasks = useQuery({ queryKey: TASKS_KEY, queryFn: tasksApi.list });'
+ONE_READ='  const tasks = useInfiniteQuery(TASK_PAGES);'
 grep -qxF "$ONE_READ" "$TASK_LIST" || fail "$TASK_LIST no longer says '$ONE_READ', so the read budget mutation tests nothing"
 cp "$TASK_LIST" "$WORK/task-list.tsx"
 python3 - "$TASK_LIST" "$ONE_READ" <<'PY'
@@ -1539,7 +1546,7 @@ import pathlib
 import sys
 
 file, line = pathlib.Path(sys.argv[1]), sys.argv[2]
-second = '  useQuery({ queryKey: ["tasks", "again"], queryFn: tasksApi.list, enabled: tasks.data !== undefined });'
+second = '  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "again"], enabled: tasks.data !== undefined });'
 file.write_text(file.read_text(encoding="utf-8").replace(line, f"{line}\n{second}"), encoding="utf-8")
 PY
 budget_refused=0

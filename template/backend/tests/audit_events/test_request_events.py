@@ -26,6 +26,7 @@ from app.main import ROUTERS
 from app.refusal import NoConnectionFree
 from app.request_events import RecordsRequests
 from app.store import Database, DatabaseBusy
+from tests.pages import every_event
 from tests.routed import assembled
 from tests.widgets import router as widgets_router
 
@@ -78,7 +79,7 @@ def an_app(database: Database) -> FastAPI:
 
 def events_in(client: TestClient, app: FastAPI, tenant_id: str) -> list[RecordedAuditEvent]:
     assert client.portal is not None
-    return client.portal.call(app.state.database.audit_events(tenant_id).list)
+    return client.portal.call(every_event, app.state.database.audit_events(tenant_id))
 
 
 def test_each_request_a_principal_made_is_recorded_whatever_it_answered(database: Database) -> None:

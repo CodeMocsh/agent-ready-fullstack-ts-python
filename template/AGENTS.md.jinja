@@ -144,6 +144,9 @@ fans out to both. Each half works without the other's toolchain.
   merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
   in the route and write in the store afterwards. A race only shows on Postgres, so its test goes
   in `tests/integration/`.
+- A store read answers one page: at most `PAGE_MAX` rows, picked in SQL, and the `next` that
+  reads the rest. Never read a whole list to answer part of it. A count, a sum or a group goes in
+  SQL. [adr/template/0026](docs/adr/template/0026-every-store-read-is-a-page.md) says why.
 - Never widen the store's surface to take a tenant or an actor. `Database.store(tenant_id)` is the
   only way to get a store, and no store method takes a tenant. A write acts as the actor
   `audit_events` names: a request's principal, or the actor of the `acting_as` block that work

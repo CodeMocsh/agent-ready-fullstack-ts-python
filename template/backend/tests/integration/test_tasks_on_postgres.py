@@ -22,14 +22,14 @@ def test_the_whole_stack_serves_a_task_round_trip(
     monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
 
     with TestClient(create_app()) as client:
-        assert client.get("/tasks").json() == []
+        assert client.get("/tasks").json() == {"tasks": [], "next": None}
 
         created = client.post("/tasks", json={"title": "Round trip"})
         assert created.status_code == 201
         task = created.json()
         assert task["done"] is False
 
-        assert [row["id"] for row in client.get("/tasks").json()] == [task["id"]]
+        assert [row["id"] for row in client.get("/tasks").json()["tasks"]] == [task["id"]]
 
         patched = client.patch(f"/tasks/{task['id']}", json={"done": True})
         assert patched.status_code == 200
@@ -39,4 +39,4 @@ def test_the_whole_stack_serves_a_task_round_trip(
         assert client.delete("/tasks/not-a-uuid").status_code == 404
 
         assert client.delete(f"/tasks/{task['id']}").status_code == 204
-        assert client.get("/tasks").json() == []
+        assert client.get("/tasks").json() == {"tasks": [], "next": None}

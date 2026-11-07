@@ -41,17 +41,31 @@
       "get": {
         "summary": "List Tasks",
         "operationId": "list_tasks_tasks_get",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/Task"
-                  },
-                  "type": "array",
-                  "title": "Response List Tasks Tasks Get"
+                  "$ref": "#/components/schemas/TaskPage"
                 }
               }
             }
@@ -75,6 +89,26 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "Task not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
         }
       },
@@ -82,14 +116,14 @@
         "summary": "Create Task",
         "operationId": "create_task_tasks_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateTaskBody"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -427,6 +461,35 @@
           "done"
         ],
         "title": "Task"
+      },
+      "TaskPage": {
+        "properties": {
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Tasks"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tasks",
+          "next"
+        ],
+        "title": "TaskPage"
       },
       "UpdateTaskBody": {
         "properties": {

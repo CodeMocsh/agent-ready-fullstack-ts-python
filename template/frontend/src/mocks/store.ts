@@ -1,4 +1,6 @@
-import type { CreateTaskBody, Task, UpdateTaskBody } from "@/api/tasks";
+import type { CreateTaskBody, Task, TaskPage, UpdateTaskBody } from "@/api/tasks";
+
+export const PAGE_MAX = 100;
 
 const SEED: readonly Task[] = [
   { id: "1", title: "Read AGENTS.md", done: true },
@@ -7,7 +9,7 @@ const SEED: readonly Task[] = [
 ];
 
 export interface TaskStore {
-  list: () => Task[];
+  list: (after: string | null) => TaskPage | null;
   create: (body: CreateTaskBody) => Task;
   update: (id: string, body: UpdateTaskBody) => Task | null;
   remove: (id: string) => boolean;
@@ -19,7 +21,17 @@ export function createTaskStore(seed: readonly Task[] = SEED): TaskStore {
   let nextId = seed.length + 1;
 
   return {
-    list: () => [...tasks],
+    list: (after) => {
+      const newest = [...tasks].reverse();
+      const named = after === null ? -1 : newest.findIndex((task) => task.id === after);
+      if (after !== null && named === -1) {
+        return null;
+      }
+      const page = newest.slice(named + 1, named + 1 + PAGE_MAX);
+      const last = page.at(-1);
+      const more = named + 1 + PAGE_MAX < newest.length;
+      return { tasks: page, next: more && last !== undefined ? last.id : null };
+    },
     create: ({ title }) => {
       const task: Task = { id: String(nextId), title, done: false };
       nextId += 1;

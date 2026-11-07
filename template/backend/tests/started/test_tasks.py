@@ -8,7 +8,7 @@ ONLY_IN_THE_FIRST = "only in the first app"
 
 
 def titles(client: TestClient) -> set[str]:
-    return {task["title"] for task in client.get("/tasks").json()}
+    return {task["title"] for task in client.get("/tasks").json()["tasks"]}
 
 
 def test_it_comes_up_on_the_in_memory_substrate() -> None:

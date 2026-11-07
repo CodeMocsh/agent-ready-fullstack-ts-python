@@ -2,14 +2,17 @@ from fastapi import APIRouter, Response
 
 from app.deps import StoreDep
 from app.errors import NoSuchTask, responses
-from app.models import CreateTaskBody, Task, UpdateTaskBody
+from app.models import CreateTaskBody, Task, TaskPage, UpdateTaskBody
 
 router = APIRouter()
 
 
-@router.get("/tasks")
-async def list_tasks(store: StoreDep) -> list[Task]:
-    return await store.list()
+@router.get("/tasks", responses=responses(NoSuchTask))
+async def list_tasks(store: StoreDep, after: str | None = None) -> TaskPage:
+    page = await store.list(after)
+    if page is None:
+        raise NoSuchTask
+    return page
 
 
 @router.post("/tasks", status_code=201)

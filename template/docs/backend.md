@@ -184,6 +184,15 @@ backend/
   method. A store you can hold is a store already scoped.
 - Every index on a tenant table leads with `tenant_id`, or the policy's predicate cannot be
   satisfied and Postgres scans.
+- **A store read answers one page.** A list takes `after` and answers at most `PAGE_MAX` rows
+  and `next`. The SQL reads `PAGE_MAX + 1` rows on an index that leads with `tenant_id` and ends
+  with the column the list is ordered by, such as `tasks_seq_idx`. A task cursor names a task by
+  its id, never by `seq`. The audit events, which no route serves, page by `seq`. A task cursor
+  that names no task of the tenant answers `None`, and the route answers `404`. An audit cursor
+  that names no event raises `NoSuchAuditEvent`. `tests/store_contract.py` holds both substrates
+  to it, and `tests/integration/test_pages_on_postgres.py` holds Postgres to the `LIMIT`. A test
+  that needs the whole list reads it with `tests/pages.py`.
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
   the row makes Postgres evaluate it for every row, and the index cannot help.
 - `MemoryDatabase` stays. The gate runs on it and must not need a daemon, and one implementation

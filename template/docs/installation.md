@@ -381,6 +381,23 @@ What to expect, because it is not all free:
   in `app/store/__init__.py` now has `time_waits`. If a substrate of yours counts its
   connections, give it `time_waits`. Without it, the app refuses to start with telemetry on,
   and the error names `time_waits`.
+- **From 0.62.0 every store read is a page.** `GET /tasks` answers `{tasks, next}`, newest
+  first, and takes `after`, the id of the last task on the page before. A cursor that names no
+  task answers `404`. `TaskStore.list` takes `after` and answers a page of at most `PAGE_MAX`
+  rows, or `None`. `AuditEvents.list` takes `after` and answers a page, or raises
+  `NoSuchAuditEvent`. `PAGE_MAX` is in `app.models`. Then:
+  - Give each list of your own stores the same shape, and run your store contract suite.
+  - Where your code read a whole list, read the page it answers. A test that needs the whole list
+    reads it with `every_task` or `every_event` from `tests/pages.py`.
+  - If you merged `src/components/task-list.tsx` or `src/mocks/` by hand, take the template's
+    `useInfiniteQuery` and the paged mock store.
+  - `tasksApi.list` takes `after`. Code that reads the `["tasks"]` cache holds
+    `InfiniteData<TaskPage>`, not `Task[]`. A `page.route` in an e2e spec that answers
+    `/api/tasks` answers `{tasks, next}`.
+  - Run `make openapi`, and commit `openapi.json` and `frontend/src/api/schema.ts`.
+  - In `docs/backend.md`, take the template's bullet that starts "A store read answers one page".
+    In `docs/frontend.md`, take the bullet that starts "A list is read a page at a time".
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
