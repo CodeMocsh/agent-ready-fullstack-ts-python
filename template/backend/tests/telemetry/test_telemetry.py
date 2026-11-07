@@ -21,7 +21,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from app import serve, telemetry
 from app.deployment import RESOURCE_ATTRIBUTES_ENV
-from app.jobs import KINDS
+from app.jobs import kinds
 from app.main import ROUTERS
 from app.store import Connections, Database
 from app.store.memory import MemoryDatabase
@@ -368,7 +368,7 @@ def test_a_substrate_that_counts_its_connections_and_times_no_wait_is_refused(
     untrusting: Instrumented,
 ) -> None:
     with pytest.raises(TypeError, match="time_waits"):
-        untrusting.instruments.observe(CountsItsConnections(seed_tenant="t", kinds=KINDS))
+        untrusting.instruments.observe(CountsItsConnections(seed_tenant="t", kinds=kinds))
 
 
 @pytest.mark.usefixtures("untrusting")

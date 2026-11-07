@@ -219,7 +219,7 @@ _Avoid_: task (the example resource is a task), queue item, message.
 **Lease**:
 A worker's claim on a job, for a time. A claim takes a job and a new lease token, and counts one
 attempt. Each transaction of the job holds the claim, and fails with `LeaseLost` when the lease
-ended or another worker claimed the job.
+ended, another worker claimed the job, or the transaction is for another tenant.
 _Avoid_: lock (a lease ends on its own), reservation.
 
 **Worker**:

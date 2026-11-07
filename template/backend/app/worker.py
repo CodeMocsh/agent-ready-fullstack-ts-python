@@ -19,7 +19,7 @@ import signal
 from collections.abc import Coroutine
 from typing import Any, Final
 
-from app import jobs, log
+from app import log
 from app.audit_events import acting_as
 from app.environment import refuse_development_settings
 from app.loop_watch import LoopWatch
@@ -32,12 +32,10 @@ from app.store.jobs import (
     Claim,
     Deferred,
     Failed,
-    Kinds,
     LeaseLost,
     attempted,
     fenced,
     handler_of,
-    store_of_the_job,
 )
 from app.store.pg import PostgresDatabase
 from app.store.pg_jobs import JobClaims, WakesLost
@@ -54,16 +52,14 @@ class WorkerNeedsPostgres(RuntimeError):
     """The worker was started on the memory substrate, whose jobs only the web process can see."""
 
 
-async def work(
-    claims: JobClaims, kinds: Kinds, *, at_once: int = AT_ONCE, sweep: float = SWEEP_SECONDS
-) -> None:
-    """Claim and run the jobs of `kinds`, `at_once` at a time, until cancelled. Raises
-    `WakesLost` when the connection that hears each job asked for ends."""
+async def work(claims: JobClaims, *, at_once: int = AT_ONCE, sweep: float = SWEEP_SECONDS) -> None:
+    """Claim and run the jobs of each kind of `claims.database`, `at_once` at a time, until
+    cancelled. Raises `WakesLost` when the connection that hears each job asked for ends."""
     wake = asyncio.Event()
     try:
         async with claims.listening(wake.set) as ended, asyncio.TaskGroup() as group:
             for _ in range(at_once):
-                _ = group.create_task(_slot(claims, kinds, wake, sweep))
+                _ = group.create_task(_slot(claims, wake, sweep))
             _ = group.create_task(_until_lost(ended))
     except* WakesLost as lost:
         raise WakesLost(
@@ -77,7 +73,8 @@ async def _until_lost(ended: asyncio.Event) -> None:
     raise WakesLost("the LISTEN connection ended")
 
 
-async def _slot(claims: JobClaims, kinds: Kinds, wake: asyncio.Event, sweep: float) -> None:
+async def _slot(claims: JobClaims, wake: asyncio.Event, sweep: float) -> None:
+    kinds = claims.database.kinds
     while True:
         wake.clear()
         try:
@@ -87,7 +84,7 @@ async def _slot(claims: JobClaims, kinds: Kinds, wake: asyncio.Event, sweep: flo
                 await _woken(wake, sweep if coming is None else min(sweep, max(coming, 0.0)))
             else:
                 wake.set()
-                await run(claims, kinds, claim)
+                await run(claims, claim)
         except DatabaseBusy as busy:
             log.database_busy(type(busy).__name__)
             await backoff(busy.retry_after)
@@ -101,26 +98,26 @@ async def _woken(wake: asyncio.Event, within: float) -> None:
         return
 
 
-async def run(claims: JobClaims, kinds: Kinds, claim: Claim) -> None:
+async def run(claims: JobClaims, claim: Claim) -> None:
     """Run one attempt of the job `claim` holds, and end the job, or make it ready again. A lost
     lease stops the attempt, and `log.lease_lost` names it."""
     try:
         with fenced(claim):
             asked = await claims.asked(claim)
             with acting_as(asked.actor):
-                await _attempt(claims, kinds, claim, asked)
+                await _attempt(claims, claim, asked)
     except LeaseLost:
         log.lease_lost(kind=claim.kind, job=claim.id, attempt=claim.attempts)
 
 
-async def _attempt(claims: JobClaims, kinds: Kinds, claim: Claim, asked: Asked) -> None:
+async def _attempt(claims: JobClaims, claim: Claim, asked: Asked) -> None:
     if claim.attempts > MAX_ATTEMPTS:
         await claims.dead(claim, ATTEMPTS_SPENT)
         log.job_dead(kind=claim.kind, job=claim.id, attempts=MAX_ATTEMPTS, failure=ATTEMPTS_SPENT)
         return
     attempt = attempted(
-        handler_of(kinds, claim.kind),
-        store_of_the_job(claims.database, claim.tenant_id),
+        handler_of(claims.database.kinds, claim.kind),
+        claim.tenant_id,
         asked,
         job=claim.id,
         kind=claim.kind,
@@ -173,22 +170,22 @@ async def _main() -> None:
         log.working(
             substrate=database.name,
             schema=database.schema,
-            kinds=tuple(jobs.KINDS),
+            kinds=tuple(database.kinds),
             at_once=AT_ONCE,
         )
-        await _until_stopped(JobClaims(database), jobs.KINDS)
+        await _until_stopped(JobClaims(database))
     finally:
         await database.close()
 
 
-async def _until_stopped(claims: JobClaims, kinds: Kinds) -> None:
+async def _until_stopped(claims: JobClaims) -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for stopping in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(stopping, stop.set)
     with LoopWatch(None):
         async with asyncio.TaskGroup() as group:
-            working = group.create_task(work(claims, kinds))
+            working = group.create_task(work(claims))
             _ = await stop.wait()
             _ = working.cancel()
 

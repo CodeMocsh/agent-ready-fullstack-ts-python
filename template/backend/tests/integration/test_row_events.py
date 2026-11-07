@@ -14,7 +14,7 @@ from asgi_correlation_id import correlation_id
 
 from app.audit_events import RequestEvent, acting_as
 from app.identity.shared import Actor
-from app.jobs import KINDS
+from app.jobs import kinds
 from app.store import Database
 from app.store.acting import MIGRATION_ACTOR
 from app.store.budget import Draws
@@ -263,7 +263,7 @@ async def one_connection(provisioned: Provisioned) -> AsyncIterator[Database]:
         dsn=provisioned.app_dsn,
         schema=provisioned.schema,
         draws=Draws(instances=1, in_process={}, outside={}, pool=1),
-        kinds=KINDS,
+        kinds=kinds,
     )
     await database.check()
     try:

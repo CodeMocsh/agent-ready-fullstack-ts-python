@@ -1,11 +1,12 @@
 """The tenant scope is not something a route can forget.
 
 `Database.store(tenant_id)` is the only way to obtain a `TaskStore`. `deps.get_store` is the
-only caller of it for a request, and `store_of_the_job` for a job, so a route receives a store
-already scoped to its request's tenant, a job's handler one scoped to the job's tenant, and each
-has no unscoped one to reach for instead. A type checker cannot see either half of that: a
-route that resolved the database itself and asked for another tenant's store would compile,
-serve, and leak. Row-level security is the backstop and this is the door.
+only caller of it for a request, so a route receives a store already scoped to its request's
+tenant, and has no unscoped one to reach for instead. For a job, the only caller is a handler
+that `kinds` in `app/jobs.py` builds, and it passes the tenant that the handler gets. A type
+checker cannot see any of that: a route that resolved the database itself and asked for another
+tenant's store would compile, serve, and leak. Row-level security is the backstop and this is
+the door.
 """
 
 import ast
@@ -15,8 +16,10 @@ from typing import NamedTuple
 
 APP = Path(__file__).resolve().parents[2] / "app"
 DEPS_MODULE = "deps.py"
-SCOPING_FUNCTIONS = frozenset({(DEPS_MODULE, "get_store"), ("jobs.py", "store_of_the_job")})
-"""Where a store is obtained: for a request, from its principal, and for a job, from its claim."""
+JOBS_MODULE = "jobs.py"
+SCOPING_FUNCTIONS = frozenset({(DEPS_MODULE, "get_store"), (JOBS_MODULE, "kinds")})
+"""Where a store is obtained: for a request, from its principal, and for a job, from the tenant
+its handler gets."""
 SUBSTRATE_FUNCTION = "database_of"
 
 
@@ -45,7 +48,7 @@ def _sites_where(matches: Callable[[ast.expr], bool]) -> list[Site]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         holder = _holder_of_each_node(tree)
         found.extend(
-            Site(path.name, holder.get(node, "<module level>"), node.lineno)
+            Site(str(path.relative_to(APP)), holder.get(node, "<module level>"), node.lineno)
             for node in ast.walk(tree)
             if isinstance(node, ast.expr) and matches(node)
         )
@@ -73,9 +76,47 @@ def test_a_store_is_obtained_in_one_place_and_that_place_resolves_the_tenant() -
     stray = [c for c in calls if (c.module, c.function) not in SCOPING_FUNCTIONS]
     assert not stray, (
         f"a store is obtained outside {sorted(SCOPING_FUNCTIONS)}: {stray}. Take it from the "
-        "request through StoreDep, or in a job from its handler's argument. Each resolves the "
-        "tenant for you."
+        "request through StoreDep, or for a job in kinds() in app/jobs.py, from the job's tenant."
     )
+
+
+def test_a_job_obtains_a_store_only_for_the_tenant_of_the_job() -> None:
+    """`kinds` holds the whole `Database`, so a handler there could pass any string to `store()`.
+
+    Postgres refuses a transaction of a job for another tenant, and the memory substrate does
+    not. Each call passes the first parameter of the function that encloses it: in a handler, the
+    job's tenant. The test reads each call, not each caller: a helper that takes the tenant moves
+    the rule to the handlers that call it.
+    """
+    tree = ast.parse((APP / JOBS_MODULE).read_text(encoding="utf-8"))
+    handler_of: dict[ast.AST, ast.Lambda | ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                handler_of[child] = node
+    calls = [
+        node for node in ast.walk(tree) if isinstance(node, ast.expr) and _obtains_a_store(node)
+    ]
+    stray = [
+        call.lineno
+        for call in calls
+        if not (
+            isinstance(call, ast.Call)
+            and call.args
+            and isinstance(call.args[0], ast.Name)
+            and call in handler_of
+            and call.args[0].id == _first_parameter(handler_of[call])
+        )
+    ]
+    assert not stray, (
+        f"{JOBS_MODULE} obtains a store on lines {stray} for something other than the tenant its "
+        "handler gets. Take the tenant from the handler's first parameter."
+    )
+
+
+def _first_parameter(function: ast.Lambda | ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    parameters = [*function.args.posonlyargs, *function.args.args]
+    return parameters[0].arg if parameters else None
 
 
 def _is_the_app_state(node: ast.expr) -> bool:
