@@ -90,6 +90,8 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
 - **Server events merge.** `invalidateForServerEvent` marks matching queries stale. It waits for
   an active read before it starts a trailing read. Events during the trailing read remain pending.
   Inactive queries stay stale until they mount. Completion and reconnect events use the same function.
+  An ordinary read canceled before its answer may resume once under the same cause.
+  A second cancellation needs a new cause. Mutation grants do not gain a spare continuation.
   Read completion alone permits no read. The returned promise settles when pending active reads settle.
   Handle its rejection at the stream boundary. The query cache also reports query failures.
 - **Event reads share a budget.** Pass each query function's `signal` to every API read it starts.
@@ -99,12 +101,18 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   The default policy lives in `src/api/read-budget.ts`. Pass a policy as the second argument to
   `createQueryClient` when deployment measurements require different limits.
   The interval also sets the minimum time between event refreshes of one query.
+  Navigation, focus, reconnect and input release reads already waiting for event admission.
+  Those reads consume that outside cause. Later events keep the event budget.
   Reads without an event cause do not use the event budget.
   Calls that omit the signal do not use it either. Test actual admitted parts across the whole screen.
   The budget belongs to one query client. It cannot reserve capacity across tabs or actors.
   Keep capacity for other traffic in the server admission limit.
-  A canceled refresh rejects its promise. Its event cause can resume once on a later read.
-  Another cancellation needs a new cause. Removing the query discards its pending refresh.
+  A canceled refresh rejects with `EventReadCanceled`. Stopping the client rejects with
+  `EventRefreshStopped`. A stream may handle these lifecycle reasons without reporting a failure.
+  Other errors, including transport aborts, remain failures.
+  An admitted event read can resume once after cancellation. A wait canceled before admission
+  keeps its allowance. Canceling an admitted continuation needs a new cause.
+  Removing the query discards its pending refresh.
   Stop `followNavigations` and clear the old query client when a session ends.
   [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
 - **A refusal that names a wait holds every request.** `request` in `src/api/client.ts` reads
