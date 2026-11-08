@@ -129,7 +129,7 @@ every resolver must then live in a module the project does not replace.
   a setting and nothing else. A rule per user or per project needs a join that a policy may not
   do. The database owns the tenant boundary. The route owns everything finer.
 - The git hook runs the guarantee before a commit. In a project that ships
-  `.github/workflows/ci.yml`, the workflow runs `make gate` again after a push, which covers a
+  `.github/workflows/ci.yml`, the workflow runs `make suite` after a push, which covers a
   clone where nobody ran `make hooks`.
 - A route that the walk cannot drive fails the test. It is not skipped. A websocket has no HTTP
   methods, and `test_no_route_shape_escapes_being_driven` fails on one. A mount whose routes the

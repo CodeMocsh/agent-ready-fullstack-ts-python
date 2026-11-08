@@ -1,4 +1,4 @@
-"""The GitHub workflow runs the gate the git hook runs, and no copy of it.
+"""The GitHub workflow runs the full suite, including the commit checks.
 
 This module ships only with the workflow: a project that answers `github_ci=false` gets neither.
 """
@@ -17,16 +17,8 @@ def workflows() -> list[tuple[Path, str]]:
     return [(path, without_comments(path.read_text(encoding="utf-8"))) for path in found]
 
 
-def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
-    """A workflow that runs its own list of steps drifts from `make gate` silently, in
-    the direction of checking less, and the drift shows up as a green push that a commit would
-    have refused. Run the target instead. If it needs to run only part of the gate, make that
-    part a target too.
-
-    The body is read with comments stripped, so a workflow naming the target in a comment and
-    running `true` does not satisfy this. Neither does naming `check_template.sh`, which an
-    earlier version accepted: that is a script in the generator repository and not a file this
-    project contains, so it could never be the right answer here and only bought a pass."""
+def test_a_workflow_runs_the_suite_rather_than_a_copy_of_it():
+    """The workflow calls the full suite target instead of copying its commands."""
     shipped = workflows()
 
     assert shipped, (
@@ -37,8 +29,8 @@ def test_a_workflow_runs_the_gate_rather_than_a_copy_of_it():
     )
 
     for path, body in shipped:
-        assert "make gate" in body, (
-            f"{path.relative_to(ROOT)} does not run `make gate`. A workflow that "
-            f"re-lists the gate's steps is a second copy of the gate, and the copy is what "
+        assert "make suite" in body, (
+            f"{path.relative_to(ROOT)} does not run `make suite`. A workflow that "
+            f"re-lists the full suite's steps is a second copy of the full suite, and the copy is what "
             f"goes stale -- point it at the target, or add a target for the part it runs."
         )

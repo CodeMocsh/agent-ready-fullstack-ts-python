@@ -1,27 +1,5 @@
 name: CI
 
-# The gate runs `make gate` -- the list the git hook runs through devtools/gate.sh. Not
-# the pre-commit target: its runner skips a half that is not installed, and here a missing half
-# must fail.
-#
-# Not a list of steps that happens to match the gate. A re-listed copy drifts, always in
-# the direction of checking less, and the drift surfaces as a green push that a commit
-# would have refused. backend/tests/test_workflow.py fails on a workflow that does not name
-# the target, and it reads this file with comments stripped, so naming it here would not
-# satisfy the check.
-#
-# The gate is deliberately the fast tier: lint, the contract artifacts, and the tests that
-# need nothing fetched or started. Add a tier to that job and the check people wait on stops
-# being the check they can run.
-#
-# A second job runs `make db-test`. That tier needs Docker or the Postgres server binaries,
-# and the runner has both. It is the one place tenant isolation is checked against a real
-# Postgres. The job adds a status of its own rather than time to the gate, and a laptop with
-# neither never runs the tier -- so without this job nothing does. The browser tiers stay
-# out: `make test-e2e` needs a browser, and the live one needs `make dev` running beside it.
-# So does `make observe-test`: it checks the viewer `make observe` starts on a laptop, which
-# no deployment runs.
-
 on:
   push:
     branches: ["main", "master"]
@@ -76,7 +54,7 @@ jobs:
       # The script `make install` runs, without a browser, which the gate does not use.
       - run: sh devtools/install.sh
 
-      - run: make gate
+      - run: make suite
 
   db:
     runs-on: ubuntu-latest

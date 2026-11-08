@@ -7,7 +7,8 @@ E2E_BROWSERS ?= chromium
 
 .DEFAULT_GOAL := default
 
-.PHONY: default install hooks pre-commit gate secrets lint lint-check test test-fast test-contract \
+.PHONY: default install hooks pre-commit gate gate-commit suite test-commit \
+        test-commit-frontend test-commit-backend secrets lint lint-check test test-fast test-contract \
         test-e2e test-e2e-live db-test test-contract-db db db-demo migrate roles schema \
         dev dev-frontend observe observe-test \
         dev-backend openapi \
@@ -26,6 +27,19 @@ pre-commit:
 	@sh devtools/gate.sh
 
 gate: secrets lint-check openapi-check test
+
+gate-commit: secrets lint-check openapi-check test-commit
+
+suite: gate build
+
+test-commit: test-commit-frontend test-commit-backend
+	@echo "Commit tests passed. Started-app tests, broader DOM tests, live contracts and build did not run. Run make suite."
+
+test-commit-frontend:
+	pnpm -C frontend test:commit
+
+test-commit-backend:
+	cd backend && uv run --no-sync pytest -q --ignore=tests/started
 
 secrets:
 	@sh devtools/secrets.sh

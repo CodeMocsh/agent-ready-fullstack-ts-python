@@ -16,18 +16,26 @@ if command -v uv >/dev/null 2>&1 && [ -d backend/.venv ]; then
     has_backend=1
 fi
 
-if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
-    passed="$(git rev-parse --git-path gate-passed)"
+reuse_pass() {
+    passed="$(git rev-parse --git-path gate-commit-passed)"
     before="$(sh devtools/worktree-tree.sh)"
     if [ -f "$passed" ] && [ "$(cat "$passed")" = "$before" ]; then
-        echo "pre-commit: tree $before already passed the gate in this checkout; not running it again" >&2
+        echo "pre-commit: tree $before already passed the commit gate in this checkout; not running it again" >&2
         exit 0
     fi
+}
+
+if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
+    reuse_pass
 fi
 
 lock="/tmp/{{ package_name }}-pre-commit-$(id -u).lock"
 exec 9>>"$lock"
 perl devtools/hold-the-gate.pl "$lock"
+
+if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
+    reuse_pass
+fi
 
 started=$(date +%s)
 
@@ -47,7 +55,7 @@ report_the_cost() {
     echo "pre-commit: ${cpu} CPU-seconds of a ${BUDGET} budget, ${elapsed}s on the clock" >&2
     if [ "$cpu" -gt "$BUDGET" ]; then
         echo "  Over budget. Something uses more CPU. Find it before it becomes normal." >&2
-        echo "  To find it, run \`time make <target>\` for each target on the Makefile's \`gate:\` line." >&2
+        echo "  To find it, run \`time make <target>\` for each target on the Makefile's \`gate-commit:\` line." >&2
         echo "  BUDGET lives in devtools/gate.sh. Raise it only in a commit that says what uses more CPU and why." >&2
         return 1
     fi
@@ -55,7 +63,7 @@ report_the_cost() {
 }
 
 if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
-    make -s gate 9>&- || exit 1
+    make -s gate-commit 9>&- || exit 1
     if [ "$(sh devtools/worktree-tree.sh)" = "$before" ]; then
         echo "$before" >"$passed"
     fi
@@ -69,12 +77,12 @@ sh devtools/secrets.sh 9>&- || failed=1
 
 if [ "$has_frontend" = 1 ]; then
     pnpm -C frontend lint:check 9>&- || failed=1
-    pnpm -C frontend test 9>&- || failed=1
+    make -s test-commit-frontend 9>&- || failed=1
 fi
 
 if [ "$has_backend" = 1 ]; then
     (cd backend && uv run --no-sync python devtools/lint.py --check) 9>&- || failed=1
-    (cd backend && uv run --no-sync pytest -q) 9>&- || failed=1
+    make -s test-commit-backend 9>&- || failed=1
 fi
 
 echo "" >&2
@@ -82,7 +90,7 @@ echo "pre-commit: PARTIAL RUN -- this commit was not checked by the whole gate."
 [ "$has_frontend" = 1 ] || echo "  frontend        SKIPPED (no pnpm, or run 'make install')" >&2
 [ "$has_backend" = 1 ] || echo "  backend         SKIPPED (no uv, or run 'make install')" >&2
 echo "  openapi-check   SKIPPED (needs both halves)" >&2
-echo "  contract suite  SKIPPED (needs both halves)" >&2
+echo "  full suite      NOT RUN (run make suite with both halves installed)" >&2
 echo "Run 'make install', then 'make pre-commit', to check it properly." >&2
 
 report_the_cost || failed=1

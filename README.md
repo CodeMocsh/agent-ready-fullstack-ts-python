@@ -113,7 +113,7 @@ generated file belongs in git is [adr/0002](docs/adr/0002-code-first-contract-wi
   instruction to run the app and read a screenshot rather than infer behaviour from JSX.
 - **A contract suite that runs twice** — identical assertions against the mock handlers and
   against the running backend through the dev proxy. Both runs are in the generated project's
-  `make pre-commit`, the second being the one check that needs both toolchains at once.
+  `make suite`. The live run needs both toolchains.
 - **A dependency-free agent guard** (`.claude/hooks/agent_guard.py`) — a `PreToolUse` hook
   blocking a small set of unambiguously dangerous actions. Standard-library Python, so it works before
   either half has been installed. Fails open. A seatbelt, not a security scanner.

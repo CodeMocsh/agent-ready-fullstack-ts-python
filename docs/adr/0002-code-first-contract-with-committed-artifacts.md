@@ -39,8 +39,8 @@ Paths under `backend/` and `frontend/` name files in a generated project.
   through `app.openapi()`, with no server. The `openapi:types` script in `frontend/package.json`
   runs a pinned `openapi-typescript` over it.
 - `make openapi-check` regenerates both artifacts and fails on any diff. Its message names
-  `make openapi`. `make gate` includes it, and the generated `.github/workflows/ci.yml` runs
-  `make gate` in one job with both toolchains.
+  `make openapi`. `make gate` includes it. The generated `.github/workflows/ci.yml` runs
+  `make suite`, which includes `make gate`, in one job with both toolchains.
 - `devtools/check_template.sh` runs `make openapi` on every generated project and fails if either
   committed artifact changes.
 - Nobody edits a contract artifact by hand, and that includes a merge conflict. The rule is in

@@ -53,7 +53,8 @@ against both implementations to prove they still agree.
 ## Everyday commands
 
 ```bash
-make pre-commit     # the gate: lint, both test suites, the contract, and the artifacts
+make pre-commit     # static checks and commit tests, once per tree
+make suite          # full suite, live contracts and frontend build
 make lint           # both halves
 make test           # both halves, then the contract suite across both
 make test-e2e       # opt-in: Playwright in mock mode, in a real browser
@@ -62,18 +63,14 @@ make build          # production build of the frontend
 make upgrade        # update dependencies, then regenerate the contract
 ```
 
+The git hook runs `make gate-commit` through `make pre-commit`. `make suite` runs the full
+check and builds the frontend. Neither needs a browser or a database daemon.
 {% if github_ci -%}
-`make gate` is what the git hook runs before a commit, through `make pre-commit`, and what
-`.github/workflows/ci.yml` runs after a push — one target, two moments, so a commit that
-skipped the hook is still checked. It needs no browser, no database daemon and no second
-terminal. The opt-in targets each need one of those, which is why they are opt-in. `ci.yml`
-also runs `make db-test` in a job of its own; nothing runs the others, so nothing will tell you
-that you did not run them.
+The GitHub workflow runs `make suite` on pull requests and pushes. It runs `make db-test`
+in a separate job. The other opt-in tiers need a caller of their own.
 {%- else -%}
-`make gate` is what the git hook runs before a commit, through `make pre-commit`. It needs no
-browser, no database daemon and no second terminal. The opt-in targets each need one of those,
-which is why they are opt-in. Nothing runs them, so nothing will tell you that you did not run
-them.
+Configure your CI or release build to run `make suite`. It must stop promotion when that
+check fails or has no result. The opt-in tiers need callers of their own.
 {%- endif %}
 
 [AGENTS.md](AGENTS.md) is the map: the principles, the rules nothing checks, and an index into
