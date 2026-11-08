@@ -1,26 +1,37 @@
 """The pool: it is sized from the connection budget, every wait on Postgres has a bound that
-raises, a connection the server refuses is a refusal of one request, and its connections can be
-counted."""
+raises, a connection the server refuses or ends is a refusal of one unit of work, and its
+connections can be counted."""
 
 import asyncio
 import math
 import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
+from app.audit_events import acting_as
 from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, STATEMENT_TIMEOUT_ENV
+from app.identity.shared import SENTINEL_TENANT
 from app.jobs import kinds
 from app.store import Connections
 from app.store.budget import Draws, OverBudget
 from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
-from app.store.pg import TIMEOUTS, AcquireTimedOut, ConnectionRefused, PostgresDatabase, Timeouts
+from app.store.pg import (
+    TIMEOUTS,
+    AcquireTimedOut,
+    ConnectionLost,
+    ConnectionRefused,
+    PostgresDatabase,
+    Timeouts,
+)
 from app.wiring import build
 from tests.clock import elapse
 from tests.event_loop import Reported, hold_the_event_loop
-from tests.integration.conftest import Provisioned, connect
+from tests.integration.conftest import THE_SUITE, Provisioned, connect, end_session
+from tests.pages import every_task
 
 SHORT = 0.2
 
@@ -77,10 +88,10 @@ async def test_a_transaction_left_idle_is_ended_by_postgres_and_its_connection_r
 ) -> None:
     database = one_connection_under(Timeouts(idle_in_transaction=SHORT))
 
-    async with database.connection() as conn:
-        await conn.transaction().start()
-        await elapse(1)
-        with pytest.raises(driver().InterfaceError):
+    with pytest.raises(ConnectionLost, match="InterfaceError"):
+        async with database.connection() as conn:
+            await conn.transaction().start()
+            await elapse(1)
             await conn.execute("SELECT 1")
 
     assert await database.check() == known_version()
@@ -105,7 +116,7 @@ async def test_a_transaction_ended_by_postgres_while_the_loop_was_busy_gives_its
 
     ended, _ = await asyncio.gather(held(), busy(), return_exceptions=True)
 
-    assert isinstance(ended, driver().InterfaceError)
+    assert isinstance(ended, ConnectionLost)
     assert await database.check() == known_version()
     assert asyncio_reports.held_on_purpose() != []
 
@@ -262,3 +273,52 @@ async def test_a_connection_the_server_refuses_is_a_refusal_of_one_request(
 
     assert refused.value.retry_after == math.ceil(TIMEOUTS.acquire)
     assert len(timed) == 1
+
+
+async def _ended_after(admin_dsn: str, pid: int) -> None:
+    await elapse(SHORT)
+    await end_session(admin_dsn, pid)
+
+
+KILLS = 3
+"""More kills than the pool of one has slots, so a slot that one kill keeps fails the next."""
+
+
+async def test_a_connection_ended_during_a_statement_is_lost_and_gives_its_slot_back(
+    provisioned: Provisioned, one_connection: PostgresDatabase
+) -> None:
+    for _ in range(KILLS):
+        with pytest.raises(ConnectionLost) as lost:
+            async with one_connection.connection() as conn:
+                pid = await conn.fetchval("SELECT pg_backend_pid()")
+                ending = asyncio.get_running_loop().create_task(
+                    _ended_after(provisioned.admin_dsn, pid)
+                )
+                try:
+                    await conn.execute("SELECT pg_sleep(3)")
+                finally:
+                    await ending
+
+        assert lost.value.retry_after == math.ceil(TIMEOUTS.acquire)
+
+    assert await one_connection.check() == known_version()
+
+
+async def test_a_transaction_whose_connection_ends_between_statements_writes_nothing(
+    provisioned: Provisioned, one_connection: PostgresDatabase
+) -> None:
+    for _ in range(KILLS):
+        with acting_as(THE_SUITE), pytest.raises(ConnectionLost):
+            async with one_connection.scoped(SENTINEL_TENANT) as conn:
+                await conn.execute(
+                    "INSERT INTO tasks (id, tenant_id, title) VALUES ($1, $2, 'lost')",
+                    uuid4(),
+                    SENTINEL_TENANT,
+                )
+                await end_session(
+                    provisioned.admin_dsn, await conn.fetchval("SELECT pg_backend_pid()")
+                )
+                await elapse(SHORT)
+                await conn.execute("SELECT 1")
+
+    assert await every_task(one_connection.store(SENTINEL_TENANT)) == []

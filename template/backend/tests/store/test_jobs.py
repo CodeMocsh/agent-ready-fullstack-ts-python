@@ -7,7 +7,7 @@ import pytest
 
 from app.identity.shared import Actor
 from app.models import JsonObject
-from app.store import DatabaseBusy
+from app.store import DatabaseUnavailable
 from app.store.jobs import Asked, Deferred, Failed, Leases, UnstorableJson, attempted, encoded
 
 ASKED = Asked(input={}, actor=Actor(issuer="a-test", subject="the-asker", name="The asker"))
@@ -53,11 +53,13 @@ def test_a_character_past_the_surrogates_is_stored() -> None:
     assert encoded({"text": "\U0001f600"}) == '{"text": "\\ud83d\\ude00"}'
 
 
-async def test_an_attempt_that_gets_no_connection_is_deferred_by_the_refusal() -> None:
-    async def busy(_tenant_id: str, _input: JsonObject) -> JsonObject:
-        raise DatabaseBusy("no connection", retry_after=7)
+async def test_an_attempt_the_database_did_not_serve_is_deferred_by_the_refusal() -> None:
+    async def unavailable(_tenant_id: str, _input: JsonObject) -> JsonObject:
+        raise DatabaseUnavailable("the connection ended", retry_after=7)
 
-    assert await attempted(busy, "a-tenant", ASKED, job="1", kind="busy", attempt=1) == Deferred(7)
+    assert await attempted(
+        unavailable, "a-tenant", ASKED, job="1", kind="unavailable", attempt=1
+    ) == Deferred(7)
 
 
 async def test_an_attempt_that_answers_what_cannot_be_stored_fails() -> None:

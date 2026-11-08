@@ -176,10 +176,25 @@ def part_left(*, route: str | None, reason: str, parts: int) -> None:
     _LOG.info("part left its group", route=route, reason=reason, parts=parts)
 
 
-def database_busy(refusal: str) -> None:
-    """A request got no database connection, and is refused with a `503`. `refusal` names the
-    class of the failure."""
-    _LOG.warning("database busy", refusal=refusal)
+def database_unavailable(refusal: str, cause: str | None) -> None:
+    """A unit of work met `DatabaseUnavailable`: a request is refused with a `503`, an attempt of a
+    job is deferred, or a step of an attempt or a renewal of its lease waits to run again.
+    `refusal` names its class, and `cause` the class of the driver's error, `None` when there is
+    none."""
+    _LOG.warning("database unavailable", refusal=refusal, cause=cause)
+
+
+def loop_waits(*, loop: str, refusal: str, cause: str | None, unavailable_seconds: float) -> None:
+    """A round of the loop `loop` met `DatabaseUnavailable`, and the loop waits to run it again.
+    `refusal` and `cause` are as in `database_unavailable`. `unavailable_seconds` is how long the
+    database has been unavailable to the loop."""
+    _LOG.warning(
+        "loop waits for the database",
+        loop=loop,
+        refusal=refusal,
+        cause=cause,
+        unavailable_seconds=round(unavailable_seconds, 1),
+    )
 
 
 def identity_verified() -> None:
@@ -337,6 +352,12 @@ def job_dead(*, kind: str, job: str, attempts: int, failure: str) -> None:
     """The job `job` of `kind` failed on each of its `attempts` attempts, and runs no more.
     `failure` names the class of the last error."""
     _LOG.error("job dead", kind=kind, job=job, attempts=attempts, failure=failure)
+
+
+def attempt_abandoned(*, kind: str, job: str, attempt: int) -> None:
+    """The database did not serve a step of attempt `attempt` of the job `job` of `kind` before
+    its lease would end. The lease ends, and the next claim runs the job again."""
+    _LOG.warning("attempt abandoned", kind=kind, job=job, attempt=attempt)
 
 
 def lease_lost(*, kind: str, job: str, attempt: int) -> None:

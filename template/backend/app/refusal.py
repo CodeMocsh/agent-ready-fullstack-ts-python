@@ -87,8 +87,9 @@ class UnstorableInput(ApiError):
 
 @final
 class NoConnectionFree(ApiError):
-    """A request that got no database connection in time. `app/main.py` answers it with a
-    `Retry-After`, and every tenant route declares it. `docs/adr/template/0022`."""
+    """A request that the database did not serve: no connection came in time, a new one did not
+    open, or its connection ended. `app/main.py` answers it with a `Retry-After`, and every tenant
+    route declares it. `docs/adr/template/0022`."""
 
     status = 503
     description = "No database connection is free. Ask again after the seconds in Retry-After"

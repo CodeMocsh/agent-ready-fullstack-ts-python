@@ -33,6 +33,7 @@ backend/
   app/loop_watch.py   reports a held event loop, in every deployment
   app/waits.py        bounds each wait outside the process; beside runs short work nobody awaits
   app/pacing.py       every wait on time, named for why it waits
+  app/loops.py        rounds: each loop that runs until its process stops, through a database outage
   app/jobs.py         each kind of job, and its handler -- yours
   app/worker.py       the worker process, `python -m app.worker`: claims and runs the jobs
   app/migrate.py      the entrypoint `make migrate` runs
@@ -162,6 +163,14 @@ backend/
   banned modules and a bare sleep, so keep it to the loops. A loop paces itself with
   `app.pacing.every` all the same, and a loop that waits on rows this system writes waits on a
   wake, never on a sleep.
+- **A loop that runs until its process stops runs each round through `app.loops.rounds`.** A
+  round the database did not serve waits the refusal's `Retry-After` and runs again, and the
+  WARNING line `loop waits for the database` names the loop. A round raises `DatabaseUnavailable`
+  only when the database served it nothing: a round that the database served and then stopped
+  serving ends. Past `UNAVAILABLE_WITHIN_SECONDS` of rounds that raise it, the loop raises
+  `DatabaseGone` and stops its process. Any other error stops it at once, so do
+  not catch it in the round. `tests/loops/` refuses a `while True` with no `break` and no
+  `return` outside `app/loops.py` and `app/pacing.py`.
 - **Postgres is not wrapped.** The process refuses to start on a bound that is not under the
   budget. [adr/template/0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md) says why.
 - **A route test starts nothing.** It mounts the routers under test with `tests.routed.routed`,

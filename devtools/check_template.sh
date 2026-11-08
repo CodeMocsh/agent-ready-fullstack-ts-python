@@ -353,11 +353,21 @@ sha256_of() {
     fi
 }
 
+released() {
+    curl -fsSL -o "$4" "https://github.com/$1/releases/download/$2/$3" && return 0
+    echo "check: the release link of $3 failed. Fetching it through the GitHub API." >&2
+    asset="$(curl -fsSL "https://api.github.com/repos/$1/releases/tags/$2" | awk -v name="\"$3\"," '
+        $1 == "\"url\":" && $2 ~ /\/releases\/assets\// { url = $2 }
+        $1 == "\"name\":" && $2 == name { gsub(/[",]/, "", url); print url; exit }')"
+    [ -n "$asset" ] || return 1
+    curl -fsSL -H "Accept: application/octet-stream" -o "$4" "$asset"
+}
+
 ACTIONLINT_DIR="$WORK/actionlint"
 mkdir -p "$ACTIONLINT_DIR"
-curl -fsSL -o "$ACTIONLINT_DIR/actionlint.tar.gz" \
-    "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_${ACTIONLINT_PLATFORM}.tar.gz" \
-    || fail "could not download actionlint $ACTIONLINT_VERSION for $ACTIONLINT_PLATFORM."
+released rhysd/actionlint "v$ACTIONLINT_VERSION" \
+    "actionlint_${ACTIONLINT_VERSION}_${ACTIONLINT_PLATFORM}.tar.gz" "$ACTIONLINT_DIR/actionlint.tar.gz" \
+    || fail "could not download actionlint $ACTIONLINT_VERSION for $ACTIONLINT_PLATFORM, through the release link or the GitHub API."
 ACTIONLINT_GOT="$(sha256_of "$ACTIONLINT_DIR/actionlint.tar.gz")"
 [ "$ACTIONLINT_GOT" = "$ACTIONLINT_SHA" ] \
     || fail "actionlint $ACTIONLINT_VERSION $ACTIONLINT_PLATFORM hashed $ACTIONLINT_GOT, and the pin says $ACTIONLINT_SHA."
@@ -647,7 +657,7 @@ for path, marker in found:
           f"passing one -- move it into a tier instead", file=sys.stderr)
 sys.exit(1 if found else 0)
 PY
-TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
+TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch loops
               log main models observe pacing reads responses routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do

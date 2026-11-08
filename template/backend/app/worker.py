@@ -6,25 +6,33 @@ job loop. `docs/adr/template/0027`.
 again. A slot that finds no job waits until a job is asked for, which `pg_notify` tells it, until
 a job that failed is ready or a lease ends, or until `SWEEP_SECONDS` pass. While a handler runs,
 its slot renews the lease. A lease that ends stops the attempt, and the fence keeps the attempt
-from writing anything after that. A handler that gets no database connection makes its job ready
+from writing anything after that. A handler that the database does not serve makes its job ready
 again after the refusal's `Retry-After`, and the attempt does not count. SIGTERM and SIGINT cancel
-each attempt, and the leases they held end on their own. When the connection that hears each job
-asked for ends, the worker stops with `WakesLost`, so that its platform starts it again.
+each attempt, and the leases they held end on their own.
+
+Each slot and the `LISTEN` connection are loops of `app.loops.rounds`. In a database outage each
+waits and runs again, and the `LISTEN` connection opens again and wakes the slots to look. A step
+of an attempt that the database does not serve runs again until the lease would end. When the
+database stays unavailable past `UNAVAILABLE_WITHIN_SECONDS`, the worker stops with
+`DatabaseGone`.
 
 The memory substrate runs its own jobs, in the web process, so this process refuses it.
 """
 
 import asyncio
 import signal
-from collections.abc import Coroutine
+import time
+from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import dataclass
 from typing import Any, Final
 
 from app import log
 from app.audit_events import acting_as
 from app.environment import refuse_development_settings
 from app.loop_watch import LoopWatch
+from app.loops import DatabaseGone, rounds
 from app.pacing import backoff, every
-from app.store import DatabaseBusy
+from app.store import DatabaseUnavailable
 from app.store.jobs import (
     ATTEMPTS_SPENT,
     MAX_ATTEMPTS,
@@ -38,7 +46,7 @@ from app.store.jobs import (
     handler_of,
 )
 from app.store.pg import PostgresDatabase
-from app.store.pg_jobs import JobClaims, WakesLost
+from app.store.pg_jobs import JobClaims
 from app.wiring import build, build_service_version
 
 AT_ONCE: Final = 4
@@ -54,40 +62,31 @@ class WorkerNeedsPostgres(RuntimeError):
 
 async def work(claims: JobClaims, *, at_once: int = AT_ONCE, sweep: float = SWEEP_SECONDS) -> None:
     """Claim and run the jobs of each kind of `claims.database`, `at_once` at a time, until
-    cancelled. Raises `WakesLost` when the connection that hears each job asked for ends."""
+    cancelled. Raises `DatabaseGone` when the database stays unavailable past
+    `UNAVAILABLE_WITHIN_SECONDS`."""
     wake = asyncio.Event()
     try:
-        async with claims.listening(wake.set) as ended, asyncio.TaskGroup() as group:
-            for _ in range(at_once):
-                _ = group.create_task(_slot(claims, wake, sweep))
-            _ = group.create_task(_until_lost(ended))
-    except* WakesLost as lost:
-        raise WakesLost(
-            "the connection that hears each job asked for ended. The worker stops, so that its "
-            "platform starts it again."
-        ) from lost
+        async with asyncio.TaskGroup() as group:
+            _ = group.create_task(rounds("listen", lambda: claims.listen(wake.set)))
+            for slot in range(at_once):
+                _ = group.create_task(
+                    rounds(f"slot {slot}", lambda: _claim_and_run(claims, wake, sweep))
+                )
+    except* DatabaseGone as gone:
+        first = gone.exceptions[0]
+        raise first from first.__cause__
 
 
-async def _until_lost(ended: asyncio.Event) -> None:
-    _ = await ended.wait()
-    raise WakesLost("the LISTEN connection ended")
-
-
-async def _slot(claims: JobClaims, wake: asyncio.Event, sweep: float) -> None:
+async def _claim_and_run(claims: JobClaims, wake: asyncio.Event, sweep: float) -> None:
     kinds = claims.database.kinds
-    while True:
-        wake.clear()
-        try:
-            claim = await claims.claim(kinds.keys())
-            if claim is None:
-                coming = await claims.next_claim_within(kinds.keys())
-                await _woken(wake, sweep if coming is None else min(sweep, max(coming, 0.0)))
-            else:
-                wake.set()
-                await run(claims, claim)
-        except DatabaseBusy as busy:
-            log.database_busy(type(busy).__name__)
-            await backoff(busy.retry_after)
+    wake.clear()
+    claim = await claims.claim(kinds.keys())
+    if claim is None:
+        coming = await claims.next_claim_within(kinds.keys())
+        await _woken(wake, sweep if coming is None else min(sweep, max(coming, 0.0)))
+    else:
+        wake.set()
+        await run(claims, claim)
 
 
 async def _woken(wake: asyncio.Event, within: float) -> None:
@@ -98,21 +97,47 @@ async def _woken(wake: asyncio.Event, within: float) -> None:
         return
 
 
+class AttemptAbandoned(RuntimeError):
+    """The database did not serve a step of an attempt before the attempt's lease would end."""
+
+
+@dataclass
+class _Held:
+    until: float
+
+
 async def run(claims: JobClaims, claim: Claim) -> None:
     """Run one attempt of the job `claim` holds, and end the job, or make it ready again. A lost
-    lease stops the attempt, and `log.lease_lost` names it."""
+    lease stops the attempt, and `log.lease_lost` names it. A step the database does not serve
+    before the lease would end stops it too, and `log.attempt_abandoned` names it: the lease ends,
+    and the next claim runs the job again. A step is the read of what the job asked, or a write
+    that ends the attempt."""
+    held = _Held(claim.held_until)
     try:
         with fenced(claim):
-            asked = await claims.asked(claim)
+            asked = await _served(held, lambda: claims.asked(claim))
             with acting_as(asked.actor):
-                await _attempt(claims, claim, asked)
+                await _attempt(claims, claim, held, asked)
     except LeaseLost:
         log.lease_lost(kind=claim.kind, job=claim.id, attempt=claim.attempts)
+    except AttemptAbandoned:
+        log.attempt_abandoned(kind=claim.kind, job=claim.id, attempt=claim.attempts)
 
 
-async def _attempt(claims: JobClaims, claim: Claim, asked: Asked) -> None:
+async def _served[T](held: _Held, step: Callable[[], Awaitable[T]]) -> T:
+    while True:
+        try:
+            return await step()
+        except DatabaseUnavailable as unavailable:
+            log.database_unavailable(type(unavailable).__name__, unavailable.cause)
+            if time.monotonic() + unavailable.retry_after >= held.until:
+                raise AttemptAbandoned("the lease ends before the database serves") from unavailable
+            await backoff(unavailable.retry_after)
+
+
+async def _attempt(claims: JobClaims, claim: Claim, held: _Held, asked: Asked) -> None:
     if claim.attempts > MAX_ATTEMPTS:
-        await claims.dead(claim, ATTEMPTS_SPENT)
+        await _served(held, lambda: claims.dead(claim, ATTEMPTS_SPENT))
         log.job_dead(kind=claim.kind, job=claim.id, attempts=MAX_ATTEMPTS, failure=ATTEMPTS_SPENT)
         return
     attempt = attempted(
@@ -123,36 +148,38 @@ async def _attempt(claims: JobClaims, claim: Claim, asked: Asked) -> None:
         kind=claim.kind,
         attempt=claim.attempts,
     )
-    result = await _renewing(claims, claim, attempt)
+    result = await _renewing(claims, claim, held, attempt)
     if isinstance(result, Deferred):
-        await claims.deferred(claim, result.after)
+        await _served(held, lambda: claims.deferred(claim, result.after))
     elif not isinstance(result, Failed):
-        await claims.done(claim, result)
+        await _served(held, lambda: claims.done(claim, result))
         log.job_done(kind=claim.kind, job=claim.id, attempt=claim.attempts)
     elif claim.attempts >= MAX_ATTEMPTS:
-        await claims.dead(claim, result.failure)
+        await _served(held, lambda: claims.dead(claim, result.failure))
         log.job_dead(kind=claim.kind, job=claim.id, attempts=claim.attempts, failure=result.failure)
     else:
-        await claims.again(claim)
+        await _served(held, lambda: claims.again(claim))
 
 
-async def _renewing[T](claims: JobClaims, claim: Claim, attempt: Coroutine[Any, Any, T]) -> T:
+async def _renewing[T](
+    claims: JobClaims, claim: Claim, held: _Held, attempt: Coroutine[Any, Any, T]
+) -> T:
     try:
         async with asyncio.TaskGroup() as group:
             running = group.create_task(attempt)
-            renewer = group.create_task(_renew(claims, claim))
+            renewer = group.create_task(_renew(claims, claim, held))
             running.add_done_callback(lambda _: renewer.cancel())
     except* LeaseLost as lost:
         raise LeaseLost(f"attempt {claim.attempts} of job {claim.id} lost its lease") from lost
     return running.result()
 
 
-async def _renew(claims: JobClaims, claim: Claim) -> None:
+async def _renew(claims: JobClaims, claim: Claim, held: _Held) -> None:
     async for _ in every(claims.leases.renewal):
         try:
-            await claims.renew(claim)
-        except DatabaseBusy as busy:
-            log.database_busy(type(busy).__name__)
+            held.until = await claims.renew(claim)
+        except DatabaseUnavailable as unavailable:
+            log.database_unavailable(type(unavailable).__name__, unavailable.cause)
 
 
 async def _main() -> None:

@@ -24,7 +24,7 @@ from app import log
 from app.audit_events import current_actor
 from app.identity.shared import Actor
 from app.models import JsonObject
-from app.store import DatabaseBusy
+from app.store import DatabaseUnavailable
 
 MAX_ATTEMPTS: Final = 5
 """The most attempts a job gets. A job whose last attempt fails is dead."""
@@ -95,6 +95,8 @@ class Claim:
     kind: str
     token: UUID
     attempts: int
+    held_until: float
+    """A time on this process's `time.monotonic` clock at or before the end of the lease."""
 
 
 @dataclass(frozen=True)
@@ -115,7 +117,7 @@ class Failed:
 
 @dataclass(frozen=True)
 class Deferred:
-    """An attempt that got no database connection. It does not count, and the job is ready again
+    """An attempt that the database did not serve. It does not count, and the job is ready again
     after `after` seconds, as the refusal asked."""
 
     after: float
@@ -191,16 +193,16 @@ async def attempted(
     handler: Handler, tenant_id: str, asked: Asked, *, job: str, kind: str, attempt: int
 ) -> JsonObject | Failed | Deferred:
     """The outcome of one attempt of `handler`: the outcome, `Failed` when the handler raises or
-    returns an outcome that cannot be stored, or `Deferred` when it got no database connection.
+    returns an outcome that cannot be stored, or `Deferred` when the database did not serve it.
     `log.job_failed` names each failure. `LeaseLost` and a cancellation raise."""
     try:
         outcome = await handler(tenant_id, asked.input)
         _ = encoded(outcome)
     except LeaseLost:
         raise
-    except DatabaseBusy as busy:
-        log.database_busy(type(busy).__name__)
-        return Deferred(after=busy.retry_after)
+    except DatabaseUnavailable as unavailable:
+        log.database_unavailable(type(unavailable).__name__, unavailable.cause)
+        return Deferred(after=unavailable.retry_after)
     except Exception as error:
         log.job_failed(kind=kind, job=job, attempt=attempt, error=error)
         return Failed(failure=type(error).__name__)
