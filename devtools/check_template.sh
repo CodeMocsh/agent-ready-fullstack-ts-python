@@ -974,7 +974,8 @@ need_only f docs/adr/template \
     0026-every-store-read-is-a-page.md \
     0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md \
     0028-every-finite-response-has-a-byte-bound.md \
-    0029-the-reads-that-start-in-one-task-are-one-request.md
+    0029-the-reads-that-start-in-one-task-are-one-request.md \
+    0030-server-events-merge-and-share-a-read-budget.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1626,7 +1627,7 @@ echo "==> assert the read budget counts each request of a first draw, and the re
 TASK_LIST=frontend/src/components/task-list.tsx
 CLIENT=frontend/src/api/client.ts
 ONE_READ='  const tasks = useInfiniteQuery(TASK_PAGES);'
-GROUPED='  const response = isPart(path, init) ? await grouped(path) : await direct(path, init);'
+GROUPED='  if (isPart(path, init)) return grouped<T>(path, signal);'
 grep -qxF "$ONE_READ" "$TASK_LIST" || fail "$TASK_LIST no longer says '$ONE_READ', so the read budget mutations test nothing"
 grep -qxF "$GROUPED" "$CLIENT" || fail "$CLIENT no longer says '$GROUPED', so the mutation that sends each GET alone tests nothing"
 cp "$TASK_LIST" "$WORK/task-list.tsx"

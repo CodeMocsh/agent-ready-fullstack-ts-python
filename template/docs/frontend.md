@@ -87,6 +87,26 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   `invalidateForServerEvent`. `pnpm conformance` refuses an invalidation anywhere else, and a
   mutation that an effect starts.
   [adr/template/0024](adr/template/0024-every-read-has-an-outside-cause.md) says why.
+- **Server events merge.** `invalidateForServerEvent` marks matching queries stale. It waits for
+  an active read before it starts a trailing read. Events during the trailing read remain pending.
+  Inactive queries stay stale until they mount. Completion and reconnect events use the same function.
+  Read completion alone permits no read. The returned promise settles when pending active reads settle.
+  Handle its rejection at the stream boundary. The query cache also reports query failures.
+- **Event reads share a budget.** Pass each query function's `signal` to every API read it starts.
+  `tasksApi.list(after, signal)` shows the contract. The transport keeps signaled reads in groups.
+  Each event read request, retry, page, and fallback uses the client's budget.
+  Duplicate paths may consume extra budget before the transport merges them.
+  The default policy lives in `src/api/read-budget.ts`. Pass a policy as the second argument to
+  `createQueryClient` when deployment measurements require different limits.
+  The interval also sets the minimum time between event refreshes of one query.
+  Reads without an event cause do not use the event budget.
+  Calls that omit the signal do not use it either. Test actual admitted parts across the whole screen.
+  The budget belongs to one query client. It cannot reserve capacity across tabs or actors.
+  Keep capacity for other traffic in the server admission limit.
+  A canceled refresh rejects its promise. Its event cause can resume once on a later read.
+  Another cancellation needs a new cause. Removing the query discards its pending refresh.
+  Stop `followNavigations` and clear the old query client when a session ends.
+  [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
 - **A refusal that names a wait holds every request.** `request` in `src/api/client.ts` reads
   `Retry-After` and refuses every request to the API itself with `Held` until the wait ends. A
   client event still goes out. Only a read that never reached the server is retried.

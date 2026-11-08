@@ -324,6 +324,9 @@ What to expect, because it is not all free:
     settles, and the mutation stays pending until the reads end, as an awaited call did.
   - A stream that invalidates moves under `src/streams/`, and calls
     `invalidateForServerEvent(queryClient, [key])`.
+    Events merge until a read can start. Handle the returned promise's rejection at the stream boundary.
+    Pass the query function's `signal` to each API read for cancellation and the event read budget.
+    [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) defines this contract.
   - A mutation that an effect starts moves to the person's action, or to a listener the effect
     registers for that action. A mutation that starts after a read answered permits no read, so
     its invalidation stops with `CycleStopped`. That includes a write awaited after another write,
@@ -519,6 +522,21 @@ What to expect, because it is not all free:
     Watch the new line `attempt abandoned`. `Claim` has a new field, `held_until`, and
     `JobClaims.renew` returns the new one.
   [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
+
+- **From 0.71.0 server events merge and share a client read budget.**
+  - Keep event mapping in `src/streams/`. Continue to call `invalidateForServerEvent(client, keys)`.
+  - Forward each query function's `signal` to every API read it starts. The signal carries
+    cancellation and the event budget. Calls without it remain outside that budget.
+  - Handle the returned invalidation promise's rejection. Do not block stream delivery while
+    waiting for refresh completion. A terminal refresh failure or cancellation now rejects that promise.
+    A canceled event cause can resume once on a later read. Another cancellation needs a new cause.
+  - Events during an active read require a trailing read. Events during the trailing read
+    remain pending. Repeated events no longer grant separate reads.
+  - Configure event limits with the second argument to `createQueryClient` when measurements
+    require it. Count admitted parts, retries, pages, and fallbacks alongside ordinary traffic.
+    A client budget cannot enforce the actor limit across clients and tabs.
+  - Stop `followNavigations` and clear the old query client when a session ends.
+  [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

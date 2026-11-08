@@ -60,11 +60,20 @@ describe("TaskList", () => {
     });
   });
 
-  it("says it is loading while the request for tasks is unanswered", async () => {
-    server.use(http.get("/api/tasks", () => heldUntilTheTestEnds()));
-    renderWithQuery(<TaskList />);
+  it("shows loading and cancels its unanswered request on unmount", async () => {
+    let received: Request | undefined;
+    server.use(
+      http.get("/api/tasks", ({ request }) => {
+        received = request;
+        return heldUntilTheTestEnds();
+      }),
+    );
+    const view = renderWithQuery(<TaskList />);
 
     expect(await screen.findByText("Loading…")).toBeInTheDocument();
+    await waitFor(() => expect(received).toBeDefined());
+    view.unmount();
+    expect(received?.signal.aborted).toBe(true);
   });
 
   it("surfaces a failing request", async () => {
