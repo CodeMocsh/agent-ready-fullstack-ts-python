@@ -97,18 +97,36 @@ More CPU for the same process does not help. One event loop uses one core.
   `Leases.retry_in`, which doubles with each attempt. A claim past `MAX_ATTEMPTS` ends the job
   dead with the failure `AttemptsSpent`: its last attempt ended with no outcome, as when its
   lease ended or its worker stopped.
-- **An attempt that gets no database connection does not count.** `attempted` answers
-  `Deferred`, the line `database busy` names the refusal, and the job is ready again after the
-  refusal's `Retry-After`. When the write that makes it ready also gets no connection, the lease
-  ends, and the next claim counts.
+- **An attempt that the database does not serve does not count.** It got no connection, or its
+  connection ended. `attempted` answers `Deferred`, the line `database unavailable` names the
+  refusal, and the job is ready again after the refusal's `Retry-After`.
+- **A step of an attempt that the database does not serve runs again until the lease would
+  end.** A step is the read of what the job asked, or a write that ends the attempt. It runs
+  again after the refusal's `Retry-After`. The worker knows when the lease ends from the time it
+  asked for the claim and for each renewal. When the lease would end first, the line
+  `attempt abandoned` names the attempt, the lease ends, and the next claim counts.
 - **A wait on the work of another process is a wake, never a loop of sleeps.** The write of a
   job sends `pg_notify` in its own transaction, so the wake comes only after the commit. The
   worker hears it through `LISTEN`, and a slot that claims a job wakes the others to look again.
   A slot with no job also wakes when a failed job is ready again or a lease ends, which
   `next_claim_within` reads. `SWEEP_SECONDS` bounds every wait. When the `LISTEN` connection
-  ends, the worker stops with `WakesLost`, and its platform starts it again. This is
+  ends, it opens again, and wakes each slot to look for the jobs it did not hear. This is
   [0024](0024-every-read-has-an-outside-cause.md) on the backend: each read has an outside
   cause.
+- **Each loop runs through `app.loops.rounds`, and outlasts a database outage within a bound.**
+  Each slot of the worker and the `LISTEN` connection are loops. A round that raises
+  `DatabaseUnavailable` waits its `Retry-After` and runs again, and the line
+  `loop waits for the database` names the loop. When rounds raise it for
+  `UNAVAILABLE_WITHIN_SECONDS`, 300 s, with no round ending between, the loop raises
+  `DatabaseGone` and the process stops, so that its platform starts it again. Any other error
+  stops the process at once. A round raises `DatabaseUnavailable` only when the database served it
+  nothing. A slot's round raises it only from its claim, or from the read of when the next
+  claim is due. A `LISTEN` connection that heard for the
+  refusal's `Retry-After` or more and then ended ends its round, and the next round opens it
+  again at once. One that ends sooner raises `ConnectionLost`. A restart of Postgres, an HA
+  failover and a maintenance window each end within about a minute, and the one restart a
+  project generated from this template measured took 32 s.
+  `tests/loops/` refuses a `while True` with no exit outside `app/loops.py` and `app/pacing.py`.
 - **`GET /jobs/{id}` answers the state of a job:** `pending`, `done` with its outcome, or `dead`
   with its failure. The browser learns that a job ended by reading it again. A screen that
   shows a job reads it with a `refetchInterval` while the job is `pending`. The template ships no
@@ -204,6 +222,18 @@ More CPU for the same process does not help. One event loop uses one core.
   between 10 s and 120 s. Shutdown spends the 10 s after `SIGTERM` on `CANCELLED_WITHIN_SECONDS`
   and `CLOSED_WITHIN_SECONDS`, so work beside the requests past that is cancelled at each swap.
 - **`to_thread` for the CPU of a job.** A parser that holds the GIL holds the loop still.
+- **A worker that stops at the first lost connection,** until 0.70.0. A restart of Postgres, a
+  failover or a weekly maintenance then stops every worker at once. Each attempt in flight waits
+  for its lease to end, and runs its handler again.
+- **A catch of every error in each loop.** It hides each bug as well as each outage. A project
+  generated from this template did this in three loops.
+- **A health check that stops a worker that cannot reach the database.** The worker serves no
+  request, so a probe needs a port of its own. The bound in the process does the same with no
+  port.
+- **A loop that waits for the database with no bound.** A proxy beside the process that stopped
+  comes back only with a new instance, and a loop that waits forever never gets one.
+- **A retry inside the store, on a connection that ended.** The store cannot know whether the
+  unit committed. Only the owner of the unit knows whether it is idempotent.
 
 ## Consequences
 
@@ -218,6 +248,13 @@ More CPU for the same process does not help. One event loop uses one core.
 - The application role reads every tenant id and every job kind in `job_claims`.
 - The web process reserves the worker's `LISTEN` connection in its share, and does not use it.
 - Nothing checks that a handler is idempotent. A review does.
+- A round and a step of an attempt run again after a connection ended, and the unit may have
+  committed. So each is idempotent. When the write that ends a job committed and its connection
+  then ended, the write runs again, finds the claim ended, and the line `lease lost` names the
+  attempt. It writes nothing, and the line `job done` is not written.
+- A loop with an exit passes `tests/loops/`: a `while not stopped:`, or a retry that returns
+  once the database serves. A review checks that a loop with no end runs through `rounds`, and
+  that a retry has a bound.
 - A job's input is one row in `jobs`, read whole. Keep it small: a handler reads large data
   through the store, in pages, as [0026](0026-every-store-read-is-a-page.md) says.
 - On the memory substrate one process serves requests and runs jobs. Its development loop does

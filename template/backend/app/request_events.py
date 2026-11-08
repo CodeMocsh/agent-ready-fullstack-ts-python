@@ -3,9 +3,9 @@
 A request that `audit_events.serve` gave a principal records one event, whatever it answered: a
 refusal, a `404` and a `500` included. A request with no principal records none: a public route,
 and a request the identity seam refused. A request cancelled before it answered, as at shutdown,
-records none, and so does a request that got no database connection: its event would wait for one
-too. When the event itself gets no connection, the request answers the `503` of `NoConnectionFree`
-in place of its own response. When the event cannot be recorded, the request fails
+records none, and so does a request that the database did not serve: its event would wait for the
+database too. When the database does not serve the event itself, the request answers the `503` of
+`NoConnectionFree` in place of its own response. When the event cannot be recorded, the request fails
 with a `500`, and the response it would have sent does not leave. `docs/adr/template/0017`.
 """
 
@@ -17,7 +17,7 @@ from app.audit_events import SERVED, UNRECORDED, RequestEvent
 from app.deps import database_of
 from app.identity.shared import Principal
 from app.refusal import no_connection_free
-from app.store import DatabaseBusy
+from app.store import DatabaseUnavailable
 
 FAILED = 500
 """The status a request event names for a request whose handler raised."""
@@ -95,12 +95,13 @@ class _Recording:
             _ = await self._recorded(FAILED)
 
     async def _recorded(self, status: int) -> bool:
-        """Whether the event was recorded. When it got no connection, the `503` of
+        """Whether the event was recorded. When the database did not serve it, the `503` of
         `NoConnectionFree` goes out in place of the response."""
         try:
             await record(self._request, status)
-        except DatabaseBusy as busy:
+        except DatabaseUnavailable as unavailable:
             self._refused = True
-            log.database_busy(type(busy).__name__)
-            await no_connection_free(busy.retry_after)(self._scope, self._receive, self._send)
+            log.database_unavailable(type(unavailable).__name__, unavailable.cause)
+            refused = no_connection_free(unavailable.retry_after)
+            await refused(self._scope, self._receive, self._send)
         return not self._refused

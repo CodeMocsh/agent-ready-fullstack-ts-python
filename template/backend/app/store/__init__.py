@@ -51,15 +51,25 @@ class TenantUnset(ValueError):
     """
 
 
-class DatabaseBusy(Exception):
-    """No connection came to a request in time: every one in the pool stayed in use, or the
-    server refused a new one. The request answers the `503` of `NoConnectionFree`, whose
-    `Retry-After` is `retry_after`, in seconds: `app/main.py` sends it when a route raises this,
-    and `app/request_events.py` when the request event does. `docs/adr/template/0022`."""
+class DatabaseUnavailable(Exception):
+    """The database did not serve a unit of work, and can serve it again after `retry_after`
+    seconds: no connection came in time, the server refused a new one, or a lent connection
+    ended during the unit. The unit may have committed before its connection ended, so only an
+    idempotent unit runs again.
+
+    A request answers the `503` of `NoConnectionFree`, whose `Retry-After` is `retry_after`:
+    `app/main.py` sends it when a route raises this, and `app/request_events.py` when the request
+    event does. A loop that `app.loops.rounds` runs waits, and runs its round again.
+    `docs/adr/template/0022`."""
 
     def __init__(self, message: str, *, retry_after: int) -> None:
         super().__init__(message)
         self.retry_after: int = retry_after
+
+    @property
+    def cause(self) -> str | None:
+        """The class of the driver's error that this one stands for, `None` when there is none."""
+        return None if self.__cause__ is None else type(self.__cause__).__name__
 
 
 @runtime_checkable

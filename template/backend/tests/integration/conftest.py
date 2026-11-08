@@ -66,6 +66,15 @@ async def connect(dsn: str) -> Any:
     return await asyncpg.connect(dsn=dsn)
 
 
+async def end_session(admin_dsn: str, pid: int) -> None:
+    """End the session `pid` from outside, as Postgres does to each session when it stops."""
+    admin = await connect(admin_dsn)
+    try:
+        assert await admin.fetchval("SELECT pg_terminate_backend($1)", pid)
+    finally:
+        await admin.close()
+
+
 ONE_PROCESS = Draws(instances=1, in_process={}, outside={})
 """What a test's own database draws: one process, holding nothing beside the pool."""
 

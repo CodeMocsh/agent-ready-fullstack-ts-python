@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.types import Message, Receive, Scope, Send
 
+from app import log
 from app.audit_events import (
     SERVED,
     RecordedAuditEvent,
@@ -26,7 +27,8 @@ from app.main import ROUTERS
 from app.pacing import yield_now
 from app.refusal import NoConnectionFree
 from app.request_events import RecordsRequests
-from app.store import Database, DatabaseBusy
+from app.store import Database, DatabaseUnavailable
+from tests.conftest import Logged
 from tests.pages import every_event
 from tests.routed import assembled
 from tests.widgets import router as widgets_router
@@ -64,9 +66,9 @@ def an_app(database: Database) -> FastAPI:
     async def raises() -> None:
         raise RuntimeError("the handler failed")
 
-    @extra.get("/busy")
-    async def busy() -> None:
-        raise DatabaseBusy("no connection came", retry_after=3)
+    @extra.get("/unavailable")
+    async def unavailable() -> None:
+        raise DatabaseUnavailable("the connection ended", retry_after=3) from ConnectionResetError()
 
     @extra.get("/acting")
     async def acting() -> Actor | None:
@@ -128,13 +130,14 @@ def test_a_request_with_no_principal_records_nothing(database: Database) -> None
     assert recorded == []
 
 
-def test_a_request_that_got_no_connection_is_refused_with_a_time_to_ask_again(
-    database: Database,
+def test_a_request_the_database_did_not_serve_is_refused_with_a_time_to_ask_again(
+    database: Database, logged: Logged
 ) -> None:
-    """Its request event would wait for a connection too, and find none."""
+    """Its request event would wait for the database too."""
     app = an_app(database)
+    log.configure(None)
     with TestClient(app) as client:
-        answered = client.get("/busy", headers={TENANT_HEADER: "tenant-a"})
+        answered = client.get("/unavailable", headers={TENANT_HEADER: "tenant-a"})
         recorded = events_in(client, app, "tenant-a")
 
     assert (answered.status_code, answered.headers["retry-after"], answered.json()) == (
@@ -143,6 +146,11 @@ def test_a_request_that_got_no_connection_is_refused_with_a_time_to_ask_again(
         {"detail": NoConnectionFree.description},
     )
     assert recorded == []
+    assert [
+        (line["refusal"], line["cause"])
+        for line in logged()
+        if line["message"] == "database unavailable"
+    ] == [("DatabaseUnavailable", "ConnectionResetError")]
 
 
 def test_a_request_acts_as_its_principal(database: Database) -> None:
@@ -248,7 +256,7 @@ def test_a_request_whose_event_got_no_connection_is_refused_with_a_time_to_ask_a
     app = an_app(database)
     with TestClient(app, raise_server_exceptions=False) as client:
         app.state.database = RefusingDatabase(
-            app.state.database, DatabaseBusy("no connection came", retry_after=4)
+            app.state.database, DatabaseUnavailable("no connection came", retry_after=4)
         )
         answered = client.get(path, headers={TENANT_HEADER: "tenant-a"})
 

@@ -290,13 +290,15 @@ Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets eac
 
 - **A statement** that runs too long is cancelled by Postgres, which raises `QueryCanceledError`.
 - **A server that does not answer** at all makes asyncpg raise `TimeoutError`.
-- **A transaction left open** with nothing sent is ended by Postgres. The pool replaces the
-  connection.
+- **A transaction left open** with nothing sent is ended by Postgres, and raises
+  `ConnectionLost`. The pool replaces the connection.
 - **A request that waits for a connection** raises `AcquireTimedOut`: every connection stayed
   in use, or a new one did not open in time.
 
-The first three answer `500` and write a traceback to the log. A request that gets no connection
-answers `503` with `Retry-After`, and writes the line `database busy`; the
+The first two answer `500` and write a traceback to the log. A request that gets no connection, or
+whose connection ends, answers `503` with `Retry-After`, and writes the line
+`database unavailable`, which names the refusal and the driver's error. A transaction left open
+is one of those: asyncpg reports it as a connection that ended. The
 [connection budget](#the-connection-budget) says why. Your platform's request timeout does
 not replace them. It closes the client's connection and leaves the handler running with a
 connection in hand, so a database that stops answering fills the pool.
@@ -382,13 +384,20 @@ says why.
 - **A worker that stops loses no job.** SIGTERM and SIGINT stop each attempt. Its lease ends
   after `Leases.lease`, and another worker claims the job. Each claim counts one attempt. A
   claim past `MAX_ATTEMPTS` ends the job `dead`, with the failure `AttemptsSpent`.
-- **A worker whose `LISTEN` connection ends stops,** with `WakesLost`, as when Postgres restarts.
-  Let the platform start it again.
+- **A worker waits out a database outage.** A restart, a failover or a proxy that stops ends each
+  connection. Each loop of the worker waits the refusal's `Retry-After` and starts again, and the
+  line `loop waits for the database` names the loop. The `LISTEN` connection opens again and
+  wakes each slot to look. An attempt whose connection ends is deferred, as below. A step of an
+  attempt runs again until its lease would end, then the line `attempt abandoned` names the
+  attempt. When the database stays unavailable for `UNAVAILABLE_WITHIN_SECONDS`, 300 s, the
+  worker stops with `DatabaseGone`. Let the platform start it again: a new instance brings back
+  a proxy that stopped.
 - **The worker accepts a longer bound on a statement.** A `DATABASE_STATEMENT_TIMEOUT` whose
   answer reaches `REQUEST_BUDGET_SECONDS` starts a worker, and refuses a web process.
-- **An attempt that gets no database connection does not count.** The job is ready again after
-  the refusal's `Retry-After`, and the line `database busy` names the refusal. When the write
-  that makes it ready also gets no connection, the lease ends, and the next claim counts. A pool
+- **An attempt that the database did not serve does not count.** It got no connection, or its
+  connection ended. The job is ready again after the refusal's `Retry-After`, and the line
+  `database unavailable` names the refusal. When the write that makes it ready is not served
+  before the lease would end, the lease ends, and the next claim counts. A pool
   too small for `AT_ONCE` handlers and their renewals defers jobs again and again: watch the
   line.
 - **The worker refuses the in-memory substrate.** Without `DATABASE_URL`, the web process runs

@@ -20,8 +20,13 @@ connection. A connection lent again does not carry the actor it had.
 
 **The pool is sized from the connection budget.** Before it opens, the pool reads the server's
 limits on one connection of its own, and takes what remains of the process's share. A pool that
-would get no connection refuses to start. A request that gets no connection raises
-`DatabaseBusy`, which `app/main.py` answers with a `503`. `docs/adr/template/0022`.
+would get no connection refuses to start. A request that gets no connection, or whose connection
+ends, raises `DatabaseUnavailable`, which `app/main.py` answers with a `503`. `docs/adr/template/0022`.
+
+**A connection that ends while it is lent is `ConnectionLost`.** asyncpg names the end in several
+ways: `ConnectionDoesNotExistError` during a statement, and an `InterfaceError` that says the
+connection went back to the pool once it ended between statements. So the pool reads whether the
+connection ended, and not the type of the error.
 
 **Every wait has a bound.** A statement, an answer, a transaction left idle, and a wait for a
 connection each raise once `Timeouts` says so. `docs/deployment.md` says why a platform's
@@ -50,7 +55,7 @@ from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage
 from app.store import (
     AuditEvents,
     Connections,
-    DatabaseBusy,
+    DatabaseUnavailable,
     Jobs,
     NoSuchAuditEvent,
     TaskStore,
@@ -131,14 +136,20 @@ class Timeouts:
 TIMEOUTS: Final = Timeouts()
 
 
-class AcquireTimedOut(DatabaseBusy):
+class AcquireTimedOut(DatabaseUnavailable):
     """No connection came to a request within `Timeouts.acquire`: every one stayed in use, or a
     new one did not open in time."""
 
 
-class ConnectionRefused(DatabaseBusy):
-    """The server refused the new connection a request needed: it holds as many as it allows, or
-    it is starting or stopping."""
+class ConnectionRefused(DatabaseUnavailable):
+    """A new connection did not open: the server holds as many as it allows, it is starting or
+    stopping, or nothing answers at its address."""
+
+
+class ConnectionLost(DatabaseUnavailable):
+    """A lent connection ended during a unit of work: the server stopped or ended the session, or
+    the network dropped it. The unit may have committed. A transaction left idle past
+    `Timeouts.idle_in_transaction` ends this way too."""
 
 
 def _milliseconds(seconds: float) -> str:
@@ -169,14 +180,37 @@ async def _name_who_acts(conn: Any) -> None:
 
 
 def _refused_by_the_server() -> tuple[type[BaseException], ...]:
-    """What asyncpg raises when the server refuses a new connection."""
-    return (_driver().TooManyConnectionsError, _driver().CannotConnectNowError)
+    """What a new connection raises when it does not open: the server refuses it, a session ends
+    before the pool lends it, or the socket does not connect. A wrong password or database is
+    none of these: no retry fixes it."""
+    asyncpg = _driver()
+    return (
+        asyncpg.TooManyConnectionsError,
+        asyncpg.CannotConnectNowError,
+        asyncpg.AdminShutdownError,
+        asyncpg.CrashShutdownError,
+        asyncpg.PostgresConnectionError,
+        OSError,
+    )
+
+
+def failed_on_a_connection() -> tuple[type[BaseException], ...]:
+    """What a statement raises from the driver or the socket. Each is `ConnectionLost` when the
+    connection ended with it."""
+    asyncpg = _driver()
+    return (asyncpg.PostgresError, asyncpg.InterfaceError, OSError)
 
 
 def _ended_but_still_lent(conn: Any) -> bool:
     """Whether Postgres ended this pooled connection while the pool still lends it. One the pool
     took back is detached, with `_con` set to `None`, and is not."""
     return conn._con is not None and conn.is_closed()
+
+
+def _ended(conn: Any) -> bool:
+    """Whether this lent connection ended. asyncpg detaches a lent connection that ends between
+    statements, so a detached one ended too."""
+    return conn._con is None or conn.is_closed()
 
 
 def _task(row: Any) -> Task:
@@ -474,15 +508,16 @@ class PostgresDatabase:
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator[Any]:
         """A connection from the pool, returned to it on exit. Raises `AcquireTimedOut` when none
-        comes within `Timeouts.acquire`, and `ConnectionRefused` when the server refuses a new
-        one. Each tells the client to ask again after `Timeouts.acquire`.
+        comes within `Timeouts.acquire`, `ConnectionRefused` when a new one does not open, and
+        `ConnectionLost` when the block fails because the connection ended. Each tells the client
+        to ask again after `Timeouts.acquire`.
 
         A wait that ends in a connection or in `AcquireTimedOut` goes to the recorder that
         `time_waits` set, if any. The wait includes the setup that names who acts, one round trip
         to Postgres. When the pool grows, it also includes opening a new connection. A refusal
         and a cancelled wait go to no recorder."""
         pool = await self.pool()
-        retry_after = math.ceil(self._timeouts.acquire)
+        retry_after = self.retry_after
         started = time.monotonic()
         try:
             conn = await pool.acquire(timeout=self._timeouts.acquire)
@@ -494,28 +529,47 @@ class PostgresDatabase:
                 retry_after=retry_after,
             ) from waited
         except _refused_by_the_server() as refused:
-            raise ConnectionRefused(
-                f"the server refused a new connection: {type(refused).__name__}",
-                retry_after=retry_after,
-            ) from refused
+            raise self._refused(refused) from refused
         try:
             self._record_wait(started)
             yield conn
+        except failed_on_a_connection() as failed:
+            if _ended(conn):
+                raise ConnectionLost(
+                    f"the connection ended during the unit of work: {type(failed).__name__}",
+                    retry_after=retry_after,
+                ) from failed
+            raise
         finally:
             if _ended_but_still_lent(conn):
                 conn.terminate()
             else:
                 await pool.release(conn)
 
+    @property
+    def retry_after(self) -> int:
+        """The whole seconds after which a unit of work that met `DatabaseUnavailable` runs
+        again: `Timeouts.acquire`, rounded up."""
+        return math.ceil(self._timeouts.acquire)
+
+    def _refused(self, refused: BaseException) -> ConnectionRefused:
+        return ConnectionRefused(
+            f"a new connection did not open: {type(refused).__name__}",
+            retry_after=self.retry_after,
+        )
+
     async def dedicated(self) -> Any:
         """A connection of its own, outside the pool and its budget, with the same search path
-        and bounds. The caller closes it."""
-        return await _driver().connect(
-            dsn=self._dsn,
-            timeout=self._timeouts.acquire,
-            command_timeout=self._timeouts.answer,
-            server_settings=self._server_settings(),
-        )
+        and bounds. The caller closes it. Raises `ConnectionRefused` when it does not open."""
+        try:
+            return await _driver().connect(
+                dsn=self._dsn,
+                timeout=self._timeouts.acquire,
+                command_timeout=self._timeouts.answer,
+                server_settings=self._server_settings(),
+            )
+        except _refused_by_the_server() as refused:
+            raise self._refused(refused) from refused
 
     def connections(self) -> Connections:
         """The pool's connections now. Before the pool opens and after it closes, none in use.

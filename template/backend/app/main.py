@@ -17,7 +17,7 @@ from app.refusal import (
     responses,
 )
 from app.routes import public, tenant
-from app.store import DatabaseBusy
+from app.store import DatabaseUnavailable
 from app.wiring import (
     TelemetrySettings,
     build_admission,
@@ -45,7 +45,7 @@ def create_app() -> FastAPI:
 
 def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
     """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant
-    and of a request that got no database connection, the admission of each actor's
+    and of a request that the database did not serve, the admission of each actor's
     requests, the limits of `GET /reads`, the mark `app.waits.waiting` reads, the request event, the request line and the
     telemetry around each route. `create_app` and `tests.routed.routed` build with it. Configures
     the logging of the whole process."""
@@ -62,7 +62,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
         app.include_router(router)
     app.add_exception_handler(500, internal_error)
     app.add_exception_handler(Unauthenticated, _refuse)
-    app.add_exception_handler(DatabaseBusy, _busy)
+    app.add_exception_handler(DatabaseUnavailable, _unavailable)
     response_bound.instrument(app, build_response_limits())
     waits.instrument(app)
     request_events.instrument(app)
@@ -101,14 +101,16 @@ async def _refuse(_request: Request, refusal: Exception) -> JSONResponse:
     )
 
 
-async def _busy(request: Request, busy: Exception) -> JSONResponse:
-    """A request that got no database connection: `503`, with the `Retry-After` the substrate
-    gave. It records no request event. `docs/adr/template/0022`."""
-    if not isinstance(busy, DatabaseBusy):
-        raise TypeError(f"{type(busy).__name__} reached the handler of DatabaseBusy") from busy
-    log.database_busy(type(busy).__name__)
+async def _unavailable(request: Request, unavailable: Exception) -> JSONResponse:
+    """A request the database did not serve: `503`, with the `Retry-After` the substrate gave. It
+    records no request event. `docs/adr/template/0022`."""
+    if not isinstance(unavailable, DatabaseUnavailable):
+        raise TypeError(
+            f"{type(unavailable).__name__} reached the handler of DatabaseUnavailable"
+        ) from unavailable
+    log.database_unavailable(type(unavailable).__name__, unavailable.cause)
     audit_events.unrecorded(request)
-    return no_connection_free(busy.retry_after)
+    return no_connection_free(unavailable.retry_after)
 
 
 @cache

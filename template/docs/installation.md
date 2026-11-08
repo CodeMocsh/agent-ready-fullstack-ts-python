@@ -496,6 +496,28 @@ What to expect, because it is not all free:
 - **Run `make suite` after an update.** Take the new `gate-commit` and `suite` targets together.
   Keep the frontend Node, smoke and DOM selections from `vitest.config.ts`. A custom CI must
   call `make suite` before promotion. `make pre-commit` now checks only the commit gate.
+- **From 0.70.0 a loop outlasts a database outage, and `DatabaseBusy` is `DatabaseUnavailable`.**
+  - Import and raise `DatabaseUnavailable` from `app.store` where you used `DatabaseBusy`.
+  - The line `database busy` is now `database unavailable`, and it also names `cause`. Change
+    each alert and each query on it.
+  - A request whose connection ends answers `503` with `Retry-After`, not `500`. A transaction
+    left idle past its bound now raises `ConnectionLost`, where it raised asyncpg's
+    `InterfaceError`.
+  - Run each loop that runs until its process stops through
+    `app.loops.rounds(name, each_round)`, with one round as a function. Delete each catch of every
+    error in it, and its `BLE001` entry in `per-file-ignores`. `make test` names each `while True` with no `break` and no `return`.
+  - `log.database_busy(refusal)` is now `log.database_unavailable(refusal, cause)`.
+  - Inside `PostgresDatabase.connection()` and `scoped()`, an error of asyncpg or of the socket
+    after which the connection ended raises `ConnectionLost`. A catch of an asyncpg error there
+    that also expects a connection that ended catches `ConnectionLost` instead.
+  - The worker no longer stops when its `LISTEN` connection ends, and `WakesLost` is gone.
+    `JobClaims.listening`, a block, is now `JobClaims.listen`, which runs until its connection
+    ends. `PostgresDatabase.dedicated` raises `ConnectionRefused` where a new connection does not
+    open.
+  - A step of an attempt that the database does not serve runs again until the lease would end.
+    Watch the new line `attempt abandoned`. `Claim` has a new field, `held_until`, and
+    `JobClaims.renew` returns the new one.
+  [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

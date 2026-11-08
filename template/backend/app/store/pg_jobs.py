@@ -9,15 +9,21 @@ new token. Every transaction of the job then holds that claim with `FOR KEY SHAR
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, Callable, Iterable
-from contextlib import asynccontextmanager
+import time
+from collections.abc import Callable, Iterable
 from typing import Any
 from uuid import UUID, uuid4
 
 from app.identity.shared import Actor
 from app.models import JsonObject
 from app.store.jobs import LEASES, Asked, Claim, LeaseLost, Leases, encoded
-from app.store.pg import PostgresDatabase, actor_from, wakes
+from app.store.pg import (
+    ConnectionLost,
+    PostgresDatabase,
+    actor_from,
+    failed_on_a_connection,
+    wakes,
+)
 
 _CLAIM = (
     "UPDATE job_claims SET state = 'running', token = $1, "
@@ -51,10 +57,6 @@ _NEXT = (
 )
 
 
-class WakesLost(RuntimeError):
-    """The connection that hears each job asked for ended, so no job wakes the worker."""
-
-
 class JobClaims:
     """The jobs of every tenant in one schema, as a worker claims them. `asked`, `done`, `dead`,
     `again` and `deferred` run inside `app.store.jobs.fenced`, and raise `LeaseLost` when the
@@ -69,6 +71,7 @@ class JobClaims:
         that ends after `Leases.lease`. `None` when no such job is there. Each claim counts one
         attempt."""
         token = uuid4()
+        asked_at = time.monotonic()
         async with self.database.connection() as conn, conn.transaction():
             row = await conn.fetchrow(_CLAIM, token, self.leases.lease, list(kinds))
         if row is None:
@@ -79,15 +82,19 @@ class JobClaims:
             kind=row["kind"],
             token=token,
             attempts=row["attempts"],
+            held_until=asked_at + self.leases.lease,
         )
 
-    async def renew(self, claim: Claim) -> None:
-        """Move the end of the lease of `claim` to `Leases.lease` from now. Raises `LeaseLost`
-        when the lease already ended, or another worker claimed the job."""
+    async def renew(self, claim: Claim) -> float:
+        """Move the end of the lease of `claim` to `Leases.lease` from now, and return a time on
+        this process's `time.monotonic` clock at or before that end. Raises `LeaseLost` when the
+        lease already ended, or another worker claimed the job."""
+        asked_at = time.monotonic()
         async with self.database.connection() as conn:
             renewed = await conn.fetchval(_RENEW, UUID(claim.id), claim.token, self.leases.lease)
         if renewed is None:
             raise LeaseLost(f"attempt {claim.attempts} of job {claim.id} lost its lease")
+        return asked_at + self.leases.lease
 
     async def asked(self, claim: Claim) -> Asked:
         """What the tenant of `claim` asked: the job's input, and the actor that asked."""
@@ -138,13 +145,14 @@ class JobClaims:
             seconds = await conn.fetchval(_NEXT, list(kinds))
         return None if seconds is None else float(seconds)
 
-    @asynccontextmanager
-    async def listening(self, woken: Callable[[], None]) -> AsyncGenerator[asyncio.Event]:
-        """Inside the block, call `woken` each time a job is asked for in this schema, and yield
-        an event that is set when the connection that hears it ends. That connection is its own,
-        outside the pool, and `app.store.budget.TEMPLATE_IN_PROCESS` counts it."""
+    async def listen(self, woken: Callable[[], None]) -> None:
+        """Call `woken` once the `LISTEN` connection opens, and each time a job is asked for in this
+        schema. That connection is its own, outside the pool, and
+        `app.store.budget.TEMPLATE_IN_PROCESS` counts it. Returns when it ends after it heard for
+        `retry_after` seconds or more. Raises `ConnectionRefused` when it does not open, and
+        `ConnectionLost` when it ends sooner."""
         conn: Any = await self.database.dedicated()
-        channel = wakes(self.database.schema)
+        opened = time.monotonic()
         ended = asyncio.Event()
 
         def heard(*_: object) -> None:
@@ -153,10 +161,24 @@ class JobClaims:
         def lost(_: object) -> None:
             ended.set()
 
-        await conn.add_listener(channel, heard)
         conn.add_termination_listener(lost)
         try:
-            yield ended
+            await self._listening(conn, heard)
+            woken()
+            _ = await ended.wait()
         finally:
             conn.remove_termination_listener(lost)
             await conn.close()
+        if time.monotonic() - opened < self.database.retry_after:
+            raise self._lost(f"ended within {self.database.retry_after} s of opening")
+
+    async def _listening(self, conn: Any, heard: Callable[..., None]) -> None:
+        try:
+            await conn.add_listener(wakes(self.database.schema), heard)
+        except failed_on_a_connection() as failed:
+            if not conn.is_closed():
+                raise
+            raise self._lost(f"ended before it listened: {type(failed).__name__}") from failed
+
+    def _lost(self, how: str) -> ConnectionLost:
+        return ConnectionLost(f"the LISTEN connection {how}", retry_after=self.database.retry_after)

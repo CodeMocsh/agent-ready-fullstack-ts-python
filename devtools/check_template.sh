@@ -647,7 +647,7 @@ for path, marker in found:
           f"passing one -- move it into a tier instead", file=sys.stderr)
 sys.exit(1 if found else 0)
 PY
-TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
+TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch loops
               log main models observe pacing reads responses routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do

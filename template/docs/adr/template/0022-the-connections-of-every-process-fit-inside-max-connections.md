@@ -58,18 +58,23 @@ covered a full pool, not a server that refuses.
   share. `wiring.build_draws` never sets it; a test sets it for a pool of one.
 - **The budget is visible.** `PostgresDatabase.budget()` returns it once the pool is open, and the
   line `connections budgeted` names each number.
-- **A request that gets no connection is refused, and only that request.** The pool raises
-  `AcquireTimedOut` when no connection comes within `Timeouts.acquire`, and `ConnectionRefused`
-  when the server refuses a new one. Both are `DatabaseBusy` in `app/store/__init__.py`.
-  `app/main.py` answers `DatabaseBusy` with `NoConnectionFree` from `app/refusal.py`: a `503`,
-  with a `Retry-After` of `Timeouts.acquire` in whole seconds, and the line `database busy`.
-  `test_a_connection_the_server_refuses_is_a_refusal_of_one_request` holds the mapping on
-  Postgres, and `test_a_request_that_got_no_connection_is_refused_with_a_time_to_ask_again` the
-  `503`.
-- **A request that gets no connection records no request event.** Recording it would wait for a
-  connection too. [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) says so.
-- **The same holds when the request event gets no connection.** Each request a principal makes
-  takes a second connection, to record its event, after its route has answered.
+- **A request that the database does not serve is refused, and only that request.** The pool
+  raises `AcquireTimedOut` when no connection comes within `Timeouts.acquire`, and
+  `ConnectionRefused` when a new one does not open: the server refuses it, or nothing answers at
+  its address. It raises `ConnectionLost` when a lent connection ends during the unit of work,
+  as at a restart or a failover. asyncpg reports that end in several ways, so the pool reads
+  whether the connection ended, and not the type of the error. Each is `DatabaseUnavailable` in
+  `app/store/__init__.py`. `app/main.py` answers `DatabaseUnavailable` with `NoConnectionFree`
+  from `app/refusal.py`: a `503`, with a `Retry-After` of `Timeouts.acquire` in whole seconds,
+  and the line `database unavailable`.
+  `test_a_connection_the_server_refuses_is_a_refusal_of_one_request` and
+  `test_a_connection_ended_during_a_statement_is_lost_and_gives_its_slot_back` hold the mapping
+  on Postgres, and `test_a_request_the_database_did_not_serve_is_refused_with_a_time_to_ask_again`
+  the `503`.
+- **A request that the database does not serve records no request event.** Recording it would
+  wait for the database too. [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md) says so.
+- **The same holds when the database does not serve the request event.** Each request a
+  principal makes takes a second connection, to record its event, after its route has answered.
   `RecordsRequests` in `app/request_events.py` sends the same `503` in place of the route's
   response. `test_a_request_whose_event_got_no_connection_is_refused_with_a_time_to_ask_again`
   holds this.
@@ -108,7 +113,9 @@ covered a full pool, not a server that refuses.
   breaks the budget, and nothing detects it.
 - A worker that runs as its own service is in `OUTSIDE`, with the most connections all of its
   instances hold.
-- A `503` from a busy database and a `503` from the platform look the same to the client. The
-  `detail` and the line `database busy` tell them apart.
-- A request that wrote rows and then got no connection keeps the row events of its writes. Only
+- A `503` from a database that is unavailable and a `503` from the platform look the same to the
+  client. The `detail` and the line `database unavailable` tell them apart.
+- A connection that ends during `COMMIT` leaves the outcome unknown. So a unit of work that
+  raised `ConnectionLost` may have committed, and only an idempotent unit runs again.
+- A request that wrote rows and then was not served keeps the row events of its writes. Only
   its request event is missing. Its client gets a `503`, and a retry of a create can create twice.

@@ -14,9 +14,11 @@ import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
 from typing import Final
+from uuid import UUID
 
 import pytest
 
+from app import log
 from app.audit_events import acting_as
 from app.identity.shared import SENTINEL_TENANT, Actor
 from app.models import CreateTaskBody, Job, JsonObject
@@ -30,11 +32,12 @@ from app.store.jobs import (
     Leases,
     fenced,
 )
-from app.store.pg import PostgresDatabase
-from app.store.pg_jobs import JobClaims, WakesLost
+from app.store.pg import ConnectionLost, PostgresDatabase, Timeouts
+from app.store.pg_jobs import JobClaims
 from app.worker import run, work
 from tests.clock import elapse
-from tests.integration.conftest import ONE_PROCESS, Provisioned, connect
+from tests.conftest import Logged
+from tests.integration.conftest import ONE_PROCESS, Provisioned, connect, end_session
 from tests.jobs_contract import ASKER, OTHER_TENANT, contract_kinds
 from tests.pages import every_task
 
@@ -341,24 +344,262 @@ async def test_an_outcome_that_cannot_be_stored_fails_its_attempt_and_not_the_wo
     assert still_working
 
 
-async def test_a_worker_whose_wakes_end_stops(
-    opened: Callable[[Handler], PostgresDatabase], provisioned: Provisioned
-) -> None:
-    working = await _working(opened(ends_at_once))
+QUICK: Final = Timeouts(acquire=1.0)
+"""Bounds whose `Retry-After` is a second, so a test waits out an outage quickly."""
+
+PIDS: Final[dict[str, int]] = {}
+"""The session of the attempt of the job with the key in its input."""
+
+
+def sleeps_until_ended(database: PostgresDatabase) -> Handler:
+    """A handler whose first attempt sleeps in a transaction of the job until the test ends its
+    session, and whose next attempt ends the job."""
+
+    async def handler(tenant_id: str, input: JsonObject) -> JsonObject:
+        key = str(input["key"])
+        if key in STARTED:
+            return {"ended": True}
+        STARTED[key] = asyncio.Event()
+        async with database.scoped(tenant_id) as conn:
+            PIDS[key] = await conn.fetchval("SELECT pg_backend_pid()")
+            STARTED[key].set()
+            await conn.execute("SELECT pg_sleep(3)")
+        raise AssertionError("the session of the first attempt did not end")
+
+    return handler
+
+
+RELEASED: Final[dict[str, asyncio.Event]] = {}
+"""Set to let the first attempt of the job with the key in its input end."""
+
+
+async def ends_once_released(_tenant_id: str, input: JsonObject) -> JsonObject:
+    """A handler whose first attempt ends when the test releases it, and whose next one at once."""
+    key = str(input["key"])
+    if key not in STARTED:
+        STARTED[key] = asyncio.Event()
+        STARTED[key].set()
+        _ = await RELEASED.setdefault(key, asyncio.Event()).wait()
+    return {"ended": True}
+
+
+QuicklyOpened = Callable[[Callable[[PostgresDatabase], Handler]], PostgresDatabase]
+
+
+@pytest.fixture
+async def quickly(provisioned: Provisioned) -> AsyncIterator[QuicklyOpened]:
+    """Each call opens a database under `QUICK`, whose jobs of `A_KIND` the handler that the
+    call builds from it runs."""
+    held: list[PostgresDatabase] = []
+
+    def opening(handler: Callable[[PostgresDatabase], Handler]) -> PostgresDatabase:
+        database = PostgresDatabase(
+            dsn=provisioned.app_dsn,
+            schema=provisioned.schema,
+            draws=ONE_PROCESS,
+            kinds=lambda opened: {A_KIND: handler(opened)},
+            timeouts=QUICK,
+        )
+        held.append(database)
+        return database
+
+    try:
+        yield opening
+    finally:
+        for database in held:
+            await database.close()
+
+
+@pytest.fixture
+def quick(quickly: QuicklyOpened) -> PostgresDatabase:
+    """A database under `QUICK`, whose jobs of `A_KIND` `sleeps_until_ended` runs."""
+    return quickly(sleeps_until_ended)
+
+
+async def _listening(provisioned: Provisioned) -> set[int]:
     admin = await connect(provisioned.admin_dsn)
     try:
-        ended_backends = await admin.fetchval(
-            "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
-            "WHERE usename = $1 AND query LIKE 'LISTEN %'",
+        rows = await admin.fetch(
+            "SELECT pid FROM pg_stat_activity WHERE usename = $1 AND query LIKE 'LISTEN %'",
+            provisioned.app,
+        )
+    finally:
+        await admin.close()
+    return {row["pid"] for row in rows}
+
+
+async def _end_every_session(provisioned: Provisioned, *, then_refuse: bool = False) -> int:
+    """End each session of the application role, as a restart of Postgres does. With
+    `then_refuse`, the role gets no new session until `_admit` runs."""
+    admin = await connect(provisioned.admin_dsn)
+    try:
+        if then_refuse:
+            await admin.execute(f'ALTER ROLE "{provisioned.app}" CONNECTION LIMIT 0')
+        return await admin.fetchval(
+            "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity WHERE usename = $1",
             provisioned.app,
         )
     finally:
         await admin.close()
 
-    assert ended_backends == 1
-    with pytest.raises(WakesLost):
-        async with asyncio.timeout(WITHIN):
-            await working
+
+async def _admit(provisioned: Provisioned) -> None:
+    admin = await connect(provisioned.admin_dsn)
+    try:
+        await admin.execute(f'ALTER ROLE "{provisioned.app}" CONNECTION LIMIT -1')
+    finally:
+        await admin.close()
+
+
+async def _heard_until_ended(
+    quick: PostgresDatabase, provisioned: Provisioned, *, heard_for: float
+) -> asyncio.Task[None]:
+    listening = asyncio.get_running_loop().create_task(JobClaims(quick).listen(lambda: None))
+    await until(lambda: _listening_again(provisioned, set()))
+    await elapse(heard_for)
+    [pid] = await _listening(provisioned)
+    await end_session(provisioned.admin_dsn, pid)
+    _ = await asyncio.wait([listening])
+    return listening
+
+
+async def test_a_listen_connection_that_heard_and_then_ended_ends_its_round(
+    quick: PostgresDatabase, provisioned: Provisioned
+) -> None:
+    listened = await _heard_until_ended(quick, provisioned, heard_for=QUICK.acquire * 1.5)
+
+    assert listened.exception() is None
+
+
+async def test_a_listen_connection_that_ends_at_once_is_lost(
+    quick: PostgresDatabase, provisioned: Provisioned
+) -> None:
+    listened = await _heard_until_ended(quick, provisioned, heard_for=0)
+
+    assert isinstance(listened.exception(), ConnectionLost)
+
+
+async def test_a_worker_whose_sessions_all_end_hears_again_and_ends_the_next_job(
+    opened: Callable[[Handler], PostgresDatabase], provisioned: Provisioned
+) -> None:
+    database = opened(ends_at_once)
+    working = await _working(database)
+    try:
+        before = await _listening_now(provisioned)
+        ended_sessions = await _end_every_session(provisioned)
+        await until(lambda: _listening_again(provisioned, before))
+        asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
+        job = await ended(database, asked.id)
+        still_working = not working.done()
+    finally:
+        await _stopped(working)
+
+    assert ended_sessions >= 2
+    assert job.state == "done"
+    assert still_working
+
+
+async def _listening_now(provisioned: Provisioned) -> set[int]:
+    """The `LISTEN` session of the worker, once it listens."""
+    await until(lambda: _listening_again(provisioned, set()))
+    return await _listening(provisioned)
+
+
+async def _listening_again(provisioned: Provisioned, before: set[int]) -> bool:
+    return (await _listening(provisioned) - before) != set()
+
+
+async def test_a_worker_waits_out_an_outage_and_then_ends_a_job(
+    quick: PostgresDatabase, provisioned: Provisioned, logged: Logged
+) -> None:
+    log.configure(None)
+    working = await _working(quick)
+    try:
+        before = await _listening_now(provisioned)
+        _ = await _end_every_session(provisioned, then_refuse=True)
+        await elapse(QUICK.acquire * 2.5)
+        await _admit(provisioned)
+        await until(lambda: _listening_again(provisioned, before))
+        asked = await quick.jobs(SENTINEL_TENANT).ask(A_KIND, {"key": "after an outage"})
+        job = await ended(quick, asked.id)
+        still_working = not working.done()
+    finally:
+        await _admit(provisioned)
+        await _stopped(working)
+
+    waits = [
+        (line["loop"], line["refusal"], line["cause"])
+        for line in logged()
+        if line["message"] == "loop waits for the database"
+    ]
+    assert ("listen", "ConnectionRefused", "TooManyConnectionsError") in waits
+    assert job.state == "done"
+    assert still_working
+
+
+async def test_an_attempt_whose_session_ends_is_deferred_and_does_not_count(
+    quick: PostgresDatabase, provisioned: Provisioned
+) -> None:
+    key = "its session ends"
+    working = await _working(quick)
+    try:
+        asked = await quick.jobs(SENTINEL_TENANT).ask(A_KIND, {"key": key})
+        await until(lambda: _started(key))
+        await end_session(provisioned.admin_dsn, PIDS[key])
+        job = await ended(quick, asked.id)
+    finally:
+        await _stopped(working)
+
+    assert (job.state, job.outcome) == ("done", {"ended": True})
+    assert await _attempts_of(provisioned, asked.id) == 1
+
+
+async def _attempts_of(provisioned: Provisioned, id: str) -> int:
+    admin = await connect(provisioned.admin_dsn)
+    try:
+        return await admin.fetchval(
+            f'SELECT attempts FROM "{provisioned.schema}".job_claims WHERE id = $1', UUID(id)
+        )
+    finally:
+        await admin.close()
+
+
+@pytest.mark.parametrize(
+    ("lease", "attempts", "abandoned"),
+    [(10.0, 1, []), (1.5, 2, ["attempt abandoned"])],
+    ids=["served within the lease", "not served within the lease"],
+)
+async def test_the_end_of_an_attempt_runs_again_until_its_lease_would_end(
+    quickly: QuicklyOpened,
+    provisioned: Provisioned,
+    logged: Logged,
+    lease: float,
+    attempts: int,
+    abandoned: list[str],
+) -> None:
+    log.configure(None)
+    key = f"its end waits out an outage under a lease of {lease} s"
+    database = quickly(lambda _: ends_once_released)
+    working = await _working(database, Leases(lease=lease, renewal=lease / 4, retry=0.01))
+    try:
+        asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {"key": key})
+        await until(lambda: _started(key))
+        _ = await _end_every_session(provisioned, then_refuse=True)
+        RELEASED.setdefault(key, asyncio.Event()).set()
+        await elapse(QUICK.acquire * 2.5)
+        await _admit(provisioned)
+        job = await ended(database, asked.id)
+        still_working = not working.done()
+    finally:
+        await _admit(provisioned)
+        await _stopped(working)
+
+    assert (job.state, job.outcome) == ("done", {"ended": True})
+    assert await _attempts_of(provisioned, asked.id) == attempts
+    assert [line["message"] for line in logged() if line["message"] == "attempt abandoned"] == (
+        abandoned
+    )
+    assert still_working
 
 
 async def test_a_worker_in_another_process_ends_a_job_that_this_process_asked_for(

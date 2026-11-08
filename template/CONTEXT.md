@@ -243,6 +243,18 @@ The process that `python -m app.worker` starts. It claims jobs and serves no req
 things.
 _Avoid_: background process, consumer.
 
+**Loop**:
+A task that runs one round again and again until its process stops. Each loop runs through
+`app.loops.rounds`, which waits out a database outage within `UNAVAILABLE_WITHIN_SECONDS`. The
+event loop is another thing.
+_Avoid_: background loop, poller, daemon.
+
+**Database outage**:
+A time when the database does not serve a unit of work: no connection comes in time, a new one
+does not open, or a lent one ends. The store raises `DatabaseUnavailable` for each. A request
+answers `503`, an attempt of a job is deferred, and a loop waits.
+_Avoid_: blip, busy (a busy pool is one cause), down.
+
 **Work beside the requests**:
 A task that `app.waits.beside` started, for work the caller does not wait for. It runs outside
 every request, ends within the request budget, ends with its process, and the lifespan cancels
