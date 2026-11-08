@@ -1,9 +1,11 @@
+import shlex
 from pathlib import Path
 
 import pytest
 
 from tests.test_gate import (
     OPT_IN_TIER,
+    PYPROJECT,
     a_clone_with_a_gate,
     prerequisites_of,
     reached_from,
@@ -21,7 +23,7 @@ def test_the_commit_gate_keeps_static_checks_and_selects_commit_tests() -> None:
     ]
     assert "test-contract" not in reached_from("gate-commit")
     assert recipe_of("test-commit-backend") == [
-        "cd backend && uv run --no-sync pytest -q --ignore=tests/started"
+        "cd backend && uv run --no-sync pytest -q --ignore=tests/started --ignore-glob='*/slow'"
     ]
     assert any("frontend test:commit" in line for line in recipe_of("test-commit-frontend"))
 
@@ -60,3 +62,26 @@ def test_a_partial_install_runs_only_its_half_and_records_no_pass(
     assert "PARTIAL RUN" in result.stderr
     assert "full suite      NOT RUN" in result.stderr
     assert not (clone / ".git/gate-commit-passed").exists()
+
+
+def test_slow_tests_fail_the_full_run_and_leave_the_commit_run(pytester: pytest.Pytester) -> None:
+    pytester.makepyprojecttoml(PYPROJECT.read_text())
+    for name in (
+        "test_fast.py",
+        "area/test_nearby.py",
+        "area/slower/test_ordinary.py",
+        "slow/test_root.py",
+        "area/slow/test_nested.py",
+        "area/slow/deep/test_deep.py",
+        "started/test_started.py",
+    ):
+        path = pytester.path / "tests" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        passes = "slow" not in path.relative_to(pytester.path).parts and "started" not in name
+        path.write_text(f"def test_selection():\n    assert {passes}\n", encoding="utf-8")
+    command = shlex.split(recipe_of("test-commit-backend")[0])
+    commit = pytester.runpytest_subprocess(*command[command.index("pytest") + 1 :])
+    commit.assert_outcomes(passed=3)
+    full_command = next(shlex.split(line) for line in recipe_of("test-fast") if "pytest" in line)
+    full = pytester.runpytest_subprocess(*full_command[full_command.index("pytest") + 1 :])
+    full.assert_outcomes(passed=3, failed=4)

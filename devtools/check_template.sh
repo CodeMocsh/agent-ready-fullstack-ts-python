@@ -1610,39 +1610,8 @@ PY
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
 
-echo "==> assert commit selection retains smoke coverage and the full run selects every file"
-pnpm -C frontend exec vitest list --json >"$WORK/frontend-all.json"
-pnpm -C frontend exec vitest list --project node --project smoke --json >"$WORK/frontend-commit.json"
-(cd backend && uv run pytest --collect-only -q) >"$WORK/backend-all.txt"
-(cd backend && uv run pytest --collect-only -q --ignore=tests/started) >"$WORK/backend-commit.txt"
-python3 - "$WORK" <<'PY_SELECTION'
-import json
-import sys
-from pathlib import Path
-
-work = Path(sys.argv[1])
-all_frontend = json.loads((work / "frontend-all.json").read_text())
-commit_frontend = json.loads((work / "frontend-commit.json").read_text())
-files = {path.resolve() for path in Path("frontend/tests").rglob("*.test.*")}
-selected = {Path(test["file"]).resolve() for test in all_frontend}
-assert selected == files, f"frontend selection differs: {selected ^ files}"
-projects = {}
-for test in all_frontend:
-    projects.setdefault(test["file"], set()).add(test["projectName"])
-assert all(len(names) == 1 for names in projects.values()), projects
-assert {test["projectName"] for test in all_frontend} == {"node", "smoke", "dom"}
-assert {test["projectName"] for test in commit_frontend} == {"node", "smoke"}
-key = lambda test: (test["file"], test["name"], test["projectName"])
-assert {key(test) for test in commit_frontend} == {
-    key(test) for test in all_frontend if test["projectName"] in {"node", "smoke"}
-}
-all_backend = {line for line in (work / "backend-all.txt").read_text().splitlines() if "::" in line}
-commit_backend = {line for line in (work / "backend-commit.txt").read_text().splitlines() if "::" in line}
-started = {test for test in all_backend if test.startswith("tests/started/")}
-assert started and commit_backend
-assert commit_backend == all_backend - started
-print(f"commit selection: {len(commit_backend)} backend, {len(commit_frontend)} frontend tests")
-PY_SELECTION
+echo "==> assert commit selection and full coverage, including nested slow tests"
+python3 "$REPO/devtools/check_test_selection.py"
 echo "==> assert the read budget counts each request of a first draw, and the reads of one task as one"
 TASK_LIST=frontend/src/components/task-list.tsx
 CLIENT=frontend/src/api/client.ts
