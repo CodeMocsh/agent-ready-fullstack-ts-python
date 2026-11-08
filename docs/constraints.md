@@ -227,7 +227,8 @@ a way the error message does not explain.
 ## `src/api/schema.ts` must stay in every exclusion list
 
 The generated contract artifact is a plain `.ts` file that grows with the API and is invisible
-to every automatic skip. It has to be named in `files.includes` in `biome.json`, and in
+to every automatic skip. `src/api/parts.ts`, which `make openapi` also writes, is in each list for
+the same reason. It has to be named in `files.includes` in `biome.json`, and in
 `complexity.exclude`, `conformance.exclude` and `comments.exclude` in `package.json` — JSON
 files, none of which can say why.
 

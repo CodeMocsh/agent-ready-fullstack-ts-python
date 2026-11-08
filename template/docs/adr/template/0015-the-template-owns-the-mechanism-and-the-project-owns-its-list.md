@@ -30,6 +30,7 @@ and the bullet on `identity_stub` below says why.
 | `app/connection_budget.py`: what it holds open to Postgres beside the template's pool | `app/store/budget.py`: `Draws`, `budgeted` |
 | `devtools/contract-test.env`: the admission numbers of the backend its contract suite runs | `devtools/contract-test.sh` |
 | `app/admission_limits.py`: what a process admits for one actor | `app/admission.py`: `Limits`, `Admission`, `admit`, `stream` |
+| `app/read_limits.py`: what one `GET /reads` runs | `app/reads.py`: `Limits`, `PART`, `answer` |
 | `app/request_line.py`: its fields on `request completed`, beyond the tenant and the actor | `app/log.py`: `name_on_request_line`, `request_completed` |
 | `tests/tiers.py`: its tiers | `tests/tier.py`: what a tier is |
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |

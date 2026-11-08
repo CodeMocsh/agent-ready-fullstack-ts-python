@@ -648,7 +648,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch
-              log main models observe pacing responses routes serve started store telemetry waits wiring worker"
+              log main models observe pacing reads responses routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -963,7 +963,8 @@ need_only f docs/adr/template \
     0025-a-tab-learns-of-a-new-build-and-reloads-at-the-next-navigation.md \
     0026-every-store-read-is-a-page.md \
     0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md \
-    0028-every-finite-response-has-a-byte-bound.md
+    0028-every-finite-response-has-a-byte-bound.md \
+    0029-the-reads-that-start-in-one-task-are-one-request.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1026,8 +1027,9 @@ for name in ('Task', 'CreateTaskBody', 'UpdateTaskBody', 'ErrorBody'):
 split = [n for n in schemas if n.endswith('-Input') or n.endswith('-Output')]
 assert not split, f'input/output schemas split: {split}. The aliases in src/api/types.ts import each schema by name.'
 paths = spec['paths']
-assert sorted(paths) == ['/client-events', '/jobs/{id}', '/tasks', '/tasks/{id}', '/tasks/{id}/close'], sorted(paths)
+assert sorted(paths) == ['/client-events', '/jobs/{id}', '/reads', '/tasks', '/tasks/{id}', '/tasks/{id}/close'], sorted(paths)
 assert '201' in paths['/tasks']['post']['responses']
+assert [path for path, item in sorted(paths.items()) if item.get('get', {}).get('x-part') is True] == ['/jobs/{id}', '/tasks'], 'each GET route that reads only the database declares PART, so its read goes out in a group (docs/adr/template/0029)'
 assert '202' in paths['/tasks/{id}/close']['post']['responses'], 'a route that asks for a job answers 202 and does nothing more (docs/adr/template/0027)'
 assert 'content' in paths['/jobs/{id}']['get']['responses']['404'], 'GET /jobs/{id} 404 declares no body, and the typed handlers cannot mock a response with no model.'
 assert schemas['ClientEvent']['additionalProperties'] is False, 'the public route takes untrusted input, so ClientEvent must refuse an undeclared field'
@@ -1074,14 +1076,16 @@ need_grep '"strict": true' frontend/tsconfig.json
 need_grep 'noUncheckedIndexedAccess' frontend/tsconfig.json
 node -e "
 const pkg = require('./frontend/package.json');
-for (const key of ['complexity', 'conformance', 'comments']) {
-  if (!pkg[key].exclude.includes('src/api/schema.ts')) {
-    throw new Error(key + '.exclude is missing src/api/schema.ts');
-  }
-}
 const biome = require('./frontend/biome.json');
-if (!biome.files.includes.includes('!src/api/schema.ts')) {
-  throw new Error('biome.json does not exclude src/api/schema.ts');
+for (const generated of ['src/api/schema.ts', 'src/api/parts.ts']) {
+  for (const key of ['complexity', 'conformance', 'comments']) {
+    if (!pkg[key].exclude.includes(generated)) {
+      throw new Error(key + '.exclude is missing ' + generated);
+    }
+  }
+  if (!biome.files.includes.includes('!' + generated)) {
+    throw new Error('biome.json does not exclude ' + generated);
+  }
 }
 "
 need frontend/devtools/comments.mjs
@@ -1505,7 +1509,7 @@ run "backend lint" sh -c 'cd backend && uv run python devtools/lint.py --check'
 run "pytest" sh -c 'cd backend && uv run pytest -q'
 echo "==> assert the startup gate refuses telemetry imported in every process"
 MAIN=backend/app/main.py
-LAZY='from app import admission, audit_events, log, request_events, response_bound, waits'
+LAZY='from app import admission, audit_events, log, reads, request_events, response_bound, waits'
 grep -qxF "$LAZY" "$MAIN" || fail "$MAIN no longer says '$LAZY', so the startup gate mutation tests nothing"
 cp "$MAIN" "$WORK/main.py"
 sed -i.bak "s/^$LAZY\$/$LAZY, telemetry/" "$MAIN" && rm -f "$MAIN.bak"
@@ -1605,24 +1609,91 @@ PY
 
 run "frontend lint" pnpm -C frontend lint:check
 run "vitest" pnpm -C frontend test
-echo "==> assert the read budget refuses a screen whose first draw reads twice"
+echo "==> assert the read budget counts each request of a first draw, and the reads of one task as one"
 TASK_LIST=frontend/src/components/task-list.tsx
+CLIENT=frontend/src/api/client.ts
 ONE_READ='  const tasks = useInfiniteQuery(TASK_PAGES);'
-grep -qxF "$ONE_READ" "$TASK_LIST" || fail "$TASK_LIST no longer says '$ONE_READ', so the read budget mutation tests nothing"
+GROUPED='  const response = isPart(path, init) ? await grouped(path) : await direct(path, init);'
+grep -qxF "$ONE_READ" "$TASK_LIST" || fail "$TASK_LIST no longer says '$ONE_READ', so the read budget mutations test nothing"
+grep -qxF "$GROUPED" "$CLIENT" || fail "$CLIENT no longer says '$GROUPED', so the mutation that sends each GET alone tests nothing"
 cp "$TASK_LIST" "$WORK/task-list.tsx"
-python3 - "$TASK_LIST" "$ONE_READ" <<'PY'
+cp "$CLIENT" "$WORK/client.ts"
+draws_with() {
+    python3 - "$TASK_LIST" "$ONE_READ" "$1" <<'PY'
+import pathlib
+import sys
+
+file, line, second = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+file.write_text(file.read_text(encoding="utf-8").replace(line, f"{line}\n{second}"), encoding="utf-8")
+PY
+    drawn=0
+    pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || drawn=$?
+    cp "$WORK/task-list.tsx" "$TASK_LIST"
+    cp "$WORK/client.ts" "$CLIENT"
+}
+counted_two() {
+    [ "$drawn" -ne 0 ] || fail "tests/first-draw.test.tsx passed a first draw that $1, against a budget of one"
+    grep -q 'the first draw read:' "$WORK/step.log" && grep -qF 'tasks?after=3' "$WORK/step.log" \
+        || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a first draw that $1, but not on its count of the read of /tasks?after=3"; }
+}
+BESIDE='  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "after"], initialPageParam: "3" });'
+AFTER='  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "after"], initialPageParam: "3", enabled: tasks.data !== undefined });'
+draws_with "$BESIDE"
+[ "$drawn" -eq 0 ] || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed a first draw whose two reads start in one task. request() in $CLIENT sends them as one GET /reads, which a budget of one holds"; }
+python3 - "$CLIENT" "$GROUPED" <<'PY'
 import pathlib
 import sys
 
 file, line = pathlib.Path(sys.argv[1]), sys.argv[2]
-second = '  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "again"], enabled: tasks.data !== undefined });'
-file.write_text(file.read_text(encoding="utf-8").replace(line, f"{line}\n{second}"), encoding="utf-8")
+file.write_text(file.read_text(encoding="utf-8").replace(line, line.replace("isPart(path, init)", "false")), encoding="utf-8")
 PY
-budget_refused=0
-pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || budget_refused=$?
+draws_with "$BESIDE"
+counted_two "sends its two reads as two requests, when request() sends each GET alone"
+draws_with "$AFTER"
+counted_two "reads again after its first answer"
+python3 - "$TASK_LIST" <<'PY'
+import pathlib
+import sys
+
+file = pathlib.Path(sys.argv[1])
+text = file.read_text(encoding="utf-8")
+react = 'import { type FormEvent, useState } from "react";'
+main = '    <main className="mx-auto flex max-w-2xl flex-col gap-6 p-8">\n'
+if react not in text or main not in text or "export function TaskList() {" not in text:
+    sys.exit(f"{file} no longer has what the slow-render mutation edits")
+text = text.replace(react, react.replace("useState", "useDeferredValue, useState"))
+text = text.replace("export function TaskList() {", """function Busy() {
+  const until = performance.now() + 5;
+  while (performance.now() < until) {
+    Math.random();
+  }
+  return null;
+}
+
+function SlowPart() {
+  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "after"], initialPageParam: "3" });
+  return null;
+}
+
+function Deferred({ ready }: { ready: boolean }) {
+  const shown = useDeferredValue(ready);
+  return shown ? (
+    <>
+      {Array.from({ length: 80 }, (_, index) => (
+        <Busy key={String(index)} />
+      ))}
+      <SlowPart />
+    </>
+  ) : null;
+}
+
+export function TaskList() {""")
+file.write_text(text.replace(main, main + "      <Deferred ready={tasks.data !== undefined} />\n", 1), encoding="utf-8")
+PY
+drawn=0
+pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || drawn=$?
 cp "$WORK/task-list.tsx" "$TASK_LIST"
-[ "$budget_refused" -ne 0 ] || fail "tests/first-draw.test.tsx passed a first draw that reads again after its first response, against a budget of one"
-grep -q 'the first draw read:' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a first draw that reads twice, but not on its count"; }
+counted_two "reads in a part that a slow render mounts after its first answer"
 refuses_the_cycle() {
     shape=$1
     cycle=$2
@@ -1697,7 +1768,7 @@ rm -f "$PLANTED"
 
 echo "==> assert the contract artifacts are in sync with the code"
 run "make openapi" make openapi
-git diff --exit-code -- openapi.json frontend/src/api/schema.ts \
+git diff --exit-code -- openapi.json frontend/src/api/schema.ts frontend/src/api/parts.ts \
     || { echo "the committed contract artifacts do not match the rendered code" >&2; exit 1; }
 
 echo "==> the contract suite, against both implementations"
@@ -1840,10 +1911,14 @@ if curl -fsS --max-time 2 "$PROBE" >/dev/null 2>&1; then
     fail ":$BACKEND_PORT is answering before app.serve started -- something else has it"
 fi
 
-env -u DATABASE_URL APP_ENV=development FRONTEND_BUNDLE="$OUT/frontend/dist" \
-    backend/.venv/bin/python -m uvicorn --app-dir backend \
-    --factory app.serve:build_server --port "$BACKEND_PORT" --log-level warning \
-    >"$WORK/serve.log" 2>&1 &
+(
+    set -a
+    . devtools/contract-test.env
+    set +a
+    exec env -u DATABASE_URL APP_ENV=development FRONTEND_BUNDLE="$OUT/frontend/dist" \
+        backend/.venv/bin/python -m uvicorn --app-dir backend \
+        --factory app.serve:build_server --port "$BACKEND_PORT" --log-level warning
+) >"$WORK/serve.log" 2>&1 &
 serve_pid=$!
 
 serve_deadline=$(($(date +%s) + 30))

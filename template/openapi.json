@@ -47,6 +47,61 @@
         }
       }
     },
+    "/reads": {
+      "get": {
+        "summary": "Read Parts",
+        "description": "The answer of each `part`, in order, as its route answers it alone. Requires nothing\nitself: each part carries the credential of this request to its own route. A part that cannot\nanswer in the group answers `left`. `docs/adr/template/0029`.",
+        "operationId": "read_parts_reads_get",
+        "parameters": [
+          {
+            "name": "part",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "maxItems": 256,
+              "title": "Part"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reads"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response exceeds its byte limit, or response did not finish within its time limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The group names more paths than its response can hold",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs/{id}": {
       "get": {
         "summary": "Read Job",
@@ -123,7 +178,8 @@
               }
             }
           }
-        }
+        },
+        "x-part": true
       }
     },
     "/tasks": {
@@ -209,7 +265,8 @@
               }
             }
           }
-        }
+        },
+        "x-part": true
       },
       "post": {
         "summary": "Create Task",
@@ -509,6 +566,38 @@
   },
   "components": {
     "schemas": {
+      "AnsweredPart": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "answered",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "headers",
+          "body"
+        ],
+        "title": "AnsweredPart"
+      },
       "ClientEvent": {
         "properties": {
           "kind": {
@@ -694,6 +783,61 @@
         "description": "One job, as the tenant that asked for it reads it. `outcome` is set when the job is `done`,\nand `failure` names why it is `dead`."
       },
       "JsonValue": {},
+      "LeftPart": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "left",
+            "title": "Kind"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "timed out",
+              "not a part",
+              "past the cap",
+              "too large"
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "reason"
+        ],
+        "title": "LeftPart"
+      },
+      "Reads": {
+        "properties": {
+          "parts": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/AnsweredPart"
+                },
+                {
+                  "$ref": "#/components/schemas/LeftPart"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "kind",
+                "mapping": {
+                  "answered": "#/components/schemas/AnsweredPart",
+                  "left": "#/components/schemas/LeftPart"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Parts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "parts"
+        ],
+        "title": "Reads"
+      },
       "Task": {
         "properties": {
           "id": {

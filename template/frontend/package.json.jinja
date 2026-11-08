@@ -38,7 +38,8 @@
     "exclude": [
       "src/components/ui/**",
       "src/lib/utils.ts",
-      "src/api/schema.ts"
+      "src/api/schema.ts",
+      "src/api/parts.ts"
     ]
   },
   "conformance": {
@@ -49,14 +50,16 @@
     "exclude": [
       "src/components/ui/**",
       "src/lib/utils.ts",
-      "src/api/schema.ts"
+      "src/api/schema.ts",
+      "src/api/parts.ts"
     ]
   },
   "comments": {
     "exclude": [
       "src/components/ui/**",
       "src/lib/utils.ts",
-      "src/api/schema.ts"
+      "src/api/schema.ts",
+      "src/api/parts.ts"
     ]
   },
   "scripts": {
@@ -66,7 +69,7 @@
     "build": "vite build",
     "build:mock": "vite build --mode mock",
     "preview": "vite preview",
-    "openapi:types": "pnpm dlx openapi-typescript@7.13.0 ../openapi.json -o src/api/schema.ts",
+    "openapi:types": "pnpm dlx openapi-typescript@7.13.0 ../openapi.json -o src/api/schema.ts && node devtools/parts.mjs ../openapi.json src/api/parts.ts",
     "lint": "biome check --write src tests e2e devtools && tsc --noEmit && pnpm run comments && pnpm run conformance && pnpm run file-length && pnpm run complexity --tighten-baseline",
     "lint:check": "biome ci src tests e2e devtools && tsc --noEmit && pnpm run comments && pnpm run conformance && pnpm run file-length && pnpm run complexity",
     "comments": "node devtools/comments.mjs src tests e2e devtools",

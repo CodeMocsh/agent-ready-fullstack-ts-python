@@ -104,6 +104,15 @@ def no_connection_free(retry_after: int) -> JSONResponse:
     )
 
 
+@final
+class GroupTooLarge(ApiError):
+    """A `GET /reads` that names more paths than its response can name, each as a part that left.
+    `docs/adr/template/0029`."""
+
+    status = 422
+    description = "The group names more paths than its response can hold"
+
+
 Bound = Literal["in_flight", "rate", "streams"]
 """Which bound of `app/admission.py` refused a request."""
 

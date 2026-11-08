@@ -122,3 +122,14 @@ def test_the_process_says_what_it_admits_and_warns_when_it_only_reports(
         said = [one for one in logged() if one["message"] == "admission"]
 
     assert [(one["severity"], one["enforced"]) for one in said] == [("WARNING", False)]
+
+
+def test_the_process_says_what_a_group_of_reads_runs(logged: Logged) -> None:
+    app = main.create_app()
+    with TestClient(app):
+        said = [one for one in logged() if one["message"] == "reads"]
+
+    limits = app.state.read_limits
+    assert [
+        (one["part_bound_seconds"], one["max_parts"], one["part_concurrency"]) for one in said
+    ] == [(limits.part_bound_seconds, limits.max_parts, limits.part_concurrency)]

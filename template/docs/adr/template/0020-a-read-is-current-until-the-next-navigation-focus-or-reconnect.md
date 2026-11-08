@@ -65,12 +65,12 @@ and passed when the machine was idle.
 - **Give each child the data of the screen's query.** It is the right shape for a new screen.
   In a project with many screens, each duplicate is found only after it causes a burst.
 - **`refetchOnMount: false`.** A screen that a navigation draws again then shows its old copy.
-- **Record only navigations, not a focus or a reconnect.** A part that closed before a focus,
+- **Record only navigations, not a focus or a reconnect.** A section that closed before a focus,
   and opens after it, then shows data older than the focus.
 
 ## Consequences
 
-- A part that opens without a navigation can show data as old as the last navigation, focus or
+- A section that opens without a navigation can show data as old as the last navigation, focus or
   reconnect. A screen that must show another writer's change sooner needs a stream.
 - A project that creates its own `QueryClient` does not get this default, and its read budgets
   measure a different client from the one the app uses.

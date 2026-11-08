@@ -42,7 +42,7 @@ Each half installs, lints, tests and builds on its own. `pnpm` runs in `frontend
 The backend is the source of truth. After changing a model or a route:
 
 ```bash
-make openapi        # regenerates openapi.json and frontend/src/api/schema.ts
+make openapi        # regenerates openapi.json, frontend/src/api/schema.ts and parts.ts
 ```
 
 Commit both alongside the change; `make openapi-check` fails if they drift. The frontend's

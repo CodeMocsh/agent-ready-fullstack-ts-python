@@ -36,6 +36,7 @@ object is deliberately the wrong shape for every route that takes one."""
 PUBLIC_ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", "/health"),
     ("GET", "/ready"),
+    ("GET", "/reads"),
     ("POST", "/client-events"),
 )
 """Every route allowed to answer without resolving a tenant, spelled exactly.

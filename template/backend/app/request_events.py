@@ -9,8 +9,6 @@ in place of its own response. When the event cannot be recorded, the request fai
 with a `500`, and the response it would have sent does not leave. `docs/adr/template/0017`.
 """
 
-import asyncio
-
 from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -93,7 +91,7 @@ class _Recording:
         await self._send(message)
 
     async def end(self) -> None:
-        if not self._answered and not _cancelled():
+        if not self._answered and not log.cancelling():
             _ = await self._recorded(FAILED)
 
     async def _recorded(self, status: int) -> bool:
@@ -106,8 +104,3 @@ class _Recording:
             log.database_busy(type(busy).__name__)
             await no_connection_free(busy.retry_after)(self._scope, self._receive, self._send)
         return not self._refused
-
-
-def _cancelled() -> bool:
-    task = asyncio.current_task()
-    return task is not None and task.cancelling() > 0

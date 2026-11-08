@@ -4,11 +4,14 @@ Which ones is a list in the route guarantee's test, rather than a mark here.
 `docs/adr/template/0004` says why an exemption is a list and never a decorator.
 """
 
-from fastapi import APIRouter, Request, Response
+from typing import Annotated
 
-from app import log
+from fastapi import APIRouter, Query, Request, Response
+
+from app import log, reads
 from app.deps import database_of
-from app.models import ClientEvents
+from app.models import ClientEvents, Reads
+from app.refusal import GroupTooLarge, responses
 
 router = APIRouter()
 
@@ -39,3 +42,14 @@ async def record_client_events(body: ClientEvents) -> Response:
     for event in body.events:
         log.client_event(event)
     return Response(status_code=204)
+
+
+@router.get("/reads", response_model=Reads, responses=responses(GroupTooLarge))
+async def read_parts(
+    request: Request,
+    part: Annotated[list[str], Query(min_length=1, max_length=reads.PATHS_AT_MOST)],
+) -> Response:
+    """The answer of each `part`, in order, as its route answers it alone. Requires nothing
+    itself: each part carries the credential of this request to its own route. A part that cannot
+    answer in the group answers `left`. `docs/adr/template/0029`."""
+    return await reads.answer(request, part)

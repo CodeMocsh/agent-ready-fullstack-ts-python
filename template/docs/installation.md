@@ -470,6 +470,29 @@ What to expect, because it is not all free:
     template's copy: `kinds` in `app/jobs.py` in `SCOPING_FUNCTIONS`, a `Site` named by its path
     under `app/`, and `test_a_job_obtains_a_store_only_for_the_tenant_of_the_job`.
   [adr/template/0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md) says why.
+- **From 0.67.0 the reads that start in one task are one request.**
+  - Give each GET route that reads only the database `openapi_extra=PART`, from `app.reads`, and
+    run `make openapi`. It writes `frontend/src/api/parts.ts`. Leave a route that waits on
+    another system alone: `waiting` raises `PartWaitsOutside` in a part.
+  - Each budget in `tests/read-budgets.ts` is now exact, and a budget above 1 names `because`.
+    Run `pnpm -C frontend exec vitest run tests/first-draw.test.tsx`, and set each budget to the
+    requests it reports. The test now waits for each render, so a screen with a slow render can
+    count more reads than before.
+  - `app/read_limits.py` is new, and yours. In `tests/models/layers.py`, give the new module
+    `app/models/reads.py` the entry `"reads": frozenset()`, or `make test` names it.
+  - The contract suite sends each part of a group as a request of the rate. If
+    `make test-contract` gets a `429`, run `ADMISSION_MODE=evaluate make test-contract` and raise
+    `ADMISSION_BURST` in `devtools/contract-test.env`. The template's own suite needs 60.
+  - In `docs/frontend.md`, take the template's bullet that starts "A screen's first draw is one
+    request".
+  - If you keep your own `tests/routes/test_guarantee.py`, add `("GET", "/reads")` to
+    `PUBLIC_ROUTES`. Each part presents the credential of its group.
+  - The process now refuses to start when `READS_MAX_PARTS`, 16, is more than `burst`, or when
+    `READS_PART_CONCURRENCY`, 4, is more than `in_flight`. This includes a test that lowers
+    `ADMISSION_IN_FLIGHT`. Raise the admission numbers in `app/admission_limits.py`, or lower
+    the numbers in `app/read_limits.py`. `in_flight` no longer needs to hold a whole draw.
+    Measure with `ADMISSION_MODE=evaluate` before you lower it.
+  [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md) says why.
 - **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be

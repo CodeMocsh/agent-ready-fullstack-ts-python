@@ -3,6 +3,7 @@ from fastapi import APIRouter, Response
 from app.deps import JobsDep, StoreDep
 from app.errors import NoSuchTask, responses
 from app.models import CreateTaskBody, Job, Task, TaskPage, UpdateTaskBody
+from app.reads import PART
 from app.refusal import UnstorableInput
 from app.store.jobs import UnstorableJson
 from app.task_jobs import CLOSE_A_TASK
@@ -10,7 +11,7 @@ from app.task_jobs import CLOSE_A_TASK
 router = APIRouter()
 
 
-@router.get("/tasks", responses=responses(NoSuchTask))
+@router.get("/tasks", responses=responses(NoSuchTask), openapi_extra=PART)
 async def list_tasks(store: StoreDep, after: str | None = None) -> TaskPage:
     page = await store.list(after)
     if page is None:

@@ -25,6 +25,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Parts
+         * @description The answer of each `part`, in order, as its route answers it alone. Requires nothing
+         *     itself: each part carries the credential of this request to its own route. A part that cannot
+         *     answer in the group answers `left`. `docs/adr/template/0029`.
+         */
+        get: operations["read_parts_reads_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs/{id}": {
         parameters: {
             query?: never;
@@ -99,6 +121,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AnsweredPart */
+        AnsweredPart: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "answered";
+            /** Status */
+            status: number;
+            /** Headers */
+            headers: {
+                [key: string]: string;
+            };
+            /** Body */
+            body: string;
+        };
         /**
          * ClientEvent
          * @description One failure the browser saw, named rather than described. No field takes free text:
@@ -162,6 +200,24 @@ export interface components {
             failure: string | null;
         };
         JsonValue: unknown;
+        /** LeftPart */
+        LeftPart: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "left";
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "timed out" | "not a part" | "past the cap" | "too large";
+        };
+        /** Reads */
+        Reads: {
+            /** Parts */
+            parts: (components["schemas"]["AnsweredPart"] | components["schemas"]["LeftPart"])[];
+        };
         /** Task */
         Task: {
             /** Id */
@@ -232,6 +288,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Response exceeds its byte limit, or response did not finish within its time limit */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    read_parts_reads_get: {
+        parameters: {
+            query: {
+                part: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Reads"];
+                };
+            };
+            /** @description The group names more paths than its response can hold */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             /** @description Response exceeds its byte limit, or response did not finish within its time limit */

@@ -151,7 +151,7 @@ openapi:
 	pnpm -C frontend openapi:types
 
 openapi-check: openapi
-	@git diff --exit-code -- openapi.json frontend/src/api/schema.ts \
+	@git diff --exit-code -- openapi.json frontend/src/api/schema.ts frontend/src/api/parts.ts \
 	  || { echo "" >&2; \
 	       echo "The contract artifacts do not match the backend code." >&2; \
 	       echo "Run 'make openapi' and commit the result." >&2; exit 1; }
