@@ -312,3 +312,11 @@ forced tenant isolation, why the application never applies DDL — and `copier u
 them there. Yours go in `docs/adr/` itself, numbered from `0001`. Each file's name is the
 decision it records, so the directory listing is the index. Its
 [README](docs/adr/README.md) says what belongs there and how to write one.
+
+## Verification
+
+**Commit gate**: `make gate-commit`, run by the hook through `make pre-commit`.
+It checks static rules and the selected local tests. Its pass record certifies only this gate.
+
+**Full suite**: `make suite`, run by CI or a release caller.
+It runs the full default gate and the frontend build. It does not include opt-in tiers.

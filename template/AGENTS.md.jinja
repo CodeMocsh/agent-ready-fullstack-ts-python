@@ -71,8 +71,9 @@ fans out to both. Each half works without the other's toolchain.
 
 - Never hand-edit or hand-merge a generated file. Take a side and regenerate: `make openapi` for
   the contract, `make schema` and `make roles` for `deploy/`.
-- Run `make pre-commit`, then commit. The gate runs once per tree. A run that skipped a half says
-  so on stderr; read that before you believe the green.
+- Run `make pre-commit`, then commit. The commit gate runs once per tree.
+  Read the checks it says it did not run.
+  Run `make suite` before merge when CI does not run it.
 - When a complexity gate fails, split the function. Do not raise a threshold to get green.
 - When the startup gate fails, import the package where it is used. Do not record a rise to get
   green.
@@ -185,7 +186,8 @@ fans out to both. Each half works without the other's toolchain.
 
 ```bash
 make install        # the git hooks, both halves, then the browser
-make pre-commit     # the gate, once per tree
+make pre-commit     # the commit gate, once per tree
+make suite          # the full suite and build
 make dev            # both halves, live mode; with DATABASE_URL, the worker too
 make dev-frontend   # frontend only, mock mode
 make lint           # auto-fix and lint both halves

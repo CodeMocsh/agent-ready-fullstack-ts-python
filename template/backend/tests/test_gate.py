@@ -5,11 +5,8 @@ Everything here reads a file rather than an import: the `Makefile`, the git hook
 and nothing but this file notices when they stop -- a gate that lost a member, a tier nothing
 runs, a test that switched itself off.
 
-**Everything that runs the gate runs the same list, and that is the point.** The hook checks a
-commit on the machine making it; a CI checks a push against a fresh checkout nobody configured,
-which is what catches a clone where `make hooks` was never run. Neither may grow its own list of
-steps. A project that ships the GitHub workflow also ships the test that holds it to
-`make gate`.
+The hook runs `make gate-commit`. CI runs `make suite`, which includes `make gate`.
+Each caller names a target instead of copying its steps.
 
 Two of its helpers are imported by `devtools/check_template.sh` in the generator repository,
 which is why this module imports no third-party package at the top and does each such import
@@ -338,7 +335,7 @@ def test_the_hook_and_make_pre_commit_run_the_gate_through_one_runner():
     """A gate started by hand that skipped the runner would take no lock and record no pass."""
     assert "make -s pre-commit" in HOOK.read_text(encoding="utf-8")
     assert recipe_of("pre-commit") == ["@sh devtools/gate.sh"]
-    assert "make -s gate" in RUNNER.read_text(encoding="utf-8")
+    assert "make -s gate-commit" in RUNNER.read_text(encoding="utf-8")
 
 
 def test_the_runner_says_so_when_it_could_not_run_the_whole_gate():
@@ -437,7 +434,7 @@ THE_BUDGET = re.compile(r"^BUDGET=[0-9]+$", re.MULTILINE)
 
 def a_clone_with_a_gate(tmp_path: Path, recipe: str, budget: int = 600) -> Path:
     """A git checkout with both halves "installed", the runner and its helpers copied in, and a
-    `gate` target that runs `recipe`. The lock is moved into `tmp_path`, so a gate already
+    `gate-commit` target that runs `recipe`. The lock is moved into `tmp_path`, so a gate already
     holding this project's lock -- the one running this test -- does not hold this one."""
     clone = tmp_path / "clone"
     (clone / "devtools").mkdir(parents=True)
@@ -451,7 +448,7 @@ def a_clone_with_a_gate(tmp_path: Path, recipe: str, budget: int = 600) -> Path:
         (clone / "devtools" / helper.name).write_text(helper.read_text(encoding="utf-8"))
     (clone / "frontend" / "node_modules").mkdir(parents=True)
     (clone / "backend" / ".venv").mkdir(parents=True)
-    (clone / "Makefile").write_text(f"gate:\n\t@{recipe}\n", encoding="utf-8")
+    (clone / "Makefile").write_text(f"gate-commit:\n\t@{recipe}\n", encoding="utf-8")
     (clone / ".gitignore").write_text("ran.log\nnode_modules/\n.venv/\n", encoding="utf-8")
     (clone / "kept.txt").write_text("one\n", encoding="utf-8")
     tools = tmp_path / "bin"
@@ -488,7 +485,7 @@ def test_a_green_gate_is_not_run_again_over_the_same_tree(tmp_path: Path):
 
     assert first.returncode == 0 and second.returncode == 0, first.stderr + second.stderr
     assert times_the_gate_ran(clone) == 1
-    assert "already passed the gate" in second.stderr
+    assert "already passed the commit gate" in second.stderr
 
 
 def test_an_edit_after_a_green_gate_runs_it_again(tmp_path: Path):

@@ -47,23 +47,27 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 
 ## The gate
 
-{% if github_ci -%}
-- **The gate is `make gate`:** secrets, lint-check, openapi-check and test. The git hook runs
-  it through `make pre-commit` before a commit, and `.github/workflows/ci.yml` runs it directly
-  after a push, against a fresh checkout nobody configured. A new check goes in `make gate`,
-  never into the workflow: a workflow that re-lists the steps is a second copy, and the copy is
-  the one that goes stale.
-{%- else -%}
-- **The gate is `make gate`:** secrets, lint-check, openapi-check and test. The git hook runs
-  it through `make pre-commit` before a commit. If your CI runs it after a push, have it run
-  `make gate` rather than a list of the same steps: a copy of the list is the one that goes
-  stale.
-{%- endif %}
-- **`make pre-commit` runs the gate once per tree.** `devtools/gate.sh` queues behind any other
-  gate of this project and records the tree a green run read, so a commit of that same tree
-  passes at once. Edit one byte and the gate runs again.
-  [adr/template/0014](adr/template/0014-the-gate-runs-once-per-tree-and-one-at-a-time.md) says
-  why.
+- **The hook runs `make gate-commit` through `make pre-commit`.** It checks secrets, lint,
+  types and contract artifacts. It runs backend tests outside `tests/started/` and the frontend
+  Node and smoke projects. It reports the checks left for `make suite`.
+- **`make suite` runs all default tests and builds the frontend.** It includes the started
+  app, every frontend test and the live contract suite. It does not select the opt-in tiers below.
+  {% if github_ci %}The GitHub workflow runs it on pull requests and pushes.{% else %}Configure
+  your CI or release build to run it before promotion.{% endif %}
+- **`make pre-commit` records one pass per tree.** A matching pass returns before the project lock.
+  After locking, a waiter reads the tree and pass again. It reuses a matching pass.
+  The record certifies only the commit gate. It does not certify the full suite.
+  [adr/template/0014](adr/template/0014-the-gate-runs-once-per-tree-and-one-at-a-time.md) defines
+  the execution stages and the lock.
+- **Test requirements decide selection.** `frontend/vitest.config.ts` keeps Node tests separate
+  from DOM setup. Its smoke project keeps API, component and first-draw checks in the commit
+  gate. All other frontend test files enter the DOM project. New backend tests enter the
+  default run unless an explicit tier excludes them. A test that starts the app belongs under
+  `tests/started/`. Timing reports identify costly tests; timing never silently deselects one.
+- **A release caller must bind the result to its source revision.** Install from lockfiles,
+  provide a Git checkout for repository checks, and stop promotion on a failed or missing result.
+  Select additional tiers for the deployment's requirements. Assign an owner for failures.
+  A post-merge check can block deployment but cannot keep a broken change out of `main`.
 - **`devtools/gate.sh` unsets git's local environment first.** git runs the hook with `GIT_DIR`
   and `GIT_INDEX_FILE` set to this repository. A test that runs `git init` in a temporary
   directory then reinitialises this repository instead. Keep the `unset`.

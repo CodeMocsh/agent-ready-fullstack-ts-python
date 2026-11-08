@@ -493,7 +493,9 @@ What to expect, because it is not all free:
     the numbers in `app/read_limits.py`. `in_flight` no longer needs to hold a whole draw.
     Measure with `ADMISSION_MODE=evaluate` before you lower it.
   [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md) says why.
-- **Re-run the gate.** `make pre-commit` is the check that the merge left something coherent.
+- **Run `make suite` after an update.** Take the new `gate-commit` and `suite` targets together.
+  Keep the frontend Node, smoke and DOM selections from `vitest.config.ts`. A custom CI must
+  call `make suite` before promotion. `make pre-commit` now checks only the commit gate.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
