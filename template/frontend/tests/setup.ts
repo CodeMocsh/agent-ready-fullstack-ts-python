@@ -23,6 +23,8 @@ beforeAll(() => {
   if (!againstLiveBackend) {
     server.events.on("request:start", ({ request, requestId }) => {
       inFlight.set(requestId, `${request.method} ${request.url}`);
+      if (request.signal.aborted) settled({ requestId });
+      else request.signal.addEventListener("abort", () => settled({ requestId }), { once: true });
     });
     server.events.on("request:end", settled);
     server.events.on("request:unhandled", settled);

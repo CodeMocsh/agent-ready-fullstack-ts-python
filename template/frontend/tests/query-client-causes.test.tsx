@@ -117,7 +117,7 @@ it("reads once for each mutation one click starts", async () => {
   expect(record).not.toHaveBeenCalled();
 });
 
-it("reads once for each server event about a query, however close together they come", async () => {
+it("merges server events about a query before its read starts", async () => {
   aQueryOfTasks();
   await settle();
   await act(() =>
@@ -127,7 +127,7 @@ it("reads once for each server event about a query, however close together they 
     ]),
   );
   await settle();
-  expect(reads).toBe(3);
+  expect(reads).toBe(2);
   expect(record).not.toHaveBeenCalled();
 });
 

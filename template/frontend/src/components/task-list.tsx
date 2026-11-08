@@ -17,7 +17,8 @@ const TASKS_KEY = ["tasks"] as const;
 
 const TASK_PAGES = infiniteQueryOptions({
   queryKey: TASKS_KEY,
-  queryFn: ({ pageParam }: { pageParam: string | null }) => tasksApi.list(pageParam),
+  queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
+    tasksApi.list(pageParam, signal),
   initialPageParam: null,
   getNextPageParam: (page: TaskPage) => page.next,
 });

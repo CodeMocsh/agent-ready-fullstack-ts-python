@@ -40,11 +40,12 @@ ordinary invalidation in an ordinary callback. Only the running cycle shows it.
   - a backstop: a query's `refetchInterval`, at its spacing.
 - **A navigation, a focus, a reconnect and a person's input each permit one read of every key.** A
   person's mutation and a server event permit one read of the keys they name, and of no other key.
-  Each one counts: eight mutations from one click, or two server events in one tick, permit eight or
-  two reads. A permit that comes before the key's next read since the last cause stands in for that
-  read's own permit. One mutation or event permits, and starts, one read of each active query its
-  keys match, however many of its keys match that query. `tests/query-client-causes.test.tsx` holds
-  this. `followNavigations` hears the causes. The default `persister` that `createQueryClient` sets
+  Each mutation counts. Server events merge while a read waits or runs. A later event requires a
+  trailing read after the active read settles. That read still needs an event cause.
+  A permit that comes before the key's next read since the last cause stands in for that read's
+  own permit. Each cause matches a query once, however many of its keys match that query. `tests/query-client-causes.test.tsx` holds
+  this. [0030](0030-server-events-merge-and-share-a-read-budget.md) defines event refresh and transport limits.
+  `followNavigations` hears the causes. The default `persister` that `createQueryClient` sets
   checks each read of a key against the record of its last read before the read starts. It waits one
   microtask first, so that each listener of a focus or a reconnect hears the cause before the read
   that the event starts. A retry of a read that never reached the server is the same read.

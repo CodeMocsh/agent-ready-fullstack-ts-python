@@ -12,7 +12,14 @@ import {
 } from "@tanstack/react-query";
 import type { AnyRouter } from "@tanstack/react-router";
 import { Unreached } from "@/api/client";
+import {
+  budgetEventRead,
+  checkedEventReadPolicy,
+  EVENT_READ_POLICY,
+  type EventReadPolicy,
+} from "@/api/read-budget";
 import type { RecordClientEvent } from "@/client-events";
+import { EventRefresh } from "@/event-refresh";
 
 declare module "@tanstack/react-query" {
   interface Register {
@@ -41,6 +48,9 @@ const PERSON_INPUTS = [
   "change",
   "drop",
 ] as const;
+
+const eventPolicies = new WeakMap<QueryClient, EventReadPolicy>();
+const eventRefreshes = new WeakMap<QueryClient, EventRefresh>();
 
 const periods = new WeakMap<QueryClient, WeakSet<Query>>();
 const followed = new WeakMap<QueryClient, Causes>();
@@ -142,7 +152,7 @@ function aPageNotYetRead(query: Query): boolean {
   return meta?.fetchMore !== undefined;
 }
 
-function admit(queryClient: QueryClient, query: Query): Read {
+function admit(queryClient: QueryClient, query: Query, eventRead: boolean): Read {
   const { reads } = causesOf(queryClient);
   const now = Date.now();
   const last = reads.get(query.queryHash);
@@ -153,8 +163,8 @@ function admit(queryClient: QueryClient, query: Query): Read {
     last.refused = false;
     return last;
   }
-  if (last === undefined || last.granted > 0) {
-    const granted = last === undefined ? 0 : last.granted - 1;
+  if (eventRead || last === undefined || last.granted > 0) {
+    const granted = last !== undefined && last.granted > 0 ? last.granted - 1 : 0;
     const read = { granted, at: now, failure: NO_FAILURE, refused: false };
     reads.set(query.queryHash, read);
     return read;
@@ -178,16 +188,33 @@ function everyListenerOfTheEventRan(): Promise<void> {
 
 const readsOnlyWithACause: QueryPersister<unknown, QueryKey> = async (queryFn, context, query) => {
   await everyListenerOfTheEventRan();
-  const read = admit(context.client, query);
+  const refresh = eventRefreshes.get(context.client);
+  const page = aPageNotYetRead(query);
+  let permit = page ? undefined : refresh?.take(query);
+  if (!page && permit === undefined && query.state.fetchFailureCount > 0) {
+    permit = refresh?.retry(query);
+  }
+  const eventRead = permit !== undefined;
+  if (eventRead && refresh !== undefined) budgetEventRead(context.signal, refresh.budget);
+  const read = admit(context.client, query, eventRead);
+  const attempt = refresh?.begin(query, permit);
+  const stop =
+    eventRead && refresh !== undefined && attempt !== undefined
+      ? refresh.watch(query, attempt, context.signal)
+      : () => undefined;
   try {
+    if (eventRead && refresh !== undefined && attempt !== undefined) {
+      await refresh.prepare(query, attempt, context.signal);
+    }
     const data = await queryFn(context);
     read.failure = NO_FAILURE;
     return data;
   } catch (failure: unknown) {
-    read.failure = failure;
+    if (!context.signal.aborted) read.failure = failure;
     throw failure;
   } finally {
-    answered(context.client);
+    stop();
+    if (followed.has(context.client)) answered(context.client);
   }
 };
 
@@ -203,11 +230,21 @@ export async function invalidateForServerEvent(
   queryClient: QueryClient,
   queryKeys: readonly QueryKey[],
 ): Promise<void> {
-  grant(queryClient, queryKeys);
-  await invalidate(queryClient, queryKeys);
+  causesOf(queryClient);
+  const refresh = eventRefreshes.get(queryClient);
+  if (refresh === undefined) throw new Error(UNFOLLOWED);
+  await Promise.all(
+    queryClient
+      .getQueryCache()
+      .findAll({ predicate: matching(queryKeys) })
+      .map((query) => refresh.change(query)),
+  );
 }
 
-export function createQueryClient(record: RecordClientEvent): QueryClient {
+export function createQueryClient(
+  record: RecordClientEvent,
+  eventReadPolicy: EventReadPolicy = EVENT_READ_POLICY,
+): QueryClient {
   const queryClient: QueryClient = new QueryClient({
     queryCache: new QueryCache({ onError: (error) => record("query", error) }),
     mutationCache: new MutationCache({
@@ -237,6 +274,7 @@ export function createQueryClient(record: RecordClientEvent): QueryClient {
       },
     },
   });
+  eventPolicies.set(queryClient, checkedEventReadPolicy(eventReadPolicy));
   return queryClient;
 }
 
@@ -244,6 +282,9 @@ export function followNavigations(router: AnyRouter, queryClient: QueryClient): 
   if (periods.has(queryClient)) {
     throw new Error("this query client already follows a router");
   }
+  const policy = eventPolicies.get(queryClient);
+  if (policy === undefined) throw new Error("Use createQueryClient before following a router");
+  eventRefreshes.set(queryClient, new EventRefresh(queryClient, policy));
   const regained = (happened: boolean) => {
     if (happened) {
       startPeriod(queryClient);
@@ -285,6 +326,8 @@ export function followNavigations(router: AnyRouter, queryClient: QueryClient): 
     for (const stop of stops) {
       stop();
     }
+    eventRefreshes.get(queryClient)?.stop();
+    eventRefreshes.delete(queryClient);
     periods.delete(queryClient);
     followed.delete(queryClient);
   };

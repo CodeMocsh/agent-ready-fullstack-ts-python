@@ -8,8 +8,10 @@ export type CreateTaskBody = components["schemas"]["CreateTaskBody"];
 export type UpdateTaskBody = components["schemas"]["UpdateTaskBody"];
 
 export const tasksApi = {
-  list: (after: string | null) =>
-    request<TaskPage>(after === null ? "/tasks" : `/tasks?after=${encodeURIComponent(after)}`),
+  list: (after: string | null, signal: AbortSignal | null = null) =>
+    request<TaskPage>(after === null ? "/tasks" : `/tasks?after=${encodeURIComponent(after)}`, {
+      signal,
+    }),
   create: (body: CreateTaskBody) =>
     request<Task>("/tasks", { method: "POST", body: JSON.stringify(body) }),
   update: (id: string, body: UpdateTaskBody) =>
