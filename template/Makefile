@@ -33,13 +33,13 @@ gate-commit: secrets lint-check openapi-check test-commit
 suite: gate build
 
 test-commit: test-commit-frontend test-commit-backend
-	@echo "Commit tests passed. Started-app tests, broader DOM tests, live contracts and build did not run. Run make suite."
+	@echo "Commit tests passed. Slow tests, started-app tests, broader DOM tests, live contracts and build did not run. Run make suite."
 
 test-commit-frontend:
 	pnpm -C frontend test:commit
 
 test-commit-backend:
-	cd backend && uv run --no-sync pytest -q --ignore=tests/started
+	cd backend && uv run --no-sync pytest -q --ignore=tests/started --ignore-glob='*/slow'
 
 secrets:
 	@sh devtools/secrets.sh

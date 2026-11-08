@@ -204,6 +204,16 @@ The final section of `check_template.sh` drives `pnpm lint` and `backend/devtool
 what an earlier step exists to catch, move backend source under `make openapi-check`, and pass a
 template that ships unformatted source. Nothing may follow that section.
 
+## Slow tests stay in the default full suite
+
+Only the commit commands exclude directories named `slow`.
+`norecursedirs` and full-run exclusions must not name them.
+The generator gate runs [check_test_selection.py](../devtools/check_test_selection.py) against
+the rendered project. It compares actual collection with files on disk and the commit
+selection. Its temporary probes exercise root and nested slow directories, a similarly named
+ordinary directory, and the Node and DOM environments. The backend selection test also makes
+slow probes fail the full run while the commit run passes.
+
 ## `openapi-typescript` runs through `pnpm dlx` at an exact pin
 
 It must not become a devDependency. It declares `peerDependencies: { typescript: "^5.x" }` and

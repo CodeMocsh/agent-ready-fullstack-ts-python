@@ -16,7 +16,13 @@ A small local check gives earlier feedback. A full remote check retains broader 
 
 The hook calls `make pre-commit`. Its runner calls `make gate-commit`.
 This stage retains static checks, backend tests that do not start the app, and frontend Node
-and smoke tests. `test_commit_gate.py` holds the target boundaries.
+and smoke tests. Both halves exclude directories named `slow` at any depth.
+`test_commit_gate.py` holds the target boundaries and proves the backend selection.
+
+Test directories retain the subject they cover. An expensive test lives under that subject's
+`slow/` directory. The full run still selects it. The directory changes selection, not the
+test's environment or prerequisites. The Node and DOM projects retain their existing rules.
+The external tiers remain separate: a slow unit test does not become an integration test.
 
 `make gate` retains all default tests and static checks. `make suite` adds the frontend build.
 The generated GitHub workflow calls `make suite` on pull requests and pushes.

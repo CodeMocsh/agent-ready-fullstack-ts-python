@@ -49,9 +49,10 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 
 - **The hook runs `make gate-commit` through `make pre-commit`.** It checks secrets, lint,
   types and contract artifacts. It runs backend tests outside `tests/started/` and the frontend
-  Node and smoke projects. It reports the checks left for `make suite`.
+  Node and smoke projects. Both halves exclude directories named `slow` at any depth.
+  It reports the checks left for `make suite`.
 - **`make suite` runs all default tests and builds the frontend.** It includes the started
-  app, every frontend test and the live contract suite. It does not select the opt-in tiers below.
+  app, slow tests, every frontend test and the live contract suite. It does not select the opt-in tiers below.
   {% if github_ci %}The GitHub workflow runs it on pull requests and pushes.{% else %}Configure
   your CI or release build to run it before promotion.{% endif %}
 - **`make pre-commit` records one pass per tree.** A matching pass returns before the project lock.
@@ -64,6 +65,16 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   gate. All other frontend test files enter the DOM project. New backend tests enter the
   default run unless an explicit tier excludes them. A test that starts the app belongs under
   `tests/started/`. Timing reports identify costly tests; timing never silently deselects one.
+- **Keep expensive tests beside their subject, under `slow/`.** For example, a costly route
+  test belongs in `backend/tests/routes/slow/`. An expensive component test belongs in
+  `frontend/tests/components/slow/`. Create that directory only when it has a test. Do not
+  create a `fast/` directory. Ordinary tests keep their current selection. Moving a Node test
+  under `slow/` keeps its Node environment. Moving a DOM test keeps its DOM environment.
+  Preserve fixture scope and imports when moving a test. Add `__init__.py` to a new Python
+  test package. Do not add `slow` to `norecursedirs` or a full-run exclusion.
+- **Measure before moving a test.** Optimize unnecessary setup first. Use repeated runs with
+  the same dependencies to compare CPU and elapsed time. Keep the aggregate commit budget;
+  many cheap tests can still be costly. A measured duration never changes test selection.
 - **A release caller must bind the result to its source revision.** Install from lockfiles,
   provide a Git checkout for repository checks, and stop promotion on a failed or missing result.
   Select additional tiers for the deployment's requirements. Assign an owner for failures.
