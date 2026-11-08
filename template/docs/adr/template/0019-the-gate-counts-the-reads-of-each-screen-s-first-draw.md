@@ -24,7 +24,8 @@ before anything renders. Only a draw shows all of them.
 ## Decision
 
 - **Each screen has a read budget.** `tests/read-budgets.ts` gives each screen the path it
-  visits and the most GET requests to the API that its first draw may send. A screen is a route
+  visits and the GET requests to the API that its first draw sends. A budget above 1 names
+  `because`, and the type of `ReadBudget` asks for it. A screen is a route
   with no children. The project owns the file, and an update does not touch it. A screen that
   only redirects names in `lands` the screen its visit draws. The budget then counts that whole
   draw. A screen behind sign-in never lands on the sign-in screen: `signedIn` signs it in.
@@ -34,9 +35,17 @@ before anything renders. Only a draw shows all of them.
 - **A draw is counted in vitest, against `src/mocks/`.** `readsOf` in `tests/first-draw.tsx`
   builds a new router at the path, with the options of `src/router.tsx`, and a new query client
   from `src/query-client.ts`. The new query client replaces one in the router's context. It
-  counts from before the router loads, so a `beforeLoad` read counts. The draw has settled when
-  the router is idle, no query fetches, and no request is open, for 150 ms. A child that mounts
-  after a response therefore counts.
+  counts from before the router loads, so a `beforeLoad` read counts. Each check first flushes
+  React in `act`. The draw has settled when the router is idle, no query fetches, and no request
+  is open, for 150 ms after such a flush. A child that mounts after a response therefore counts,
+  also after a render that React slices.
+- **The count is exact, and one URL is read once.** The first draw fails when it sends more requests
+  or fewer than its budget. The count is the same on each run
+  ([0020](0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)), so a change that
+  removes a read changes its budget too. It fails when it reads one URL, its query included, in two
+  requests. `readsOf` lists the parts of each `GET /reads`.
+  [0029](0029-the-reads-that-start-in-one-task-are-one-request.md) sends the reads that start in one
+  task as one request.
 - **A draw has the providers the app has.** `src/main.tsx` and `readsOf` both put the router
   inside `AppProviders` from `src/app-providers.tsx`, inside the query client's provider. The
   project owns that file. A provider that the project adds there is in each draw too.
@@ -46,7 +55,7 @@ before anything renders. Only a draw shows all of them.
   in a `finally`. `tests/setup.ts` clears the browser storage only after each file, so a draw
   that throws would otherwise leave the credential for the next draw.
 - **A focus reads within the same budget.** After the first draw, `readsOf` reports a focus to
-  TanStack Query and counts again.
+  TanStack Query and counts again. The focus may send fewer requests than the budget.
 - **A draw that fails is a failure, not a count.** An error in a route, in a render or in a
   query fails the test with that error. A request that no handler in `src/mocks/` answers, or
   that a handler answers with a status of 400 or more, fails it with the method and the path. A
@@ -56,7 +65,8 @@ before anything renders. Only a draw shows all of them.
   A stream's handler in `src/mocks/` answers with a body that stays open. A handler that never
   answers fails `tests/setup.ts`, which waits for each request a test starts.
 - **`devtools/check_template.sh` holds the count to its purpose.** It adds a second query to
-  `TaskList` and expects the test to fail on the count.
+  `TaskList` that waits for the first answer, and expects the test to fail on the count. 0029
+  names its other mutations.
 
 ## Considered options
 
@@ -65,10 +75,6 @@ before anything renders. Only a draw shows all of them.
 - **A conformance rule that allows a fetching query only in a route or in `src/api/`.** It
   controls where a query is written, not how many requests a draw sends. A hook in `src/api/`
   that a child calls passes the rule and sends the same request.
-- **A budget that the count must equal.** It also fails a change that removes a read. The burst
-  is what costs, so the budget limits only the most a draw sends.
-- **Batch the reads into one HTTP request.** The backend still runs each handler, and repeats
-  the work they share. The burst moves from the edge into the process.
 - **A component that reads the cache and never fetches.** With no data in the cache it waits
   for ever, and shows nothing. Give a child the data of the screen's query instead.
 
@@ -78,11 +84,11 @@ before anything renders. Only a draw shows all of them.
   data in `src/mocks/` for the path it visits.
 - A screen must draw in jsdom. A browser API that jsdom does not have needs a stand-in in the
   setup of the tests.
-- A budget above one is visible in one file. A reviewer sees it.
+- A budget above one is visible in one file, with its reason. A reviewer sees it.
 - A read that is not a GET does not count. A screen that reads with a POST is outside the budget.
 - A screen is a route with no children. A parent route that draws at its own path, with no index
   route, has no budget.
 - A child that waits more than 150 ms before it reads, for example behind `React.lazy`, does not
   count.
-- The count does not see a part the person opens later. Such a part reads its own data, and the
-  rule allows that.
+- The count does not see a section the person opens later. Such a section reads its own data, and
+  the rule allows that.

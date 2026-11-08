@@ -75,6 +75,14 @@ def allow(request: Request, *, max_bytes: int, reason: str) -> None:
     declaration.reason = reason
 
 
+def ceiling_of(request: Request) -> int:
+    """The largest finite limit this request may declare: the deployment's ceiling."""
+    declaration = request.scope.get(STATE)
+    if not isinstance(declaration, Declaration):
+        raise ResponsePolicyInvalid("This request has no response guard")
+    return declaration.limits.ceiling
+
+
 def stream(request: Request, *, reason: str) -> None:
     """Declare incremental delivery without a total byte limit.
 

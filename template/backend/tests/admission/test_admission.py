@@ -15,7 +15,12 @@ from app import admission, log, response_limits
 from app.admission import Admission, Limits, Policy
 from app.admission_limits import LIMITS
 from app.audit_events import AuditEventPage, RequestEvent
-from app.deployment import ADMISSION_IN_FLIGHT_ENV, ADMISSION_MODE_ENV, ADMISSION_STREAMS_ENV
+from app.deployment import (
+    ADMISSION_IN_FLIGHT_ENV,
+    ADMISSION_MODE_ENV,
+    ADMISSION_STREAMS_ENV,
+    READS_PART_CONCURRENCY_ENV,
+)
 from app.deps import admitted
 from app.identity.shared import Actor, Principal
 from app.pacing import yield_now
@@ -461,6 +466,7 @@ async def test_a_stream_of_a_request_admitted_outside_the_count_is_outside_it_to
     monkeypatch.setenv(ADMISSION_MODE_ENV, "evaluate")
     monkeypatch.setenv(ADMISSION_IN_FLIGHT_ENV, "1")
     monkeypatch.setenv(ADMISSION_STREAMS_ENV, "1")
+    monkeypatch.setenv(READS_PART_CONCURRENCY_ENV, "1")
     held = Held()
     app = an_app(database, held)
     async with asyncio.TaskGroup() as group:

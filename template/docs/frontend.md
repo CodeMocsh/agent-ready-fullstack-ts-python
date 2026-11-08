@@ -7,7 +7,7 @@ detail behind them and behind the rules the gates enforce.
 
 ```
 frontend/
-  src/api/            the contract: base.ts, client.ts, types.ts, schema.ts (generated)
+  src/api/            the contract: base.ts, client.ts, types.ts, schema.ts and parts.ts (generated)
   src/mocks/          the second implementation of that contract -- permanent, not a scaffold
   src/components/     UI; ui/ is vendored shadcn
   src/index.css       the @theme block
@@ -44,25 +44,29 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   mounts, or turns `enabled`, reads again only when its data arrived before the last navigation,
   focus or reconnect, or when this tab invalidated it. The default `staleTime` says the same:
   infinite while the read is current. `followNavigations` notes each of these events, by answers
-  rather than by time. `src/main.tsx` calls it once. A navigation that
-  starts while another one loads, such as a redirect, starts no new period. `router.invalidate()` counts
-  as a navigation. A tab that regains focus reads again every mounted query. Without a stream, these
-  reads are the only way a tab learns of a write it did not make. Another person, another tab and a
-  job outside a request make such writes. With a fixed `staleTime`, the screen shows their change
-  late. The screen does not show that it is late. A part that opens without a navigation can show
-  data as old as the last navigation, focus or reconnect.
-  `tests/query-client.test.tsx` holds this.
+  rather than by time. `src/main.tsx` calls it once. A navigation that starts while another one
+  loads, such as a redirect, starts no new period. `router.invalidate()` counts as a navigation. A
+  tab that regains focus reads again every mounted query. Without a stream, these reads are the only
+  way a tab learns of a write it did not make. Another person, another tab and a job outside a
+  request make such writes. With a fixed `staleTime`, the screen shows their change late. The screen
+  does not show that it is late. A section that opens without a navigation can show data as old as
+  the last navigation, focus or reconnect. `tests/query-client.test.tsx` holds this.
   [adr/template/0020](adr/template/0020-a-read-is-current-until-the-next-navigation-focus-or-reconnect.md)
   says why.
 - **A second `useQuery` call of a key shares the read only when it mounts.** A call that turns
   `enabled`, or changes its key, reads again. Give a child the data of the screen's query.
-- **A screen's first draw is one query, and so one request.** Its response holds everything the
-  screen draws first. A part the person opens later mounts its own query when it opens.
-  `TaskList` in `src/components/task-list.tsx` draws from one query.
-  `tests/first-draw.test.tsx` draws each screen and counts its reads against
-  `tests/read-budgets.ts`, then counts again on a focus.
+- **A screen's first draw is one request.** `request` in `src/api/client.ts` holds each GET to a
+  part, and sends the ones that start in one task as one `GET /reads`. Each call gets the answer
+  it would get alone. A GET route is a part when it declares `openapi_extra=PART`, and
+  `make openapi` writes the parts to `src/api/parts.ts`. A read that needs another read's answer
+  is a second request, and its budget names that reason in `because`. A read that needs only the
+  route's parameters starts in the route's `loader`, in the same task as the others. A section the
+  person opens later mounts its own query when it opens. `tests/first-draw.test.tsx` draws each
+  screen and expects its requests to equal `tests/read-budgets.ts`, then counts again on a focus.
+  [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md)
+  and
   [adr/template/0019](adr/template/0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md)
-  says why.
+  say why.
 - **A list is read a page at a time.** `TaskList` reads the first page, newest first, in its
   first draw. It reads the page that `next` names when the person clicks "Load more". After a
   read of a page fails, "Load more" reads every page again from the first. A focus, and a

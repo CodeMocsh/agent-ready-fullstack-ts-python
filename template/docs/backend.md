@@ -46,8 +46,8 @@ backend/
 
 ## The contract
 
-- `openapi.json` and `frontend/src/api/schema.ts` are generated from `backend/app/`. Change the
-  backend, run `make openapi`, and commit all three. `make pre-commit` fails on an artifact that
+- `openapi.json`, `frontend/src/api/schema.ts` and `frontend/src/api/parts.ts` are generated
+  from `backend/app/`. Change the backend, run `make openapi`, and commit all four. `make pre-commit` fails on an artifact that
   is out of date.
 - Declare every status code a route can return, with a `model` for anything that has a body. An
   undeclared code is invisible to the other half. A refusal is a class in `app/errors.py`: raise

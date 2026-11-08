@@ -18,6 +18,7 @@ from app.waits import (
     REQUEST_BUDGET_SECONDS,
     BesideOutlastsTheBudget,
     BesideOutlivedItsCancel,
+    PartWaitsOutside,
     SharedWork,
     WaitOutlastsTheRequest,
     WaitTimedOut,
@@ -332,3 +333,24 @@ async def test_work_beside_the_requests_past_its_bound_is_cancelled_and_reported
     assert isinstance(task.exception(), WaitTimedOut)
     [line] = [one for one in logged() if one["message"] == "work beside the requests failed"]
     assert line["work"] == WORK
+
+
+async def test_a_wait_in_a_part_is_refused_before_it_starts() -> None:
+    started = False
+
+    with waits.in_a_part(), pytest.raises(PartWaitsOutside, match="sqlserver.login"):
+        async with waiting(1.0, on="sqlserver.login"):
+            started = True
+
+    assert not started
+
+
+async def test_work_beside_the_requests_that_a_part_starts_is_not_a_part() -> None:
+    async def waits_briefly() -> str:
+        async with waiting(1.0, on="beside.call"):
+            return "waited"
+
+    with waits.in_a_part():
+        work = beside(waits_briefly(), name="beside a part", within=1.0)
+
+    assert await work == "waited"

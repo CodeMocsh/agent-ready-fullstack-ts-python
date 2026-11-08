@@ -106,6 +106,8 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/mocks/tasks.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/mocks/store.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/api/tasks.contract.test.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/api/reads.contract.test.ts{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/api/group-of-reads.test.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/responses/test_pages.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks-client-events.live.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/routes/test_tenant_scoping.py{% endif %}"
@@ -123,11 +125,12 @@ _exclude:
   - "{% if _copier_operation == 'update' %}backend/tests/environment/test_environment.py{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/tests/started/test_environment.py{% endif %}"
   # Generated from the project's own code, so an update never touches them and the project
-  # regenerates them afterwards: `make openapi` writes the first two, `make lint` the third, and
-  # `devtools/startup.py --baseline .startup-baseline.json --update-baseline` the fourth. A merged
+  # regenerates them afterwards: `make openapi` writes the first three, `make lint` the fourth, and
+  # `devtools/startup.py --baseline .startup-baseline.json --update-baseline` the fifth. A merged
   # copy of any of them describes neither tree.
   - "{% if _copier_operation == 'update' %}openapi.json{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/src/api/schema.ts{% endif %}"
+  - "{% if _copier_operation == 'update' %}frontend/src/api/parts.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/.complexity-baseline.json{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/.startup-baseline.json{% endif %}"
 
@@ -145,6 +148,7 @@ _skip_if_exists:
   - backend/app/log_lines.py
   - backend/app/connection_budget.py
   - backend/app/admission_limits.py
+  - backend/app/read_limits.py
   - backend/app/jobs.py
   - devtools/contract-test.env
   - backend/tests/tiers.py

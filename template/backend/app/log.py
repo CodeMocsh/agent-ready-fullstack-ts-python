@@ -14,6 +14,7 @@ formatter with the message they wrote, and are heard only at `WARNING` and above
 `docs/adr/template/0011` holds the reasoning.
 """
 
+import asyncio
 import logging
 import sys
 import time
@@ -94,7 +95,8 @@ def configure(service_version: str | None) -> None:
 
 
 def instrument(app: FastAPI) -> None:
-    """Give every request an id and one `request completed` line.
+    """Give every request an id and one `request completed` line, or one `request cancelled` line
+    when it is cancelled before it answers.
 
     The id is the `X-Request-ID` the client sent when it is a uuid, and a fresh one otherwise;
     either way it is echoed on the response. Added in this order so the id is bound before the
@@ -157,6 +159,23 @@ def admission_would_refuse(bound: Bound) -> None:
     _LOG.info("admission would refuse", bound=bound)
 
 
+def reads(*, part_bound_seconds: float, max_parts: int, part_concurrency: int) -> None:
+    """What one `GET /reads` runs. `docs/adr/template/0029`."""
+    _LOG.info(
+        "reads",
+        part_bound_seconds=part_bound_seconds,
+        max_parts=max_parts,
+        part_concurrency=part_concurrency,
+    )
+
+
+def part_left(*, route: str | None, reason: str, parts: int) -> None:
+    """`parts` parts of one `GET /reads` left their group for `reason`, and the client sends each
+    again alone. `route` is the template of their route, and `None` when no part route matched or
+    none was tried."""
+    _LOG.info("part left its group", route=route, reason=reason, parts=parts)
+
+
 def database_busy(refusal: str) -> None:
     """A request got no database connection, and is refused with a `503`. `refusal` names the
     class of the failure."""
@@ -211,6 +230,14 @@ def name_on_request_line(request: Request, field: str, value: str) -> None:
 def request_line_fields() -> tuple[str, ...]:
     """Every field `request completed` carries, in the order it carries them."""
     return (*TEMPLATE_FIELDS, *sorted(PROJECT_FIELDS))
+
+
+def request_cancelled(method: str, route: str | None, duration_ms: float) -> None:
+    """One request that was cancelled before it answered, by the route it reached."""
+    _LOG.info(
+        "request cancelled",
+        **{"http.request.method": method, "http.route": route, "duration_ms": duration_ms},
+    )
 
 
 def request_completed(
@@ -415,7 +442,8 @@ async def _completed(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
     """Times the request and logs it. A request that raises is logged as a `500`, which is what
-    the server answers once the exception has passed through here."""
+    the server answers once the exception has passed through here. A request cancelled before it
+    answered, such as a part of `GET /reads` past its bound, is logged as cancelled."""
     started = time.perf_counter()
     route = route_answering(request)
     status = 500
@@ -426,13 +454,20 @@ async def _completed(
         status = response.status_code
         return response
     finally:
-        request_completed(
-            request.method,
-            route,
-            status,
-            round((time.perf_counter() - started) * 1000, 1),
-            named,
-        )
+        if cancelling():
+            request_cancelled(request.method, route, _since(started))
+        else:
+            request_completed(request.method, route, status, _since(started), named)
+
+
+def _since(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 1)
+
+
+def cancelling() -> bool:
+    """Whether the task this runs in is being cancelled."""
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
 
 
 def response_too_large(*, route: str | None, limit: int, observed: int, reason: str) -> None:

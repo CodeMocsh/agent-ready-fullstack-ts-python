@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Final
 from urllib.parse import unquote
 
-from app import admission_limits, connection_budget, jobs, response_limits
+from app import admission_limits, connection_budget, jobs, read_limits, reads, response_limits
 from app.admission import Limits, Policy
 from app.deployment import (
     ACKNOWLEDGED_ENV,
@@ -39,6 +39,9 @@ from app.deployment import (
     NOT_READ,
     OTLP_ENDPOINT_ENV,
     PROTOCOL_ENV,
+    READS_MAX_PARTS_ENV,
+    READS_PART_BOUND_SECONDS_ENV,
+    READS_PART_CONCURRENCY_ENV,
     RESOURCE_ATTRIBUTES_ENV,
     RESPONSE_CEILING_BYTES_ENV,
     RESPONSE_MAX_BYTES_ENV,
@@ -104,6 +107,11 @@ class TimeoutsMisconfigured(RuntimeError):
 class AdmissionMisconfigured(RuntimeError):
     """A variable of admission is set to something this process will not run with, so it
     refuses to start."""
+
+
+class ReadsMisconfigured(RuntimeError):
+    """A variable of `GET /reads` is set to something this process will not run with, or its
+    numbers do not fit the request budget or the burst of admission, so it refuses to start."""
 
 
 class InstancesMisconfigured(RuntimeError):
@@ -305,16 +313,70 @@ def build_admission() -> Policy:
     )
 
 
-def _count(variable: str, shipped: int) -> int:
+def _count(
+    variable: str, shipped: int, misconfigured: type[RuntimeError] = AdmissionMisconfigured
+) -> int:
     said = stated(variable)
     if said == "":
         return shipped
     if not (said.isdecimal() and int(said) >= 1):
-        raise AdmissionMisconfigured(
+        raise misconfigured(
             f"{variable}={said!r} is not a count. Give a whole number of at least 1, or unset it "
             f"for {shipped}."
         )
     return int(said)
+
+
+def build_reads(admitted: Limits) -> reads.Limits:
+    """What one `GET /reads` runs: `read_limits.LIMITS`, with each field a deployment set
+    replaced. Raises `ReadsMisconfigured` on a count that is not a whole number of at least 1, a
+    bound that is not a finite number of seconds above 0, a group that may outlast the request
+    budget, more parts than the `burst` that `admitted` gives one actor, and more parts at once
+    than its `in_flight`."""
+    shipped = read_limits.LIMITS
+    bound = _part_bound(READS_PART_BOUND_SECONDS_ENV, shipped.part_bound_seconds)
+    max_parts = _count(READS_MAX_PARTS_ENV, shipped.max_parts, ReadsMisconfigured)
+    at_once = _count(READS_PART_CONCURRENCY_ENV, shipped.part_concurrency, ReadsMisconfigured)
+    try:
+        limits = reads.Limits(
+            part_bound_seconds=bound, max_parts=max_parts, part_concurrency=at_once
+        )
+    except ValueError as error:
+        raise ReadsMisconfigured(
+            f"{READS_PART_BOUND_SECONDS_ENV}, {READS_MAX_PARTS_ENV} and "
+            f"{READS_PART_CONCURRENCY_ENV} give {error}. Lower the bound or the most parts, or "
+            f"raise the parts at once."
+        ) from error
+    if limits.max_parts > admitted.burst:
+        raise ReadsMisconfigured(
+            f"a group of {limits.max_parts} parts is more than the burst of {admitted.burst} that "
+            f"admission gives one actor, so a whole group is never admitted. Lower "
+            f"{READS_MAX_PARTS_ENV}, or raise {ADMISSION_BURST_ENV}."
+        )
+    if limits.part_concurrency > admitted.in_flight:
+        raise ReadsMisconfigured(
+            f"{limits.part_concurrency} parts at once is more than the {admitted.in_flight} "
+            f"requests at once that admission gives one actor, so a group refuses its own parts. "
+            f"Lower {READS_PART_CONCURRENCY_ENV}, or raise {ADMISSION_IN_FLIGHT_ENV}."
+        )
+    return limits
+
+
+def _part_bound(variable: str, shipped: float) -> float:
+    said = stated(variable)
+    if said == "":
+        return shipped
+    refusal = ReadsMisconfigured(
+        f"{variable}={said!r} is not a bound. Give a number of seconds above 0, or unset it for "
+        f"{shipped}."
+    )
+    try:
+        seconds = float(said)
+    except ValueError as error:
+        raise refusal from error
+    if not (math.isfinite(seconds) and seconds > 0):
+        raise refusal
+    return seconds
 
 
 def _rate(variable: str, shipped: float) -> float:

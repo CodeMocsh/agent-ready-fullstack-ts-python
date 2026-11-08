@@ -152,15 +152,30 @@ A route with no children: what a person sees at one path. `screens` in `tests/fi
 lists them.
 _Avoid_: page, view.
 
+**Section**:
+A piece of a screen that reads its own data, such as a list or a panel the person opens.
+_Avoid_: part (a part is a route), widget.
+
 **First draw**:
 What a screen sends from the start of the visit until the router is idle and no request is open.
-A part the person opens later is not in it.
+A section the person opens later is not in it.
 _Avoid_: initial load, page load.
 
 **Read budget**:
-The most GET requests to the API that a screen's first draw may send, and again on a focus.
-`tests/read-budgets.ts` holds one for each screen.
+The GET requests to the API that a screen's first draw sends, and the most it may send again on
+a focus. `tests/read-budgets.ts` holds one for each screen, and a budget above 1 names its reason.
 _Avoid_: request limit, quota.
+
+**Part**:
+A GET route that declares `PART`, so that its read may go out in a group. A part reads only the
+database.
+_Avoid_: fragment, sub-request.
+
+**Group of reads**:
+One `GET /reads`: the reads of parts that `request` held until its timer of 0 ms fired, each
+answered as its route answers it alone. A part that cannot answer in its group leaves it, and
+goes out alone.
+_Avoid_: batch, coalescer, screen read, backend for frontend.
 
 **Outside cause**:
 What may start a read in the browser: a navigation, a focus, a reconnect, a person's input, a

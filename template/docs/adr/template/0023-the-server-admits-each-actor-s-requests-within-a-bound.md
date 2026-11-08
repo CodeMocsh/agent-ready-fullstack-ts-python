@@ -36,13 +36,13 @@ or a tab that runs old code, is a client that the server cannot trust.
 - **The project sets the defaults, and a deployment may replace each one.** `LIMITS` in
   `app/admission_limits.py` is the project's list, as
   [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says. The template
-  ships 8 requests at once, 5 a second after a burst of 40, and 4 streams. A screen's first draw
-  is one request, and a focus draws each open screen again, so a person with several tabs open
-  stays inside them. A tab that reads in a loop does not. `ADMISSION_IN_FLIGHT`,
-  `ADMISSION_PER_SECOND`, `ADMISSION_BURST` and `ADMISSION_STREAMS` each replace one field.
-  `wiring.build_admission` reads them, as `build_timeouts` reads the bounds on Postgres, and
-  refuses to start on a count that is not a whole number of at least 1 or a rate that is not a
-  finite number above 0. The line `admission` names the numbers in force.
+  ships 8 requests at once, 5 a second after a burst of 40, and 4 streams. A screen's first draw is
+  one group of at most 16 parts, each part one request, and a focus draws each open screen again, so
+  a person with two tabs open stays inside them. A tab that reads in a loop does not.
+  `ADMISSION_IN_FLIGHT`, `ADMISSION_PER_SECOND`, `ADMISSION_BURST` and `ADMISSION_STREAMS` each
+  replace one field. `wiring.build_admission` reads them, as `build_timeouts` reads the bounds on
+  Postgres, and refuses to start on a count that is not a whole number of at least 1 or a rate that
+  is not a finite number above 0. The line `admission` names the numbers in force.
   `tests/wiring/test_wiring.py` holds this.
 - **A deployment can evaluate admission instead of enforcing it.** `ADMISSION_MODE=evaluate`
   admits a request over a bound outside the count, and writes `admission would refuse` with the
@@ -52,12 +52,15 @@ or a tab that runs old code, is a client that the server cannot trust.
   wrong. `test_a_policy_that_evaluates_reports_what_an_enforced_policy_refuses`,
   `test_a_policy_that_evaluates_admits_over_a_bound_and_names_it` and
   `test_the_process_says_what_it_admits_and_warns_when_it_only_reports` hold this.
-- **`in_flight` and `burst` hold the largest first draw.** Admission refuses a request over a
+- **`burst` and `in_flight` hold the largest first draw.** Admission refuses a request over a
   bound, and does not queue it. A screen's first draw sends its reads at once, and a stream's
-  request holds a request place until its response starts. So `in_flight` and `burst` are each at
-  least the largest read budget in `frontend/tests/read-budgets.ts`, plus the streams that screen
-  opens. A screen over them gets a `429` on its own first draw. Nothing checks this across the
-  two halves.
+  request holds a request place until its response starts. Each part of `GET /reads` is a
+  request ([0029](0029-the-reads-that-start-in-one-task-are-one-request.md)). So `burst` is at
+  least the parts of the largest first draw, plus the streams that screen opens, and
+  `wiring.build_reads` refuses a `READS_MAX_PARTS` over it. `in_flight` is at least
+  `READS_PART_CONCURRENCY`, plus those streams, and `wiring.build_reads` refuses a
+  `READS_PART_CONCURRENCY` over it. A screen over them gets a `429` on its own first
+  draw. Nothing checks this across the two halves.
 - **`in_flight` under the template's pool leaves connections for other actors, and nothing
   enforces it.** A request holds a connection only while it queries, and a wait for one ends at
   `DATABASE_ACQUIRE_TIMEOUT` with a `503`. So an actor over the pool makes other actors wait, and
@@ -103,7 +106,9 @@ or a tab that runs old code, is a client that the server cannot trust.
 - **A harness is a client with its own numbers, not an exemption.** The contract suite sends
   every request as one actor under the identity stub. `devtools/contract-test.sh` reads the
   numbers of its backend from `devtools/contract-test.env`, which the project owns. The template
-  ships it empty, because its own suite fits `LIMITS`: about 20 requests, one at a time. A
+  ships `ADMISSION_BURST=60` there. Its own suite sends more reads at once than the burst of
+  `LIMITS` allows, because each part of `GET /reads` counts
+  ([0029](0029-the-reads-that-start-in-one-task-are-one-request.md)). A
   project measures its suite with `ADMISSION_MODE=evaluate make test-contract`, which ends with
   the count of `admission would refuse` by bound, and sets the numbers there. The suite does not
   retry on a `429`. `tests/admission/` tests the bounds.

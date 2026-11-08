@@ -19,6 +19,12 @@ from app.models.jobs import (
     JobState as JobState,
     JsonObject as JsonObject,
 )
+from app.models.reads import (
+    AnsweredPart as AnsweredPart,
+    LeftBecause as LeftBecause,
+    LeftPart as LeftPart,
+    Reads as Reads,
+)
 from app.models.shared import (
     PAGE_MAX as PAGE_MAX,
     ErrorBody as ErrorBody,

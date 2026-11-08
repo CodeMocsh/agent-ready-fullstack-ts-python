@@ -11,8 +11,8 @@ running at shutdown. `docs/adr/template/0021` and `0027`.
 
 import asyncio
 import math
-from collections.abc import AsyncGenerator, Callable, Coroutine
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
+from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, copy_context
 from typing import Any, Final
 
@@ -30,12 +30,19 @@ CANCELLED_WITHIN_SECONDS: Final = 5.0
 
 _IN_A_REQUEST: ContextVar[bool] = ContextVar("in_a_request", default=False)
 
+_IN_A_PART: ContextVar[bool] = ContextVar("in_a_part", default=False)
+
 _STARTED: Final[set[asyncio.Task[Any]]] = set()
 
 
 class WaitOutlastsTheRequest(RuntimeError):
     """A wait in a request, or in shared work, has a bound that is not under
     `REQUEST_BUDGET_SECONDS`."""
+
+
+class PartWaitsOutside(RuntimeError):
+    """A part of `GET /reads` waits on a system outside the process. A part reads only the
+    database. `docs/adr/template/0029`."""
 
 
 class BesideOutlastsTheBudget(ValueError):
@@ -75,18 +82,35 @@ class MarksRequests:
             _IN_A_REQUEST.reset(marked)
 
 
+@contextmanager
+def in_a_part() -> Generator[None]:
+    """Mark the block as a part of `GET /reads`, so that `waiting` in it raises
+    `PartWaitsOutside`."""
+    marked = _IN_A_PART.set(True)
+    try:
+        yield
+    finally:
+        _IN_A_PART.reset(marked)
+
+
 @asynccontextmanager
 async def waiting(seconds: float, on: str) -> AsyncGenerator[None, None]:
     """Bound the block to `seconds`. Past them the block is cancelled, and `WaitTimedOut` names
     `on`: the system and the call, such as `"sqlserver.login"`.
 
     In a request, raises `WaitOutlastsTheRequest` before the block runs when `seconds` is not under
-    `REQUEST_BUDGET_SECONDS`. Raises `ValueError` on a bound that is not a positive number of
+    `REQUEST_BUDGET_SECONDS`. In a part of `GET /reads`, raises `PartWaitsOutside` before the block
+    runs. Raises `ValueError` on a bound that is not a positive number of
     seconds. A block that waits in a thread stops waiting at the bound, and the thread runs on:
     give the call in the thread the same bound.
     """
     if not 0 < seconds < math.inf:
         raise ValueError(f"{on} is bounded by {seconds} s, which is not a bound")
+    if _IN_A_PART.get():
+        raise PartWaitsOutside(
+            f"{on} waits outside the database in a part of GET /reads, and a part waits on "
+            f"nothing but the database. Take PART off the route, so that it answers alone."
+        )
     if _IN_A_REQUEST.get() and seconds >= REQUEST_BUDGET_SECONDS:
         raise WaitOutlastsTheRequest(
             f"{on} may wait {seconds} s in a request or in shared work, and each wait there has a "
@@ -208,6 +232,7 @@ def _started[T](
 ) -> asyncio.Task[T]:
     context = copy_context()
     _ = context.run(_IN_A_REQUEST.set, in_a_request)
+    _ = context.run(_IN_A_PART.set, False)
     task = asyncio.get_running_loop().create_task(work, name=name, context=context)
     _STARTED.add(task)
     task.add_done_callback(lambda _: _ended(task, failed, cancelled))

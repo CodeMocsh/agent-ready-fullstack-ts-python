@@ -3,7 +3,7 @@ every configuration it refuses to start on."""
 
 import pytest
 
-from app import admission_limits, connection_budget
+from app import admission_limits, connection_budget, read_limits, reads
 from app.admission import Limits, Policy
 from app.deployment import (
     ACQUIRE_TIMEOUT_ENV,
@@ -21,6 +21,9 @@ from app.deployment import (
     OTLP_ENDPOINT_ENV,
     PRODUCTION,
     PROTOCOL_ENV,
+    READS_MAX_PARTS_ENV,
+    READS_PART_BOUND_SECONDS_ENV,
+    READS_PART_CONCURRENCY_ENV,
     RESOURCE_ATTRIBUTES_ENV,
     SAMPLING_RATIO_ENV,
     SEMCONV_ENV,
@@ -35,12 +38,14 @@ from app.wiring import (
     AdmissionMisconfigured,
     InstancesMisconfigured,
     OwnerCredentialVisible,
+    ReadsMisconfigured,
     TelemetryMisconfigured,
     TelemetrySettings,
     TimeoutsMisconfigured,
     build,
     build_admission,
     build_draws,
+    build_reads,
     build_service_version,
     build_telemetry,
     build_timeouts,
@@ -274,6 +279,62 @@ def test_instances_without_a_database_refuse_to_start(monkeypatch: pytest.Monkey
 
     with pytest.raises(InstancesMisconfigured, match=DATABASE_URL_ENV):
         build()
+
+
+def test_no_read_variable_is_the_project_s_limits() -> None:
+    assert build_reads(admission_limits.LIMITS) == read_limits.LIMITS
+
+
+def test_each_read_number_a_deployment_sets_replaces_its_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(READS_PART_BOUND_SECONDS_ENV, " 0.25 ")
+    monkeypatch.setenv(READS_MAX_PARTS_ENV, "8")
+    monkeypatch.setenv(READS_PART_CONCURRENCY_ENV, "2")
+
+    assert build_reads(admission_limits.LIMITS) == reads.Limits(
+        part_bound_seconds=0.25, max_parts=8, part_concurrency=2
+    )
+
+
+@pytest.mark.parametrize(
+    ("variable", "said"),
+    [
+        (READS_PART_BOUND_SECONDS_ENV, "0"),
+        (READS_PART_BOUND_SECONDS_ENV, "nan"),
+        (READS_PART_BOUND_SECONDS_ENV, "soon"),
+        (READS_PART_BOUND_SECONDS_ENV, "5"),
+        (READS_MAX_PARTS_ENV, "0"),
+        (READS_MAX_PARTS_ENV, "many"),
+        (READS_PART_CONCURRENCY_ENV, "1.5"),
+    ],
+)
+def test_a_read_value_that_is_not_one_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch, variable: str, said: str
+) -> None:
+    monkeypatch.setenv(variable, said)
+
+    with pytest.raises(ReadsMisconfigured, match=variable):
+        build_reads(admission_limits.LIMITS)
+
+
+def test_a_group_larger_than_the_burst_of_admission_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(READS_MAX_PARTS_ENV, "41")
+    monkeypatch.setenv(READS_PART_BOUND_SECONDS_ENV, "0.01")
+
+    with pytest.raises(ReadsMisconfigured, match="burst of 40"):
+        build_reads(Limits(in_flight=8, per_second=5.0, burst=40, streams=4))
+
+
+def test_more_parts_at_once_than_admission_admits_refuses_to_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(READS_PART_CONCURRENCY_ENV, "9")
+
+    with pytest.raises(ReadsMisconfigured, match="8 requests at once"):
+        build_reads(Limits(in_flight=8, per_second=5.0, burst=40, streams=4))
 
 
 def test_no_admission_variable_is_the_project_s_limits_enforced() -> None:

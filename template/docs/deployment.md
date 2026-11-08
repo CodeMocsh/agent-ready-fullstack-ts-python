@@ -88,9 +88,9 @@ Two limits, on two keys, in two places:
 `ADMISSION_PER_SECOND`, `ADMISSION_BURST` or `ADMISSION_STREAMS`, and the line `admission` names
 the numbers in force. Set them from three rules:
 
-- `in_flight` and `burst` are each at least the largest read budget in
-  `frontend/tests/read-budgets.ts`, plus the streams that screen opens. A first draw sends its
-  reads at once, and admission refuses rather than queues.
+- `burst` is at least the parts of the largest first draw, plus the streams that screen opens,
+  and `in_flight` at least `READS_PART_CONCURRENCY` plus those streams. Each part of `GET /reads`
+  is a request, a draw sends its reads at once, and admission refuses rather than queues.
 - `in_flight` under the template's pool, which the line `connections budgeted` names, leaves
   connections for other actors. Over it, other actors wait for a connection, up to
   `DATABASE_ACQUIRE_TIMEOUT`. With `max_connections=100`, `DATABASE_INSTANCES=12` and the shipped
@@ -136,6 +136,24 @@ Nothing here deletes an audit event, and the application role cannot. Retention 
 [Removing a tenant's audit events](#removing-a-tenants-audit-events) says how an operator
 removes one tenant's events.
 
+## A group of reads
+
+`GET /reads` answers the parts that the browser held until its timer of 0 ms fired, each as its
+route answers it alone. `LIMITS` in `app/read_limits.py` sets the bound of each part, the most parts
+in one group, and how many run at once. `READS_PART_BOUND_SECONDS`, `READS_MAX_PARTS` and
+`READS_PART_CONCURRENCY` each replace one, and the line `reads` names the numbers in force. The
+process refuses to start when a whole group may outlast the request budget, when a group has more
+parts than `ADMISSION_BURST`, or when it runs more parts at once than `ADMISSION_IN_FLIGHT`.
+
+A group holds at most `READS_PART_CONCURRENCY` connections. A part past its bound, past the most
+parts, or too large for the ceiling of the response leaves its group, and the browser sends it
+again alone. The line `part left its group` names the route, the reason and the number of parts. A
+part that left on its bound writes `request cancelled`. Many such lines for one route mean that
+the route is slow. A line with no route names paths that are not parts, or parts past the most
+parts.
+[adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md) says
+why.
+
 ## A burst of requests
 
 A burst is many requests that reach the backend at the same moment. One process serves them in
@@ -157,7 +175,7 @@ turn them away. A busy CPU fits the docs and every timestamp. The metrics did no
 report CPU per minute, and the burst arrived in 30 ms.
 
 A screen's first draw is one request, which keeps a burst small. A tab that regains focus reads
-again only the queries the screen mounted: one for its first draw, and one for each part the
+again only the queries the screen mounted: one for its first draw, and one for each section the
 person opened.
 [frontend.md](frontend.md#reading-server-state) says how.
 

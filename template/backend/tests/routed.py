@@ -27,7 +27,7 @@ from starlette.middleware import Middleware
 from starlette.routing import BaseRoute
 
 from app import log
-from app.deployment import ADMISSION_ENV, RESPONSE_ENV, stated
+from app.deployment import ADMISSION_ENV, READS_ENV, RESPONSE_ENV, stated
 from app.lifespan import build_routes
 from app.main import assemble
 from app.store import Database
@@ -52,6 +52,10 @@ class SharedWithAdmission(RuntimeError):
 
 class SharedWithResponseLimits(RuntimeError):
     """A test asked for a shared app while the environment configures response limits."""
+
+
+class SharedWithReads(RuntimeError):
+    """A test asked for a shared app while the environment sets a variable of `GET /reads`."""
 
 
 class SharedWithTelemetry(RuntimeError):
@@ -154,18 +158,7 @@ class _Ended(State):
         raise self._past("keys")
 
 
-def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
-    """The shared app that serves `routers`, with everything `assemble` puts around a route, and
-    each of its routes built, as the lifespan builds them. Its `app.state` holds what `assemble`
-    put there, `database`, and each of `state` under its name. It has no `dependency_overrides`,
-    no OpenAPI schema and no middleware stack yet, and its log lines name the `service.version`
-    the environment names.
-
-    Shares by the identity of `routers`: a router built in each test builds a new app each time,
-    and the process keeps it. Raises `SharedTwiceInOneTest` when this test asked for it already,
-    `SharedWithTelemetry` when the environment configures telemetry, and `SharedWithAdmission`
-    when it sets a variable of admission. Starts nothing. Blocks the first time it builds the app
-    for `routers`: call it off the event loop."""
+def _refuse_an_environment_a_share_ignores() -> None:
     if build_telemetry() is not None:
         raise SharedWithTelemetry(
             "The environment configures telemetry, and an instrumented app cannot be shared. "
@@ -183,6 +176,28 @@ def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
             f"The environment sets {', '.join(response_settings)}, and a shared app keeps its "
             "response limits. Build this app with tests.routed.assembled."
         )
+    read_settings = [name for name in READS_ENV if stated(name)]
+    if read_settings:
+        raise SharedWithReads(
+            f"The environment sets {', '.join(read_settings)}, and a shared app keeps the limits "
+            "of GET /reads it was built with. Build this app with tests.routed.assembled."
+        )
+
+
+def routed(*routers: APIRouter, database: Database, **state: object) -> FastAPI:
+    """The shared app that serves `routers`, with everything `assemble` puts around a route, and
+    each of its routes built, as the lifespan builds them. Its `app.state` holds what `assemble`
+    put there, `database`, and each of `state` under its name. It has no `dependency_overrides`,
+    no OpenAPI schema and no middleware stack yet, and its log lines name the `service.version`
+    the environment names.
+
+    Shares by the identity of `routers`: a router built in each test builds a new app each time,
+    and the process keeps it. Raises `SharedTwiceInOneTest` when this test asked for it already,
+    `SharedWithTelemetry` when the environment configures telemetry, `SharedWithAdmission`
+    when it sets a variable of admission, and `SharedWithReads` when it sets a variable of
+    `GET /reads`. Starts nothing. Blocks the first time it builds the app
+    for `routers`: call it off the event loop."""
+    _refuse_an_environment_a_share_ignores()
     key = tuple(id(router) for router in routers)
     if key in _SHARED_WITH_THIS_TEST:
         raise SharedTwiceInOneTest(

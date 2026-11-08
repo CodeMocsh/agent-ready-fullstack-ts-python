@@ -5,16 +5,20 @@ import {
   RouterProvider,
   rootRouteId,
 } from "@tanstack/react-router";
-import { render, waitFor } from "@testing-library/react";
+import { act, getConfig, render } from "@testing-library/react";
 import { API_BASE_URL } from "@/api/base";
 import { AppProviders } from "@/app-providers";
 import { server } from "@/mocks/node";
 import { createQueryClient, followNavigations } from "@/query-client";
 import { router } from "@/router";
 
-export type ReadBudget = { visit: string; reads: number; lands?: string };
+export type ReadBudget =
+  | { visit: string; reads: 1; lands?: string }
+  | { visit: string; reads: number; because: string; lands?: string };
 
-export type Reads = { landed: string; firstDraw: string[]; afterFocus: string[] };
+export type DrawnRead = { line: string; urls: string[] };
+
+export type Reads = { landed: string; firstDraw: DrawnRead[]; afterFocus: DrawnRead[] };
 
 type AppRouter = typeof router;
 
@@ -23,6 +27,8 @@ type RequestEvent = { request: Request; requestId: string };
 type ResponseEvent = RequestEvent & { response: Response };
 
 const QUIET_MS = 150;
+
+const FLUSH_MS = 20;
 
 export function screens(): string[] {
   return Object.values(router.routesById)
@@ -55,6 +61,10 @@ function failureOf(visited: AppRouter, visit: string, failures: unknown[]): unkn
   return undefined;
 }
 
+function flushed(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => setTimeout(resolve, FLUSH_MS)));
+}
+
 async function settled(
   visited: AppRouter,
   visit: string,
@@ -62,47 +72,53 @@ async function settled(
   open: Map<string, string>,
   failures: unknown[],
 ): Promise<void> {
+  const patience = getConfig().asyncUtilTimeout;
+  const started = performance.now();
   let quietSince: number | undefined;
-  await waitFor(
-    () => {
-      if (failureOf(visited, visit, failures) !== undefined) {
-        return;
-      }
-      const quiet =
-        visited.state.status === "idle" &&
-        !visited.state.isLoading &&
-        queryClient.isFetching() === 0 &&
-        open.size === 0;
-      if (!quiet) {
-        quietSince = undefined;
-        throw new Error(
-          `the draw did not settle: router ${visited.state.status}, ` +
-            `${queryClient.isFetching()} queries fetching, open: ${[...open.values()].join(", ")}`,
-        );
-      }
-      quietSince ??= performance.now();
-      if (performance.now() - quietSince < QUIET_MS) {
-        throw new Error(`the draw has been quiet for less than ${QUIET_MS} ms`);
-      }
-    },
-    { interval: 20 },
-  );
-  const failure = failureOf(visited, visit, failures);
-  if (failure !== undefined) {
-    throw failure;
+  for (;;) {
+    await flushed();
+    const failure = failureOf(visited, visit, failures);
+    if (failure !== undefined) {
+      throw failure;
+    }
+    const quiet =
+      visited.state.status === "idle" &&
+      !visited.state.isLoading &&
+      queryClient.isFetching() === 0 &&
+      open.size === 0;
+    const now = performance.now();
+    quietSince = quiet ? (quietSince ?? now) : undefined;
+    if (quietSince !== undefined && now - quietSince >= QUIET_MS) {
+      return;
+    }
+    if (now - started > patience) {
+      throw new Error(
+        `the draw did not settle: router ${visited.state.status}, ` +
+          `${queryClient.isFetching()} queries fetching, open: ${[...open.values()].join(", ")}`,
+      );
+    }
   }
 }
 
 type Recorder = {
   open: Map<string, string>;
-  takeReads: () => string[];
+  takeReads: () => DrawnRead[];
   stop: () => void;
 };
+
+function readOf(url: URL, api: string): DrawnRead {
+  const relative = url.href.slice(api.length);
+  const parts = url.searchParams.getAll("part");
+  if (url.pathname === new URL(`${api}/reads`).pathname) {
+    return { line: `GET ${url.pathname} [${parts.join(", ")}]`, urls: parts };
+  }
+  return { line: `GET ${url.pathname}${url.search}`, urls: [relative] };
+}
 
 function recordRequests(streams: readonly RegExp[], failures: unknown[]): Recorder {
   const api = new URL(API_BASE_URL, window.location.href).href;
   const open = new Map<string, string>();
-  const reads: string[] = [];
+  const reads: DrawnRead[] = [];
   const pathOf = (request: Request) => `${request.method} ${new URL(request.url).pathname}`;
 
   const started = ({ request, requestId }: RequestEvent) => {
@@ -111,7 +127,7 @@ function recordRequests(streams: readonly RegExp[], failures: unknown[]): Record
     }
     open.set(requestId, pathOf(request));
     if (request.method === "GET" && request.url.startsWith(api)) {
-      reads.push(pathOf(request));
+      reads.push(readOf(new URL(request.url), api));
     }
   };
   const ended = ({ requestId }: { requestId: string }) => {
