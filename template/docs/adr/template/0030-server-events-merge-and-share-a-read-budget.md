@@ -39,6 +39,9 @@ The existing bounded retry policy still applies to a request that never reached 
 `src/api/read-budget.ts` holds a separate budget for each query client.
 Its policy limits event read grants over a sliding interval and spaces refreshes of each query.
 Unused capacity does not accumulate at interval boundaries.
+An independent outside cause releases reads already waiting for event admission. Navigation,
+focus, reconnect and input must not wait behind old event traffic. Those queued reads now have
+that outside cause. This does not add budget for later events, or start a read by itself.
 `createQueryClient` accepts a policy as its second argument.
 The default policy leaves capacity below the reported platform incident rate for other work.
 It is a starting policy, not proof of sufficient capacity for a deployment.
@@ -57,7 +60,9 @@ Event groups from different query clients stay separate.
 Cancellation does not become `Unreached` and does not trigger a network retry.
 Explicit cancellation without a newer cause rejects the refresh promise, even with old cached data.
 A replacement read can complete the same pending refresh. A newer event remains a cause.
-Its event cause can resume once on a later read. Another cancellation needs a new cause.
+Its event cause can resume once after an admitted read is canceled. Canceling that admitted
+continuation needs a new cause. A wait canceled before budget admission retains its allowance;
+it has sent no read. Continuation identity distinguishes that retained cause from a newer event.
 Removing the query discards its pending refresh instead of reporting cancellation.
 Stopping `followNavigations` aborts pending event work and its scoped transport.
 It restores active event queries to idle without reporting cancellation as a query failure.

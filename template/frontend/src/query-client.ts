@@ -27,7 +27,13 @@ declare module "@tanstack/react-query" {
   }
 }
 
-type Read = { granted: number; at: number; failure: unknown; refused: boolean };
+type Read = {
+  granted: number;
+  at: number;
+  failure: unknown;
+  refused: boolean;
+  continuation: "none" | "available" | "used";
+};
 
 const NO_FAILURE = Symbol("no failure");
 
@@ -99,6 +105,7 @@ function causedBy(queryClient: QueryClient): void {
   const causes = causesOf(queryClient);
   causes.reads.clear();
   causes.answeredSinceTheLast = false;
+  refreshesOf(queryClient).budget.outsideCause();
 }
 
 function answered(queryClient: QueryClient): void {
@@ -112,19 +119,17 @@ function matching(queryKeys: readonly QueryKey[]): (query: Query) => boolean {
 function grant(queryClient: QueryClient, queryKeys: readonly QueryKey[]): void {
   const { reads } = causesOf(queryClient);
   const read = queryClient.getQueryCache().findAll({ predicate: matching(queryKeys) });
-  for (const query of read) {
-    const last = reads.get(query.queryHash);
-    if (last === undefined) {
-      reads.set(query.queryHash, {
-        granted: 1,
-        at: Date.now(),
-        failure: NO_FAILURE,
-        refused: false,
-      });
-    } else {
-      last.granted += 1;
-    }
+  for (const query of read) grantRead(reads, query.queryHash);
+}
+
+function grantRead(reads: Map<string, Read>, hash: string): void {
+  const last = reads.get(hash);
+  if (last === undefined) {
+    reads.set(hash, { ...grantedRead(undefined, Date.now(), false), granted: 1 });
+    return;
   }
+  last.granted += 1;
+  last.continuation = "none";
 }
 
 function shortestInterval(query: Query): number | undefined {
@@ -163,16 +168,32 @@ function admit(queryClient: QueryClient, query: Query, eventRead: boolean): Read
     last.refused = false;
     return last;
   }
-  if (eventRead || last === undefined || last.granted > 0) {
-    const granted = last !== undefined && last.granted > 0 ? last.granted - 1 : 0;
-    const read = { granted, at: now, failure: NO_FAILURE, refused: false };
+  if (eventRead || last === undefined || last.granted > 0 || last.continuation === "available") {
+    const read = grantedRead(last, now, eventRead);
     reads.set(query.queryHash, read);
     return read;
   }
+  return admitBackstop(query, last, now);
+}
+
+function grantedRead(last: Read | undefined, now: number, eventRead: boolean): Read {
+  const granted = last === undefined ? 0 : Math.max(0, last.granted - 1);
+  const resumed = !eventRead && last?.granted === 0 && last.continuation === "available";
+  return {
+    granted,
+    at: now,
+    failure: NO_FAILURE,
+    refused: false,
+    continuation: resumed ? "used" : "none",
+  };
+}
+
+function admitBackstop(query: Query, last: Read, now: number): Read {
   const interval = shortestInterval(query);
   if (interval !== undefined && now - last.at >= interval - CLOCK_RESOLUTION_MS) {
     last.at = now;
     last.refused = false;
+    last.continuation = "none";
     return last;
   }
   last.refused = true;
@@ -186,24 +207,62 @@ function everyListenerOfTheEventRan(): Promise<void> {
   return Promise.resolve();
 }
 
+function refreshesOf(queryClient: QueryClient): EventRefresh {
+  const refresh = eventRefreshes.get(queryClient);
+  if (refresh === undefined) throw new Error(UNFOLLOWED);
+  return refresh;
+}
+
+function permitFor(query: Query, refresh: EventRefresh) {
+  if (aPageNotYetRead(query)) return undefined;
+  const permit = refresh.take(query);
+  if (permit !== undefined) return permit;
+  return query.state.fetchFailureCount > 0 ? refresh.retry(query) : undefined;
+}
+
+function resumedForCause(client: QueryClient, query: Query, read: Read): void {
+  read.granted = 0;
+  read.at = Date.now();
+  causesOf(client).reads.set(query.queryHash, read);
+}
+
+function watchUnanswered(
+  client: QueryClient,
+  query: Query,
+  read: Read,
+  signal: AbortSignal,
+): () => void {
+  const canceled = () => {
+    if (
+      followed.get(client)?.reads.get(query.queryHash) === read &&
+      read.granted === 0 &&
+      read.continuation === "none"
+    ) {
+      read.continuation = "available";
+    }
+  };
+  signal.addEventListener("abort", canceled, { once: true });
+  if (signal.aborted) canceled();
+  return () => signal.removeEventListener("abort", canceled);
+}
+
 const readsOnlyWithACause: QueryPersister<unknown, QueryKey> = async (queryFn, context, query) => {
   await everyListenerOfTheEventRan();
-  const refresh = eventRefreshes.get(context.client);
-  const page = aPageNotYetRead(query);
-  let permit = page ? undefined : refresh?.take(query);
-  if (!page && permit === undefined && query.state.fetchFailureCount > 0) {
-    permit = refresh?.retry(query);
-  }
+  const refresh = refreshesOf(context.client);
+  const permit = permitFor(query, refresh);
   const eventRead = permit !== undefined;
-  if (eventRead && refresh !== undefined) budgetEventRead(context.signal, refresh.budget);
   const read = admit(context.client, query, eventRead);
-  const attempt = refresh?.begin(query, permit);
-  const stop =
-    eventRead && refresh !== undefined && attempt !== undefined
-      ? refresh.watch(query, attempt, context.signal)
-      : () => undefined;
+  if (eventRead) {
+    budgetEventRead(context.signal, refresh.budget, () =>
+      resumedForCause(context.client, query, read),
+    );
+  }
+  const attempt = refresh.begin(query, permit);
+  const stop = eventRead
+    ? refresh.watch(query, attempt, context.signal)
+    : watchUnanswered(context.client, query, read, context.signal);
   try {
-    if (eventRead && refresh !== undefined && attempt !== undefined) {
+    if (eventRead) {
       await refresh.prepare(query, attempt, context.signal);
     }
     const data = await queryFn(context);
@@ -231,14 +290,23 @@ export async function invalidateForServerEvent(
   queryKeys: readonly QueryKey[],
 ): Promise<void> {
   causesOf(queryClient);
-  const refresh = eventRefreshes.get(queryClient);
-  if (refresh === undefined) throw new Error(UNFOLLOWED);
+  const refresh = refreshesOf(queryClient);
   await Promise.all(
     queryClient
       .getQueryCache()
       .findAll({ predicate: matching(queryKeys) })
       .map((query) => refresh.change(query)),
   );
+}
+
+async function invalidateAfterMutation(
+  client: QueryClient,
+  mutation: Mutation<unknown, unknown, unknown, unknown>,
+): Promise<void> {
+  const invalidates = mutation.meta?.invalidates;
+  if (invalidates === undefined) return;
+  if (mutationsWithACause.has(mutation)) grant(client, invalidates);
+  await invalidate(client, invalidates);
 }
 
 export function createQueryClient(
@@ -254,16 +322,8 @@ export function createQueryClient(
         }
       },
       onError: (error) => record("mutation", error),
-      onSettled: async (_data, _error, _variables, _context, mutation) => {
-        const invalidates = mutation.meta?.invalidates;
-        if (invalidates === undefined) {
-          return;
-        }
-        if (mutationsWithACause.has(mutation)) {
-          grant(queryClient, invalidates);
-        }
-        await invalidate(queryClient, invalidates);
-      },
+      onSettled: (_data, _error, _variables, _context, mutation) =>
+        invalidateAfterMutation(queryClient, mutation),
     }),
     defaultOptions: {
       queries: {

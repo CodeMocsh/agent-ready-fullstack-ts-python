@@ -36,3 +36,23 @@ it.each([
 ])("refuses an invalid event policy when creating the client: %j", (policy) => {
   expect(() => createQueryClient(vi.fn(), policy)).toThrow("Event reads need a positive interval");
 });
+
+it("releases queued reads for an outside cause without granting capacity to later events", async () => {
+  const budget = new ReadBudget({ intervalMs: 500, readsPerInterval: 2 });
+  const signal = new AbortController().signal;
+  const first = Promise.all([budget.wait(signal), budget.wait(signal)]);
+  await vi.advanceTimersByTimeAsync(1);
+  await first;
+  const waiting = Array.from({ length: 4 }, () => budget.wait(signal));
+  budget.outsideCause();
+  await Promise.all(waiting);
+  let later = false;
+  const next = budget.wait(signal).then(() => {
+    later = true;
+  });
+  await vi.advanceTimersByTimeAsync(498);
+  expect(later).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  await next;
+  expect(later).toBe(true);
+});

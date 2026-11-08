@@ -211,7 +211,7 @@ it("keeps an event stale after unmount cancels its read", async () => {
   await vi.advanceTimersByTimeAsync(160);
   version = 1;
   const changed = expect(invalidateForServerEvent(value, [["tasks"]])).rejects.toMatchObject({
-    name: "AbortError",
+    name: "EventReadCanceled",
   });
   await vi.advanceTimersByTimeAsync(10);
   first.stop();
@@ -230,7 +230,7 @@ it("aborts scoped transport and leaves a new client independent when a session e
   watch(value);
   await vi.advanceTimersByTimeAsync(160);
   const changed = expect(invalidateForServerEvent(value, [["tasks"]])).rejects.toMatchObject({
-    name: "AbortError",
+    name: "EventRefreshStopped",
   });
   await vi.advanceTimersByTimeAsync(10);
   const stopFollowing = stops[0];
@@ -367,7 +367,7 @@ it("rejects an active event refresh when cancellation reverts to old data", asyn
   await vi.advanceTimersByTimeAsync(160);
   version = 1;
   const changed = expect(invalidateForServerEvent(value, [["tasks"]])).rejects.toMatchObject({
-    name: "AbortError",
+    name: "EventReadCanceled",
   });
   await vi.advanceTimersByTimeAsync(10);
   await value.cancelQueries({ queryKey: ["tasks"] });
@@ -453,4 +453,58 @@ it("follows a replacement of an event read started by a mount", async () => {
   await replacement;
   expect(await changed).toBeNull();
   expect(mounted.observer.getCurrentResult().data).toBe(2);
+});
+
+it("keeps an event cause when remounts cancel reads before budget admission", async () => {
+  const value = client();
+  let task = watch(value);
+  watch(value, "first");
+  watch(value, "second");
+  await vi.advanceTimersByTimeAsync(160);
+  version = 1;
+  const occupying = invalidateForServerEvent(value, [["first"], ["second"]]);
+  await vi.advanceTimersByTimeAsync(10);
+  const changed = expect(invalidateForServerEvent(value, [["tasks"]])).rejects.toMatchObject({
+    name: "EventReadCanceled",
+  });
+  await vi.advanceTimersByTimeAsync(10);
+  task.stop();
+  await vi.advanceTimersByTimeAsync(1);
+  await changed;
+  for (let mount = 0; mount < 3; mount += 1) {
+    task = watch(value);
+    await vi.advanceTimersByTimeAsync(10);
+    task.stop();
+    await vi.advanceTimersByTimeAsync(1);
+  }
+  const final = watch(value);
+  await vi.advanceTimersByTimeAsync(1000);
+  await occupying;
+  expect(starts).toHaveLength(6);
+  expect(final.observer.getCurrentResult().data).toBe(1);
+  expect(final.observer.getCurrentResult().error).toBeNull();
+  await final.observer.refetch();
+  expect(final.observer.getCurrentResult().error?.name).toBe("CycleStopped");
+});
+
+it("spends the input cause on released event reads and grants no read from their answers", async () => {
+  const value = client();
+  const observed = [watch(value), watch(value, "first"), watch(value, "second")];
+  await vi.advanceTimersByTimeAsync(160);
+  version = 1;
+  const occupying = invalidateForServerEvent(value, [["first"], ["second"]]);
+  await vi.advanceTimersByTimeAsync(10);
+  const queued = invalidateForServerEvent(value, [["tasks"]]);
+  await vi.advanceTimersByTimeAsync(10);
+  expect(starts).toHaveLength(5);
+  window.dispatchEvent(new Event("click"));
+  await vi.advanceTimersByTimeAsync(160);
+  await Promise.all([occupying, queued]);
+  expect(starts).toHaveLength(6);
+  const task = observed[0];
+  if (task === undefined) throw new Error("No task observer");
+  expect(task.observer.getCurrentResult().data).toBe(1);
+  await task.observer.refetch();
+  expect(task.observer.getCurrentResult().error?.name).toBe("CycleStopped");
+  expect(starts).toHaveLength(6);
 });

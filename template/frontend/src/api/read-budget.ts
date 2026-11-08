@@ -3,15 +3,19 @@ export type EventReadPolicy = { intervalMs: number; readsPerInterval: number };
 export const EVENT_READ_POLICY: EventReadPolicy = { intervalMs: 500, readsPerInterval: 2 };
 
 export function checkedEventReadPolicy(policy: EventReadPolicy): EventReadPolicy {
-  if (
-    !Number.isFinite(policy.intervalMs) ||
-    policy.intervalMs <= 0 ||
-    !Number.isSafeInteger(policy.readsPerInterval) ||
-    policy.readsPerInterval <= 0
-  ) {
+  if (!validPolicy(policy)) {
     throw new Error("Event reads need a positive interval and a positive integer read limit");
   }
   return { ...policy };
+}
+
+function validPolicy(policy: EventReadPolicy): boolean {
+  return (
+    Number.isFinite(policy.intervalMs) &&
+    policy.intervalMs > 0 &&
+    Number.isSafeInteger(policy.readsPerInterval) &&
+    policy.readsPerInterval > 0
+  );
 }
 
 export function until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -38,7 +42,12 @@ export function delay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-type WaitingRead = { signal: AbortSignal; start: () => void; abort: () => void };
+type WaitingRead = {
+  signal: AbortSignal;
+  start: () => void;
+  abort: () => void;
+  outsideCause: () => void;
+};
 
 export class ReadBudget {
   readonly lifetime = new AbortController();
@@ -51,12 +60,13 @@ export class ReadBudget {
     this.policy = checkedEventReadPolicy(policy);
   }
 
-  wait(signal: AbortSignal): Promise<void> {
+  wait(signal: AbortSignal, outsideCause: () => void = () => undefined): Promise<void> {
     const lifetime = AbortSignal.any([signal, this.lifetime.signal]);
     lifetime.throwIfAborted();
     return new Promise((resolve, reject) => {
       const waiting: WaitingRead = {
         signal: lifetime,
+        outsideCause,
         start: resolve,
         abort: () => {
           this.remove(waiting);
@@ -67,6 +77,14 @@ export class ReadBudget {
       lifetime.addEventListener("abort", waiting.abort, { once: true });
       this.schedule();
     });
+  }
+
+  outsideCause(): void {
+    for (const waiting of this.waiting) {
+      this.remove(waiting);
+      waiting.outsideCause();
+      waiting.start();
+    }
   }
 
   private remove(waiting: WaitingRead): void {
@@ -102,33 +120,52 @@ export class ReadBudget {
   }
 }
 
-const budgets = new WeakMap<AbortSignal, ReadBudget>();
+type BudgetedRead = { budget: ReadBudget; admitted: boolean; outsideCause: () => void };
 
-export function budgetEventRead(signal: AbortSignal, budget: ReadBudget): void {
-  budgets.set(signal, budget);
+const budgets = new WeakMap<AbortSignal, BudgetedRead>();
+
+export function budgetEventRead(
+  signal: AbortSignal,
+  budget: ReadBudget,
+  outsideCause: () => void = () => undefined,
+): void {
+  budgets.set(signal, { budget, admitted: false, outsideCause });
 }
 
 export function waitForRead(signal: AbortSignal | null | undefined): Promise<void> | undefined {
   signal?.throwIfAborted();
-  if (signal !== undefined && signal !== null) {
-    return budgets.get(signal)?.wait(signal);
-  }
+  if (signal == null) return undefined;
+  const read = budgets.get(signal);
+  if (read !== undefined) return admittedRead(read, signal);
 }
 
-export function readBudget(signal: AbortSignal | undefined): ReadBudget | undefined {
+async function admittedRead(read: BudgetedRead, signal: AbortSignal): Promise<void> {
+  await read.budget.wait(signal, read.outsideCause);
+  read.admitted = true;
+}
+
+export function eventReadAdmitted(signal: AbortSignal): boolean {
+  return budgets.get(signal)?.admitted === true;
+}
+
+function budgetedRead(signal: AbortSignal | undefined): BudgetedRead | undefined {
   return signal === undefined ? undefined : budgets.get(signal);
 }
 
+export function readBudget(signal: AbortSignal | undefined): ReadBudget | undefined {
+  return budgetedRead(signal)?.budget;
+}
+
 export function copyReadBudget(source: AbortSignal | undefined, target: AbortSignal): void {
-  const budget = source === undefined ? undefined : budgets.get(source);
-  if (budget !== undefined) budgets.set(target, budget);
+  const read = budgetedRead(source);
+  if (read !== undefined) budgets.set(target, read);
 }
 
 export function readSignal(signal: AbortSignal | null | undefined): AbortSignal | undefined {
-  if (signal === undefined || signal === null) return undefined;
-  const budget = budgets.get(signal);
-  if (budget === undefined) return signal;
-  const scoped = AbortSignal.any([signal, budget.lifetime.signal]);
-  budgets.set(scoped, budget);
+  if (signal == null) return undefined;
+  const read = budgets.get(signal);
+  if (read === undefined) return signal;
+  const scoped = AbortSignal.any([signal, read.budget.lifetime.signal]);
+  budgets.set(scoped, read);
   return scoped;
 }
