@@ -77,7 +77,7 @@ make install
 make openapi
 make lint
 make schema
-make pre-commit
+make suite
 ```
 
 Copier resolves against **tags**, so `update` brings you to the template's newest release
