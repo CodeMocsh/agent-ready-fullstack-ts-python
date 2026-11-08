@@ -25,7 +25,8 @@ the application's Python — the one uv installs is. `devtools/dev.sh` and
 only way they can stop what they started. `devtools/gate.sh` uses `perl` to take the lock that
 keeps two gates of one project from running at once, because macOS ships no `flock`.
 `make install` uses `curl` to fetch a pinned gitleaks, checked against `devtools/gitleaks.sums`,
-for the secret scan in the gate.
+for the secret scan in the gate. When the release link fails, it fetches the same file through
+the GitHub API.
 
 ## Install
 

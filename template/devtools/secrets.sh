@@ -28,6 +28,19 @@ esac
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
+released() {
+    curl -fsSL -o "$4" "https://github.com/$1/releases/download/$2/$3" && return 0
+    echo "secrets: the release link of $3 failed. Fetching it through the GitHub API." >&2
+    asset="$(curl -fsSL "https://api.github.com/repos/$1/releases/tags/$2" | awk -v name="\"$3\"," '
+        $1 == "\"url\":" && $2 ~ /\/releases\/assets\// { url = $2 }
+        $1 == "\"name\":" && $2 == name { gsub(/[",]/, "", url); print url; exit }')"
+    [ -n "$asset" ] || {
+        echo "secrets: the GitHub API names no asset $3 in the release $2 of $1" >&2
+        return 1
+    }
+    curl -fsSL -H "Accept: application/octet-stream" -o "$4" "$asset"
+}
+
 tool="$root/build/tools/gitleaks-$version/gitleaks"
 if [ ! -x "$tool" ]; then
     archive="gitleaks_${version}_${platform}.tar.gz"
@@ -35,8 +48,7 @@ if [ ! -x "$tool" ]; then
         echo "secrets: devtools/gitleaks.sums has no checksum for $archive" >&2
         exit 1
     }
-    curl -fsSL -o "$scratch/$archive" \
-        "https://github.com/gitleaks/gitleaks/releases/download/v$version/$archive"
+    released gitleaks/gitleaks "v$version" "$archive" "$scratch/$archive"
     if command -v sha256sum >/dev/null; then check="sha256sum -c -"; else check="shasum -a 256 -c -"; fi
     (cd "$scratch" && echo "$sum" | $check >/dev/null)
     tar -xzf "$scratch/$archive" -C "$scratch" gitleaks
