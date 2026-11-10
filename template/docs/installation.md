@@ -30,11 +30,15 @@ the GitHub API.
 
 ## Install
 
+Commit the project before you install it. `make install` activates the git hooks. The hooks need
+a repository.
+
 ```bash
+git init && git add . && git commit -m "Initial commit"
 make install
 ```
 
-That activates the versioned git hooks, then runs `devtools/install.sh`. The script runs
+`make install` activates the versioned git hooks, then runs `devtools/install.sh`. The script runs
 `pnpm install` in `frontend/` and `uv sync --all-groups` in `backend/` (which installs the Python
 version pinned in `backend/.python-version`), and fetches what the gate and the browser tiers
 need. Each step downloads only what is absent. Run it again with nothing changed, and it
@@ -61,11 +65,11 @@ Neither half needs the other's toolchain to install, lint, test or build.
 ## Verify
 
 ```bash
-make lint test
+make pre-commit
 ```
 
-The last step starts both halves and runs the contract suite against the real backend, so a
-green run means the two agree.
+`make pre-commit` runs the commit gate. [development.md](development.md#the-gate) says what it
+checks. CI or the release caller runs the full suite.
 
 ## Updating from the template
 
@@ -78,7 +82,7 @@ make install
 make openapi
 make lint
 make schema
-make suite
+make pre-commit
 ```
 
 Copier resolves against **tags**, so `update` brings you to the template's newest release
@@ -337,8 +341,8 @@ What to expect, because it is not all free:
   - Any other invalidation reads in answer to the client's own cache. Remove it. If a screen
     then shows old data, find the outside cause it misses: a mutation, a server event or a
     backstop.
-  - Run `make test`. A read with no outside cause fails `tests/first-draw.test.tsx` or a component
-    test with `CycleStopped`, which names the key.
+  - Run `pnpm -C frontend exec vitest run tests/first-draw.test.tsx tests/components`. A read
+    with no outside cause fails with `CycleStopped`, which names the key.
   - `ApiError` takes a fourth argument, `retryAfterSeconds`. Pass `null` where you build one.
   - A query retries only `Unreached`: a request that never reached the server. A test that waited
     for a retry of a `5xx` now sees the error at once.
@@ -461,7 +465,7 @@ What to expect, because it is not all free:
     read it there: drop the map from each call. `store_of_the_job` is gone, and `attempted`
     takes the tenant in place of a store.
   - `app/models/tasks.py` imports `PAGE_MAX` from `app.models.shared`. In
-    `tests/models/layers.py`, give `tasks` the layer `shared`, or `make test` names the import.
+    `tests/models/layers.py`, give `tasks` the layer `shared`, or `tests/models/test_layering.py` names the import.
   - In `docs/backend.md`, take the template's bullet that starts "Make a wait past the budget a
     job".
   - With `example_resource: false`, an update neither writes nor changes `app/jobs.py`, as for
@@ -483,7 +487,7 @@ What to expect, because it is not all free:
     requests it reports. The test now waits for each render, so a screen with a slow render can
     count more reads than before.
   - `app/read_limits.py` is new, and yours. In `tests/models/layers.py`, give the new module
-    `app/models/reads.py` the entry `"reads": frozenset()`, or `make test` names it.
+    `app/models/reads.py` the entry `"reads": frozenset()`, or `tests/models/test_layering.py` names it.
   - The contract suite sends each part of a group as a request of the rate. If
     `make test-contract` gets a `429`, run `ADMISSION_MODE=evaluate make test-contract` and raise
     `ADMISSION_BURST` in `devtools/contract-test.env`. The template's own suite needs 60.
@@ -497,9 +501,9 @@ What to expect, because it is not all free:
     the numbers in `app/read_limits.py`. `in_flight` no longer needs to hold a whole draw.
     Measure with `ADMISSION_MODE=evaluate` before you lower it.
   [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md) says why.
-- **Run `make suite` after an update.** Take the new `gate-commit` and `suite` targets together.
-  Keep the frontend Node, smoke and DOM selections from `vitest.config.ts`. A custom CI must
-  call `make suite` before promotion. `make pre-commit` now checks only the commit gate.
+- **A custom CI must call `make suite` before promotion.** Take the new `gate-commit` and `suite`
+  targets together. Keep the frontend Node, smoke and DOM selections from `vitest.config.ts`.
+  `make pre-commit` now checks only the commit gate.
 - **From 0.70.0 a loop outlasts a database outage, and `DatabaseBusy` is `DatabaseUnavailable`.**
   - Import and raise `DatabaseUnavailable` from `app.store` where you used `DatabaseBusy`.
   - The line `database busy` is now `database unavailable`, and it also names `cause`. Change
@@ -509,7 +513,7 @@ What to expect, because it is not all free:
     `InterfaceError`.
   - Run each loop that runs until its process stops through
     `app.loops.rounds(name, each_round)`, with one round as a function. Delete each catch of every
-    error in it, and its `BLE001` entry in `per-file-ignores`. `make test` names each `while True` with no `break` and no `return`.
+    error in it, and its `BLE001` entry in `per-file-ignores`. `tests/loops/test_every_loop_runs_through_rounds.py` names each `while True` with no `break` and no `return`.
   - `log.database_busy(refusal)` is now `log.database_unavailable(refusal, cause)`.
   - Inside `PostgresDatabase.connection()` and `scoped()`, an error of asyncpg or of the socket
     after which the connection ended raises `ConnectionLost`. A catch of an asyncpg error there

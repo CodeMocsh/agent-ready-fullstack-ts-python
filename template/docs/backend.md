@@ -230,6 +230,6 @@ backend/
 - **The schema is data.** `app/store/ddl.py` holds one statement per four-digit key, and
   `make migrate` runs all of them every time. A shipped entry never changes: a column added later
   lands twice, once in its table's `CREATE` and once keyed from `REPAIR_BAND` in `app/store/ddl.py`.
-  `.schema-baseline.json` records each body, and `make test` refuses an edit to one. Run
+  `.schema-baseline.json` records each body, and `tests/store/test_schema.py` refuses an edit to one. Run
   `make schema` and commit both files. [schema.md](schema.md) says what the migration system will
   not do.

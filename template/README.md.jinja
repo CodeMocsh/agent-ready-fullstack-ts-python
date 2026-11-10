@@ -54,9 +54,9 @@ against both implementations to prove they still agree.
 
 ```bash
 make pre-commit     # static checks and commit tests, once per tree
-make suite          # full suite, live contracts and frontend build
+make suite          # full suite and frontend build; CI or the release caller runs it
 make lint           # both halves
-make test           # both halves, then the contract suite across both
+make test           # both halves, then the contract suite; make suite runs it
 make test-e2e       # opt-in: Playwright in mock mode, in a real browser
 make db-test        # opt-in: backend/tests/integration/, on a Postgres it starts itself
 make build          # production build of the frontend

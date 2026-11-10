@@ -34,7 +34,7 @@ $drift"
 }
 
 shared_prose() {
-    sed -E -n "/^## Approach/,/^## (Layout|The template is inert)/p" "$1" |
+    sed -E -n "/^## Approach/,/^## (Layout|The template is inert|Speed)/p" "$1" |
         sed '$d'
 }
 PROSE_ROOT="$(mktemp)"
