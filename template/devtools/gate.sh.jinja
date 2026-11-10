@@ -64,10 +64,10 @@ report_the_cost() {
 
 if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
     make -s gate-commit 9>&- || exit 1
+    report_the_cost || exit 1
     if [ "$(sh devtools/worktree-tree.sh)" = "$before" ]; then
         echo "$before" >"$passed"
     fi
-    report_the_cost || exit 1
     exit 0
 fi
 
