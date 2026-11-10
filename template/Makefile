@@ -14,7 +14,7 @@ E2E_BROWSERS ?= chromium
         dev-backend openapi \
         openapi-check build upgrade clean
 
-default: install lint test
+default: install lint pre-commit
 
 install:
 	@$(MAKE) --no-print-directory hooks
