@@ -50,7 +50,7 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 - **The hook runs `make gate-commit` through `make pre-commit`.** It checks secrets, lint,
   types and contract artifacts. It runs backend tests outside `tests/started/` and the frontend
   Node and smoke projects. Both halves exclude directories named `slow` at any depth.
-  It reports the checks left for `make suite`.
+  It names the checks that `make suite` adds. CI or the release caller runs them, not you.
 - **`make suite` runs all default tests and builds the frontend.** It includes the started
   app, slow tests, every frontend test and the live contract suite. It does not select the opt-in tiers below.
   {% if github_ci %}The GitHub workflow runs it on pull requests and pushes.{% else %}Configure

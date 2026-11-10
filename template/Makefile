@@ -33,7 +33,7 @@ gate-commit: secrets lint-check openapi-check test-commit
 suite: gate build
 
 test-commit: test-commit-frontend test-commit-backend
-	@echo "Commit tests passed. Slow tests, started-app tests, broader DOM tests, live contracts and build did not run. Run make suite."
+	@echo "Commit tests passed. Slow tests, started-app tests, broader DOM tests, live contracts and build did not run. CI or the release caller runs them in make suite."
 
 test-commit-frontend:
 	pnpm -C frontend test:commit

@@ -54,6 +54,16 @@ active voice, one meaning per term. That covers docs, commit messages, decisions
 test names, log lines and failure messages. `CONTEXT.md` is the word list: one term per concept,
 and that term every time.
 
+## Speed
+
+Keep the lead time to production short (DORA).
+Each stage of the deployment pipeline has its own checks (Continuous Delivery).
+
+- On your machine, test the change that you made.
+- CI or the release caller tests the whole tree.
+- A pass on a tree is final for that tree.
+- If a check is slow, make the check faster.
+
 ## Layout
 
 Two halves and the root. `pnpm` runs in `frontend/`, `uv` in `backend/`, and `make` at the root
@@ -72,8 +82,6 @@ fans out to both. Each half works without the other's toolchain.
 - Never hand-edit or hand-merge a generated file. Take a side and regenerate: `make openapi` for
   the contract, `make schema` and `make roles` for `deploy/`.
 - Run `make pre-commit`, then commit. The commit gate runs once per tree.
-  Read the checks it says it did not run.
-  Run `make suite` before merge when CI does not run it.
 - When a complexity gate fails, split the function. Do not raise a threshold to get green.
 - When the startup gate fails, import the package where it is used. Do not record a rise to get
   green.
@@ -187,11 +195,11 @@ fans out to both. Each half works without the other's toolchain.
 ```bash
 make install        # the git hooks, both halves, then the browser
 make pre-commit     # the commit gate, once per tree
-make suite          # the full suite and build
+make suite          # the full suite and build; CI or the release caller runs it
 make dev            # both halves, live mode; with DATABASE_URL, the worker too
 make dev-frontend   # frontend only, mock mode
 make lint           # auto-fix and lint both halves
-make test           # both halves, then the contract suite against the real backend
+make test           # both halves, then the contract suite; make suite runs it
 make openapi        # regenerate the contract artifacts
 make db             # a Postgres to develop against
 ```

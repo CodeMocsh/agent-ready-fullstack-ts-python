@@ -90,7 +90,7 @@ echo "pre-commit: PARTIAL RUN -- this commit was not checked by the whole gate."
 [ "$has_frontend" = 1 ] || echo "  frontend        SKIPPED (no pnpm, or run 'make install')" >&2
 [ "$has_backend" = 1 ] || echo "  backend         SKIPPED (no uv, or run 'make install')" >&2
 echo "  openapi-check   SKIPPED (needs both halves)" >&2
-echo "  full suite      NOT RUN (run make suite with both halves installed)" >&2
+echo "  full suite      NOT RUN (CI or the release caller runs make suite)" >&2
 echo "Run 'make install', then 'make pre-commit', to check it properly." >&2
 
 report_the_cost || failed=1
