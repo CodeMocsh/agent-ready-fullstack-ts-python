@@ -65,7 +65,7 @@ make install        # both halves, and the git hooks
 
 make dev            # backend on :8000, frontend on :5173
 make dev-frontend   # or just the frontend, mock mode, no backend at all
-make lint test      # both halves, then the contract suite across both
+make lint pre-commit # both halves, then the commit gate
 ```
 
 Commit before `make install`: the installer activates the project's git hooks, and that needs a
