@@ -15,7 +15,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry import trace
-from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+from opentelemetry.sdk.metrics.export import HistogramDataPoint, InMemoryMetricReader
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, Status, StatusCode
@@ -359,6 +360,29 @@ def test_a_loop_delay_is_recorded_in_seconds_in_its_own_buckets(untrusting: Inst
     assert point.sum == 0.3
     assert tuple(point.explicit_bounds) == telemetry.LOOP_DELAY_BUCKETS
     assert dict(point.attributes or {}) == {}
+
+
+def test_a_process_that_serves_no_request_measures_its_loop_and_instruments_nothing_else() -> None:
+    metrics = InMemoryMetricReader()
+    measured = telemetry.meters(telemetry_settings(), metrics)
+
+    measured.loop_delay()(0.3)
+
+    collected = metrics.get_metrics_data()
+    assert collected is not None
+    [resource] = collected.resource_metrics
+    [point] = [
+        point
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+        if metric.name == telemetry.LOOP_DELAY
+        for point in metric.data.data_points
+        if isinstance(point, HistogramDataPoint)
+    ]
+    assert point.sum == 0.3
+    assert resource.resource.attributes["service.name"] == "tasks-test"
+    assert not AsyncPGInstrumentor().is_instrumented_by_opentelemetry
+    measured.shutdown()
 
 
 class CountsItsConnections(MemoryDatabase):

@@ -1,7 +1,9 @@
 """What a real Postgres produces: database spans named by operation, with no query text and no
 value that was sent, only inside a request, and the pool's connections as metrics."""
 
+import asyncio
 import json
+import signal
 from collections.abc import Callable
 
 import pytest
@@ -17,12 +19,14 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
 
-from app import telemetry
+from app import telemetry, worker
 from app.deps import database_of
+from app.loop_watch import TICK_SECONDS
 from app.main import create_app
 from app.store.pg import PostgresDatabase
+from tests.clock import elapse
 from tests.doubles import CANARY, telemetry_settings
-from tests.integration.conftest import Provisioned
+from tests.integration.conftest import Provisioned, a_postgres_database
 from tests.widgets import Widget
 
 
@@ -188,3 +192,23 @@ def by_state(collected: MetricsData | None, *, pool: str) -> dict[tuple[str, str
         assert (name, state) not in reported
         reported[name, state] = point.value
     return reported
+
+
+async def test_a_worker_reports_its_loop_and_its_pool(provisioned: Provisioned) -> None:
+    metrics = InMemoryMetricReader()
+    measured = telemetry.meters(telemetry_settings(), metrics)
+    database = await a_postgres_database(provisioned)
+
+    async with asyncio.TaskGroup() as group:
+        _ = group.create_task(worker.serve(database, measured))
+        await elapse(3 * TICK_SECONDS)
+        collected = metrics.get_metrics_data()
+        signal.raise_signal(signal.SIGTERM)
+
+    assert collected is not None
+    assert {telemetry.LOOP_DELAY, "db.client.connection.count"} <= {
+        metric.name
+        for resource in collected.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }

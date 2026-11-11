@@ -559,6 +559,11 @@ What to expect, because it is not all free:
   - Stop `followNavigations` and clear the old query client when a session ends.
   [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
 
+- **From 0.74.0 the worker reports its pool and its event loop's delay.** It does so when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Give the worker the telemetry settings of the web process,
+  with its own `OTEL_SERVICE_NAME`. `telemetry.meters` builds the same metrics for any other
+  process that serves no request.
+
 - **From 0.73.0 an update never writes the lists in your test folders.** These are
   `backend/tests/tiers.py`, `backend/tests/models/layers.py`, `frontend/tests/read-budgets.ts`,
   `frontend/tests/signed-in.ts` and `frontend/e2e/signed-in.ts`. If this project lacks one of

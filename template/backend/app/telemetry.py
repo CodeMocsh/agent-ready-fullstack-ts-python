@@ -6,8 +6,9 @@ every request adds to `http.server.request.duration`; `/health` and `/ready` are
 request starts a trace. A query exports a span only inside a traced request. A pooled substrate
 reports its connections as `db.client.connection.count`, by state, and as
 `db.client.connection.max`, and each wait for one to `CONNECTION_WAIT`. Each tick of
-`app.loop_watch` adds how late it ran to `LOOP_DELAY`. This module instruments and `app.log` reads the current span; ruff
-refuses `opentelemetry` anywhere else.
+`app.loop_watch` adds how late it ran to `LOOP_DELAY`. A process that serves no request, such as
+`app.worker`, gets `meters`: its pool, its waits and its loop's delay, and no trace. This module
+instruments and `app.log` reads the current span; ruff refuses `opentelemetry` anywhere else.
 
 **What leaves the process is declared here.** A span keeps only the attributes in
 `SPAN_ATTRIBUTES`, its status code, none of its events and no caller's `tracestate`; a
@@ -110,12 +111,12 @@ _CALLER: Final = create_key("untrusted-caller")
 
 
 @dataclass(frozen=True)
-class Instruments:
-    """What `instrument` installed, so the lifespan can stop it."""
+class Meters:
+    """The metrics of one process: its pool, its waits for a connection and how late its event
+    loop ran. `meters` builds them for a process that serves no request, and `Instruments` adds
+    a request's traces and metrics to them."""
 
-    tracer_provider: TracerProvider
     meter_provider: MeterProvider
-    semconv_before: str | None
 
     def observe(self, database: Database) -> None:
         """Report the connections of `database` at every collection, and each wait for one to
@@ -166,11 +167,26 @@ class Instruments:
         )
 
     def shutdown(self) -> None:
+        """Flush and stop the meter provider. Waits up to the export timeout when the Collector
+        does not answer. Call it before the database closes, because the last collection counts
+        its connections."""
+        self.meter_provider.shutdown()
+
+
+@dataclass(frozen=True)
+class Instruments(Meters):
+    """What `instrument` installed, so the lifespan can stop it."""
+
+    tracer_provider: TracerProvider
+    semconv_before: str | None
+
+    @override
+    def shutdown(self) -> None:
         """Flush and stop both providers, take the instrumentation off asyncpg, and put back
         `SEMCONV_ENV`. Waits up to the export timeout for each provider, one after the other,
         when the Collector does not answer."""
         self.tracer_provider.shutdown()
-        self.meter_provider.shutdown()
+        super().shutdown()
         AsyncPGInstrumentor().uninstrument()
         if self.semconv_before is None:
             os.environ.pop(SEMCONV_ENV, None)
@@ -215,12 +231,7 @@ def instrument(
     )
     tracer_provider.add_span_processor(_LinkTheCaller())
     tracer_provider.add_span_processor(BatchSpanProcessor(_Declared(spans)))
-    meter_provider = MeterProvider(
-        metric_readers=[metrics],
-        resource=resource,
-        exemplar_filter=AlwaysOffExemplarFilter(),
-        views=[View(instrument_name="*", attribute_keys=set(METRIC_ATTRIBUTES))],
-    )
+    meter_provider = _meter_provider(resource, metrics)
     FastAPIInstrumentor.instrument_app(
         app,
         tracer_provider=tracer_provider,
@@ -229,7 +240,26 @@ def instrument(
         excluded_urls=PROBES,
     )
     AsyncPGInstrumentor().instrument(tracer_provider=tracer_provider)
-    return Instruments(tracer_provider, meter_provider, semconv_before)
+    return Instruments(
+        meter_provider=meter_provider,
+        tracer_provider=tracer_provider,
+        semconv_before=semconv_before,
+    )
+
+
+def meters(settings: TelemetrySettings, metrics: MetricReader) -> Meters:
+    """The metrics of a process that serves no request, exported through `metrics`. It starts no
+    trace, because only a request starts one, and it leaves asyncpg and the propagator alone."""
+    return Meters(_meter_provider(Resource.create({"service.name": settings.service}), metrics))
+
+
+def _meter_provider(resource: Resource, metrics: MetricReader) -> MeterProvider:
+    return MeterProvider(
+        metric_readers=[metrics],
+        resource=resource,
+        exemplar_filter=AlwaysOffExemplarFilter(),
+        views=[View(instrument_name="*", attribute_keys=set(METRIC_ATTRIBUTES))],
+    )
 
 
 class _CallerAsLink(TextMapPropagator):
