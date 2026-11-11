@@ -225,8 +225,9 @@ backend/
   that names no event raises `NoSuchAuditEvent`. `tests/store_contract.py` holds both substrates
   to it, and `tests/integration/test_pages_on_postgres.py` holds Postgres to the `LIMIT`.
   `tests/integration/test_routes_read_pages.py` holds each GET route to a page for each read. Give
-  each new tenant table rows, and each new GET route a path, in `tests/integration/filled.py`. A
-  test that needs the whole list reads it with `tests/pages.py`.
+  each new tenant table rows, and each new GET route a path, in `tests/integration/filled.py`.
+  A route that reads more than a page today goes in `OVER_A_PAGE` there, with its reason, until
+  it reads a page. A test that needs the whole list reads it with `tests/pages.py`.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
   the row makes Postgres evaluate it for every row, and the index cannot help.
