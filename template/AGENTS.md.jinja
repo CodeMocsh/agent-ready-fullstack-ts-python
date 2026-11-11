@@ -38,6 +38,9 @@ and the code reports it. In an app with two halves, a silent failure looks like 
 a route that ignores a store error answers `200 []`, and the table says "No tasks yet". Assert
 the failure itself, never the absence of an effect.
 
+Work that must continue after one item fails catches the failure at that item, records it on the
+item, and reports it. The loop around the items catches nothing.
+
 ## Zero comments
 
 No comments in source, tests or scripts, suppression directives included: `make lint` refuses
