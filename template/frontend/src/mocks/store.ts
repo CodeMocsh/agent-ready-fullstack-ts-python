@@ -2,6 +2,16 @@ import type { CreateTaskBody, Task, TaskPage, UpdateTaskBody } from "@/api/tasks
 
 export const PAGE_MAX = 100;
 
+let rowsPerPage = PAGE_MAX;
+
+export function pageRows(): number {
+  return rowsPerPage;
+}
+
+export function pageAtMost(rows: number): void {
+  rowsPerPage = rows;
+}
+
 const SEED: readonly Task[] = [
   { id: "1", title: "Read AGENTS.md", done: true },
   { id: "2", title: "Run the app in mock mode", done: false },
@@ -27,9 +37,9 @@ export function createTaskStore(seed: readonly Task[] = SEED): TaskStore {
       if (after !== null && named === -1) {
         return null;
       }
-      const page = newest.slice(named + 1, named + 1 + PAGE_MAX);
+      const page = newest.slice(named + 1, named + 1 + pageRows());
       const last = page.at(-1);
-      const more = named + 1 + PAGE_MAX < newest.length;
+      const more = named + 1 + pageRows() < newest.length;
       return { tasks: page, next: more && last !== undefined ? last.id : null };
     },
     create: ({ title }) => {

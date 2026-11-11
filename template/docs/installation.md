@@ -561,6 +561,26 @@ What to expect, because it is not all free:
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) and
   [adr/template/0031](adr/template/0031-the-database-bounds-the-bytes-of-every-value.md) say why.
 
+- **From 0.74.0 every successful answer has a largest size, and each first draw holds one row a
+  page.**
+  - `tests/models/test_response_bounds.py` names each route whose answer has no largest size,
+    with the path of the part that has no bound. Bound each part in its model: `max_length` on a
+    `str` or a `list`, and `MAX_BYTES` from `app.models` on a value that is any JSON. A route
+    whose schema cannot bound it goes in `BOUNDED_ELSEWHERE` in that test, with the code that
+    bounds it instead.
+  - `Task`, `TaskPage` and `Job` bound their ids, names and titles. `Job.outcome` gives
+    `MAX_BYTES`. `app/models/jobs.py` now imports `app.models.shared`, so in
+    `tests/models/layers.py`, which is yours, give `jobs` the layer `{"shared"}`.
+  - `readsOf` draws each screen at one row a page. In each mock of a list of yours, read the
+    page size from `pageRows()` in `src/mocks/store.ts`, not `PAGE_MAX`.
+    `tests/api/pages.test.ts` names a mock that does not.
+  - A part of `GET /reads` no longer carries `set-cookie`, and a group counts its parts in UTF-8
+    bytes. If a part renewed a session cookie, renew it on a request that is not a part.
+  [adr/template/0028](adr/template/0028-every-finite-response-has-a-byte-bound.md),
+  [adr/template/0019](adr/template/0019-the-gate-counts-the-reads-of-each-screen-s-first-draw.md)
+  and [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md)
+  say why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

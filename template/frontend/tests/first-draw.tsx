@@ -9,6 +9,7 @@ import { act, getConfig, render } from "@testing-library/react";
 import { API_BASE_URL } from "@/api/base";
 import { AppProviders } from "@/app-providers";
 import { server } from "@/mocks/node";
+import { pageAtMost } from "@/mocks/store";
 import { createQueryClient, followNavigations } from "@/query-client";
 import { router } from "@/router";
 
@@ -164,6 +165,7 @@ function recordRequests(streams: readonly RegExp[], failures: unknown[]): Record
 }
 
 export async function readsOf(visit: string, streams: readonly RegExp[]): Promise<Reads> {
+  pageAtMost(1);
   const failures: unknown[] = [];
   const queryClient = createQueryClient((_kind, error) => failures.push(error));
   const defaults = queryClient.getDefaultOptions();

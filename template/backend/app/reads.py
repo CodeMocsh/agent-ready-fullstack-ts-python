@@ -52,6 +52,10 @@ _NOT_CARRIED: Final = (b"content-length", b"x-request-id")
 
 _ENVELOPE: Final = (b'{"parts":[', b"]}")
 
+_NOT_IN_A_PART: Final = (b"content-length", b"set-cookie", b"set-cookie2")
+"""The headers a part's answer never carries. A cookie that a part sets would reach the client as
+JSON it can read, so an `HttpOnly` cookie would not be one."""
+
 
 @dataclass(frozen=True)
 class Limits:
@@ -196,7 +200,7 @@ class _Held:
             self._headers = {
                 name.decode("latin-1").lower(): value.decode("latin-1")
                 for name, value in message.get("headers", [])
-                if name.lower() != b"content-length"
+                if name.lower() not in _NOT_IN_A_PART
             }
         elif message["type"] == "http.response.body":
             self._body.extend(message.get("body", b""))
@@ -217,9 +221,12 @@ def _left(reason: LeftBecause) -> LeftPart:
     return LeftPart(kind="left", reason=reason)
 
 
-_LEFT_AT_MOST: Final = max(
-    len(_left(reason).model_dump_json()) + 1 for reason in get_args(LeftBecause)
-)
+def _bytes(answer: AnsweredPart | LeftPart) -> int:
+    """The bytes of `answer` as the group sends it: UTF-8, not characters."""
+    return len(answer.model_dump_json().encode())
+
+
+_LEFT_AT_MOST: Final = max(_bytes(_left(reason)) + 1 for reason in get_args(LeftBecause))
 
 
 def _within(outcomes: Sequence[_Outcome], ceiling: int) -> list[_Outcome]:
@@ -229,10 +236,10 @@ def _within(outcomes: Sequence[_Outcome], ceiling: int) -> list[_Outcome]:
     kept: list[_Outcome] = []
     for index, outcome in enumerate(outcomes):
         later = (len(outcomes) - index - 1) * _LEFT_AT_MOST
-        size = len(outcome.answer.model_dump_json()) + 1
+        size = _bytes(outcome.answer) + 1
         if isinstance(outcome.answer, AnsweredPart) and size + later > room:
             outcome = _Outcome(_left("too large"), outcome.route)
-            size = len(outcome.answer.model_dump_json()) + 1
+            size = _bytes(outcome.answer) + 1
         room -= size
         kept.append(outcome)
     return kept

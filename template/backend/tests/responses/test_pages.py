@@ -2,10 +2,12 @@ import asyncio
 from pathlib import Path
 
 import pytest
+from fastapi import APIRouter, Depends, Response
 from fastapi.testclient import TestClient
 
 from app import response_bound, serve
 from app.audit_events import acting_as
+from app.deps import resolved_principal
 from app.identity.shared import SENTINEL_PRINCIPAL, SENTINEL_TENANT
 from app.main import ROUTERS
 from app.models import PAGE_MAX, TITLE_MAX, CreateTaskBody
@@ -33,14 +35,23 @@ async def test_a_full_page_of_large_rows_still_answers_a_complete_page(database:
     assert all(task["title"] == "界" * TITLE_MAX for task in response.json()["tasks"])
 
 
+def oversized_router() -> APIRouter:
+    """A tenant route whose answer is over the default limit, as a route answers what its schema
+    does not bound."""
+    router = APIRouter(dependencies=[Depends(resolved_principal)])
+
+    @router.get("/oversized")
+    async def oversized() -> Response:
+        return Response(b"x" * (DEFAULT_BYTES + 1))
+
+    return router
+
+
 async def test_a_refused_read_records_the_status_the_client_received(database: Database) -> None:
-    store = database.store(SENTINEL_TENANT)
-    with acting_as(SENTINEL_PRINCIPAL.actor):
-        await store.create(CreateTaskBody.model_construct(title="x" * (DEFAULT_BYTES + 1)))
-    app = await asyncio.to_thread(assembled, *ROUTERS, database=database)
+    app = await asyncio.to_thread(assembled, oversized_router(), database=database)
     client = TestClient(app)
 
-    response = await asyncio.to_thread(client.get, "/tasks")
+    response = await asyncio.to_thread(client.get, "/oversized")
     events = await every_event(database.audit_events(SENTINEL_TENANT))
     requests = [event for event in events if event.method == "GET"]
 

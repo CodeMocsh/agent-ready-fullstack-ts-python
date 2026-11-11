@@ -170,8 +170,9 @@ fans out to both. Each half works without the other's toolchain.
   of it. Every column of variable width has a byte bound, and a file or a whole document goes in
   object storage, not in a row. A count, a sum or a group goes in
   SQL. [adr/template/0026](docs/adr/template/0026-every-store-read-is-a-page.md) says why.
-- Each finite response has a byte bound. A route exception names its reason and stays under
-  the deployment ceiling. A stream declares its own limits.
+- Each finite response has a byte bound. Its schema bounds every list and every string, so the
+  gate works out its largest size. A route exception names its reason and stays under the
+  deployment ceiling. A stream declares its own limits.
   [adr/template/0028](docs/adr/template/0028-every-finite-response-has-a-byte-bound.md) defines the contract.
 - Never widen the store's surface to take a tenant or an actor. `Database.store(tenant_id)` is the
   only way to get a store, and no store method takes a tenant. A write acts as the actor

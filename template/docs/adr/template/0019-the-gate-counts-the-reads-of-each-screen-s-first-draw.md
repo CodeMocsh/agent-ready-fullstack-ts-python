@@ -46,6 +46,12 @@ before anything renders. Only a draw shows all of them.
   requests. `readsOf` lists the parts of each `GET /reads`.
   [0029](0029-the-reads-that-start-in-one-task-are-one-request.md) sends the reads that start in one
   task as one request.
+- **A draw holds one row a page.** `readsOf` calls `pageAtMost(1)` from `src/mocks/store.ts`
+  before it draws. A screen that reads the next page by itself then reads one page for each row,
+  and its count passes its budget, whatever the seed holds. At `PAGE_MAX` rows a page, the seed
+  fits one page, and the same screen passes. Each mock of a list reads `pageRows()`.
+  `tests/api/pages.test.ts` asks each list in `PAGES` of `src/api/parts.ts` at one row a page, and
+  fails on a mock that answers more.
 - **A draw has the providers the app has.** `src/main.tsx` and `readsOf` both put the router
   inside `AppProviders` from `src/app-providers.tsx`, inside the query client's provider. The
   project owns that file. A provider that the project adds there is in each draw too.
