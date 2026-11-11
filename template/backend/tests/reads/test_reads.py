@@ -163,8 +163,8 @@ async def test_each_part_is_a_request_event_with_the_request_id_of_its_group(
 async def test_a_part_past_its_bound_leaves_its_group_and_the_next_part_answers(
     database: Database, monkeypatch: pytest.MonkeyPatch, logged: Logged
 ) -> None:
-    monkeypatch.setenv(READS_PART_BOUND_SECONDS_ENV, "0.05")
-    app = await asyncio.to_thread(assembled, *ROUTERS, WIDGETS, slow_router(1.0), database=database)
+    monkeypatch.setenv(READS_PART_BOUND_SECONDS_ENV, "0.5")
+    app = await asyncio.to_thread(assembled, *ROUTERS, WIDGETS, slow_router(5.0), database=database)
 
     parts = await asyncio.to_thread(parts_of, TestClient(app), "/slow", "/widgets")
 
@@ -182,15 +182,22 @@ async def test_a_part_past_its_bound_leaves_its_group_and_the_next_part_answers(
 async def test_each_part_s_bound_starts_at_its_turn(
     database: Database, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv(READS_PART_BOUND_SECONDS_ENV, "0.3")
+    count = 12
+    bound_seconds = 0.8
+    monkeypatch.setenv(READS_PART_BOUND_SECONDS_ENV, str(bound_seconds))
+    monkeypatch.setenv(READS_MAX_PARTS_ENV, str(count))
     monkeypatch.setenv(READS_PART_CONCURRENCY_ENV, "1")
     app = await asyncio.to_thread(
-        assembled, *ROUTERS, WIDGETS, slow_router(0.15), database=database
+        assembled,
+        *ROUTERS,
+        WIDGETS,
+        slow_router(bound_seconds / (count - 1)),
+        database=database,
     )
 
-    parts = await asyncio.to_thread(parts_of, TestClient(app), "/slow", "/slow", "/slow")
+    parts = await asyncio.to_thread(parts_of, TestClient(app), *["/slow"] * count)
 
-    assert [part["kind"] for part in parts] == ["answered"] * 3
+    assert [part["kind"] for part in parts] == ["answered"] * count
 
 
 async def test_a_part_past_the_cap_leaves_its_group(
