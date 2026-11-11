@@ -172,6 +172,19 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /**
+         * Failure
+         * @description Why some work failed. It holds no text but the sentence its cause declares.
+         */
+        Failure: {
+            /**
+             * Cause
+             * @enum {string}
+             */
+            cause: "internal" | "attempts_spent";
+            /** Said */
+            readonly said: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -180,7 +193,7 @@ export interface components {
         /**
          * Job
          * @description One job, as the tenant that asked for it reads it. `outcome` is set when the job is `done`,
-         *     and `failure` names why it is `dead`.
+         *     and `failure` says why it is `dead`.
          */
         Job: {
             /** Id */
@@ -196,8 +209,7 @@ export interface components {
             outcome: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
-            /** Failure */
-            failure: string | null;
+            failure: components["schemas"]["Failure"] | null;
         };
         JsonValue: unknown;
         /** LeftPart */

@@ -152,6 +152,7 @@ _exclude:
 # project without the example, and its import fails.
 _skip_if_exists:
   - backend/app/errors.py
+  - backend/app/failures.py
   - backend/app/environment.py
   - backend/app/request_line.py
   - backend/app/log_lines.py

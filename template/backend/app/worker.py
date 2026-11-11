@@ -29,12 +29,12 @@ from typing import TYPE_CHECKING, Any, Final
 from app import log
 from app.audit_events import acting_as
 from app.environment import refuse_development_settings
+from app.failing import AttemptsSpent
 from app.loop_watch import LoopWatch
 from app.loops import DatabaseGone, rounds
 from app.pacing import backoff, every
 from app.store import DatabaseUnavailable
 from app.store.jobs import (
-    ATTEMPTS_SPENT,
     MAX_ATTEMPTS,
     Asked,
     Claim,
@@ -140,8 +140,14 @@ async def _served[T](held: _Held, step: Callable[[], Awaitable[T]]) -> T:
 
 async def _attempt(claims: JobClaims, claim: Claim, held: _Held, asked: Asked) -> None:
     if claim.attempts > MAX_ATTEMPTS:
-        await _served(held, lambda: claims.dead(claim, ATTEMPTS_SPENT))
-        log.job_dead(kind=claim.kind, job=claim.id, attempts=MAX_ATTEMPTS, failure=ATTEMPTS_SPENT)
+        await _served(held, lambda: claims.dead(claim, AttemptsSpent.cause))
+        log.job_dead(
+            kind=claim.kind,
+            job=claim.id,
+            attempts=MAX_ATTEMPTS,
+            cause=AttemptsSpent.cause,
+            error=AttemptsSpent.__name__,
+        )
         return
     attempt = attempted(
         handler_of(claims.database.kinds, claim.kind),
@@ -158,8 +164,14 @@ async def _attempt(claims: JobClaims, claim: Claim, held: _Held, asked: Asked) -
         await _served(held, lambda: claims.done(claim, result))
         log.job_done(kind=claim.kind, job=claim.id, attempt=claim.attempts)
     elif claim.attempts >= MAX_ATTEMPTS:
-        await _served(held, lambda: claims.dead(claim, result.failure))
-        log.job_dead(kind=claim.kind, job=claim.id, attempts=claim.attempts, failure=result.failure)
+        await _served(held, lambda: claims.dead(claim, result.cause))
+        log.job_dead(
+            kind=claim.kind,
+            job=claim.id,
+            attempts=claim.attempts,
+            cause=result.cause,
+            error=result.error,
+        )
     else:
         await _served(held, lambda: claims.again(claim))
 

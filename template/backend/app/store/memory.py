@@ -17,7 +17,16 @@ from datetime import UTC, datetime
 
 from app import log
 from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, acting_as
-from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
+from app.models import (
+    PAGE_MAX,
+    CreateTaskBody,
+    Failure,
+    Job,
+    JsonObject,
+    Task,
+    TaskPage,
+    UpdateTaskBody,
+)
 from app.pacing import backoff
 from app.store import AuditEvents, Jobs, NoSuchAuditEvent, TaskStore, TenantUnset, numbered
 from app.store.jobs import (
@@ -255,8 +264,10 @@ class MemoryDatabase:
         with acting_as(asked.actor):
             attempt, result = await self._attempts(tenant_id, job, handler, asked)
         if isinstance(result, Failed):
-            job.state, job.failure = "dead", result.failure
-            log.job_dead(kind=job.kind, job=job.id, attempts=attempt, failure=result.failure)
+            job.state, job.failure = "dead", Failure(cause=result.cause)
+            log.job_dead(
+                kind=job.kind, job=job.id, attempts=attempt, cause=result.cause, error=result.error
+            )
         else:
             job.state, job.outcome = "done", result
             log.job_done(kind=job.kind, job=job.id, attempt=attempt)

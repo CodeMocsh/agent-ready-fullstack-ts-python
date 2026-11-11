@@ -121,10 +121,10 @@ class JobClaims:
             await conn.execute(_DONE, UUID(claim.id), encoded(outcome))
             await conn.execute(_ENDED, UUID(claim.id))
 
-    async def dead(self, claim: Claim, failure: str) -> None:
-        """End the job of `claim` as dead, for `failure`."""
+    async def dead(self, claim: Claim, cause: str) -> None:
+        """End the job of `claim` as dead, for `cause`."""
         async with self.database.scoped(claim.tenant_id) as conn:
-            await conn.execute(_DEAD, UUID(claim.id), failure)
+            await conn.execute(_DEAD, UUID(claim.id), cause)
             await conn.execute(_ENDED, UUID(claim.id))
 
     async def again(self, claim: Claim) -> None:

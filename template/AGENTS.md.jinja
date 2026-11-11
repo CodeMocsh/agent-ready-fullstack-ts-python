@@ -158,6 +158,11 @@ fans out to both. Each half works without the other's toolchain.
   idempotent. `app.waits.beside` is only for work the caller does not wait for, within the
   budget. [adr/template/0027](docs/adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
   says why.
+- A failure that a person reads is a cause. Declare it in `app/failures.py`, and raise it where
+  the work fails. Never store or answer an error's message: the log carries it. A response field
+  named `error` or `failure` is a `Failure`.
+  [adr/template/0031](docs/adr/template/0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md)
+  says why.
 - Never wait on rows this system writes with a sleep: wait on a wake. Wait on time only through
   `app/pacing.py`.
 - The lifespan runs at each start of the process, and in each test that starts the app. Keep it

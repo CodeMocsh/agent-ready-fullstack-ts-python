@@ -43,7 +43,10 @@ no test reaches is still wrong, and that branch is the one that fails in product
     (`test_nothing_in_app_builds_an_http_exception`). `ApiError` subclasses `HTTPException` and
     does not build one, so no module is exempt;
   - `app/errors.py` defines a refusal that is not built on `app.refusal.ApiError`
-    (`test_every_refusal_in_app_errors_is_built_on_app_refusal`).
+    (`test_every_refusal_in_app_errors_is_built_on_app_refusal`);
+  - a refusal is built from an error that its `except` caught
+    (`test_no_refusal_says_the_words_of_an_error_it_caught`).
+    [0031](0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md) says why.
 - `test_the_walk_finds_every_route_the_app_serves_and_no_other` compares the routes read from
   the source with the handlers read off the app. The tests above cannot pass against an empty
   walk.

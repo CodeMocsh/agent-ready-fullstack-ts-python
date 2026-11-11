@@ -208,3 +208,56 @@ def test_every_refusal_in_app_errors_is_built_on_app_refusal() -> None:
         f"app/errors.py defines {own} on its own HTTPException. Delete its ApiError, _joined and "
         f"responses, and import ApiError and responses from app.refusal instead."
     )
+
+
+REFUSALS = frozenset(
+    name
+    for module in (errors, refusal)
+    for name, value in vars(module).items()
+    if isinstance(value, type) and issubclass(value, ApiError)
+)
+
+
+def _says_a_caught_error(tree: ast.AST) -> list[int]:
+    """The line of each refusal built inside `except ... as name` from an argument that reads
+    `name`."""
+    return sorted(
+        call.lineno
+        for handler in ast.walk(tree)
+        if isinstance(handler, ast.ExceptHandler) and handler.name is not None
+        for call in ast.walk(ast.Module(body=handler.body, type_ignores=[]))
+        if isinstance(call, ast.Call) and _name_of(call.func) in REFUSALS
+        for argument in [*call.args, *(keyword.value for keyword in call.keywords)]
+        if any(
+            isinstance(read, ast.Name) and read.id == handler.name for read in ast.walk(argument)
+        )
+    )
+
+
+def test_no_refusal_says_the_words_of_an_error_it_caught() -> None:
+    """A refusal's `detail` reaches a person, and an error's own words reach only the log.
+    `docs/adr/template/0031`."""
+    said = [
+        f"{path.relative_to(SOURCE.parent)}:{line}"
+        for path in sorted(SOURCE.rglob("*.py"))
+        if "__pycache__" not in path.parts
+        for line in _says_a_caught_error(ast.parse(path.read_text()))
+    ]
+
+    assert said == [], (
+        f"{said} build a refusal from an error they caught. Pass no detail, or a sentence of "
+        f"your own, and let the log carry the error."
+    )
+
+
+def test_a_refusal_built_from_a_caught_error_is_found() -> None:
+    tree = ast.parse(
+        "try:\n"
+        "    pass\n"
+        "except LookupError as missing:\n"
+        "    raise NoSuchTask(str(missing)) from missing\n"
+        "except ValueError as wrong:\n"
+        "    raise NoSuchJob() from wrong\n"
+    )
+
+    assert _says_a_caught_error(tree) == [4]

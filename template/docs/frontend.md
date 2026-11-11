@@ -115,6 +115,9 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   Removing the query discards its pending refresh.
   Stop `followNavigations` and clear the old query client when a session ends.
   [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
+- **A failure shows its `said`, and nothing else.** A `Failure` holds a `cause` and the sentence
+  the backend declares for it. Pick a mark or a tone by `cause`. Never show an error's own text.
+  [adr/template/0031](adr/template/0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md).
 - **A refusal that names a wait holds every request.** `request` in `src/api/client.ts` reads
   `Retry-After` and refuses every request to the API itself with `Held` until the wait ends. A
   client event still goes out. Only a read that never reached the server is retried.

@@ -20,8 +20,9 @@ import pytest
 
 from app import log
 from app.audit_events import acting_as, current_actor
+from app.failing import Internal
 from app.identity.shared import SENTINEL_TENANT, Actor
-from app.models import CreateTaskBody, JsonObject
+from app.models import CreateTaskBody, Failure, JsonObject
 from app.store import Database, TaskStore
 from app.store.jobs import (
     MAX_ATTEMPTS,
@@ -38,6 +39,8 @@ OTHER_TENANT: Final = "a-second-tenant"
 
 PERSON: Final = Actor(issuer="a-test", subject="a-person", name="A person")
 ASKER: Final = Actor(issuer="a-test", subject="the-asker", name="The asker", on_behalf_of=PERSON)
+
+INTERNAL: Final = Failure(cause=Internal.cause)
 
 ATTEMPTS: Final[dict[str, int]] = {}
 """How many attempts each job of the flaky kind has had, by the key in its input."""
@@ -180,12 +183,12 @@ class JobsContract:
 
         read = await jobs.read(asked.id)
         assert read is not None
-        assert (read.state, read.outcome, read.failure) == ("dead", None, "ValueError")
+        assert (read.state, read.outcome, read.failure) == ("dead", None, INTERNAL)
         lines = logged()
         failed = [line for line in lines if line["message"] == "job failed"]
         assert [line["attempt"] for line in failed] == list(range(1, MAX_ATTEMPTS + 1))
         [dead] = [line for line in lines if line["message"] == "job dead"]
-        assert (dead["job"], dead["failure"]) == (asked.id, "ValueError")
+        assert (dead["job"], dead["cause"], dead["error"]) == (asked.id, "internal", "ValueError")
 
     async def test_a_kind_that_no_handler_runs_is_refused(self, database: Database) -> None:
         with pytest.raises(UnknownKind, match="no such kind"):
@@ -216,7 +219,7 @@ class JobsContract:
 
         read = await jobs.read(asked.id)
         assert read is not None
-        assert (read.state, read.failure) == ("dead", "UnstorableJson")
+        assert (read.state, read.failure) == ("dead", INTERNAL)
 
     async def test_asks_once_per_a_key_while_its_job_waits_for_its_first_claim_are_one_job(
         self, database: Database, finish: Finish

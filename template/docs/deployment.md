@@ -389,7 +389,7 @@ says why.
   'ready'`.
 - **A worker that stops loses no job.** SIGTERM and SIGINT stop each attempt. Its lease ends
   after `Leases.lease`, and another worker claims the job. Each claim counts one attempt. A
-  claim past `MAX_ATTEMPTS` ends the job `dead`, with the failure `AttemptsSpent`.
+  claim past `MAX_ATTEMPTS` ends the job `dead`, with the cause `attempts_spent`.
 - **A worker waits out a database outage.** A restart, a failover or a proxy that stops ends each
   connection. Each loop of the worker waits the refusal's `Retry-After` and starts again, and the
   line `loop waits for the database` names the loop. The `LISTEN` connection opens again and
@@ -408,7 +408,8 @@ says why.
   line.
 - **The worker refuses the in-memory substrate.** Without `DATABASE_URL`, the web process runs
   each job itself, and no other process can see them.
-- **Watch the line `job dead`.** It names the kind, the job and the failure. Each attempt that
+- **Watch the line `job dead`.** It names the kind, the job, the cause and the class of the last
+  error. Each attempt that
   fails writes the WARNING line `job failed`, with its traceback. An attempt whose lease ended
   writes `lease lost`.
 

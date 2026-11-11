@@ -225,6 +225,12 @@ worker runs it from Postgres. On the in-memory substrate the backend runs it, an
 that process. `docs/adr/template/0027`.
 _Avoid_: background work, async work.
 
+**Failure**:
+Why some work failed, as a person reads it: a cause that a class in `app/failures.py` or
+`app/failing.py` declares, and the sentence of that cause. A row stores the cause. A response
+carries a `Failure`. The error itself goes to the log.
+_Avoid_: error, message, reason (for a failure that is stored or answered).
+
 **Job**:
 One unit of durable work: a kind, an input, the actor that asked, and an outcome or a failure.
 Its state is `pending`, `done` or `dead`. `app/jobs.py` maps each kind to its handler, which runs

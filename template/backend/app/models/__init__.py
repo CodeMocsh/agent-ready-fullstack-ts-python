@@ -14,6 +14,11 @@ from app.models.client_events import (
     RouteId as RouteId,
     Status as Status,
 )
+from app.models.failures import (
+    SAID as SAID,
+    Cause as Cause,
+    Failure as Failure,
+)
 from app.models.jobs import (
     Job as Job,
     JobState as JobState,

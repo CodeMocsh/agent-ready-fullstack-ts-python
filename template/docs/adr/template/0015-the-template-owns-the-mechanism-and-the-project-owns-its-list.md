@@ -31,6 +31,7 @@ and the bullet on `identity_stub` below says why.
 | `devtools/contract-test.env`: the admission numbers of the backend its contract suite runs | `devtools/contract-test.sh` |
 | `app/admission_limits.py`: what a process admits for one actor | `app/admission.py`: `Limits`, `Admission`, `admit`, `stream` |
 | `app/read_limits.py`: what one `GET /reads` runs | `app/reads.py`: `Limits`, `PART`, `answer` |
+| `app/failures.py`: its failures, and the response fields that are still free text | `app/failing.py`: `Failing`, `cause_of` |
 | `app/request_line.py`: its fields on `request completed`, beyond the tenant and the actor | `app/log.py`: `name_on_request_line`, `request_completed` |
 | `tests/tiers.py`: its tiers | `tests/tier.py`: what a tier is |
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |
@@ -79,6 +80,7 @@ and the bullet on `identity_stub` below says why.
 - **A list module that defines its own copy of the mechanism fails a test.** That copy stops
   receiving the template's changes. These tests fail on one and name what to delete:
   `test_every_refusal_in_app_errors_is_built_on_app_refusal`,
+  `test_every_failure_in_app_failures_is_built_on_app_failing`,
   `test_app_environment_defines_none_of_the_mechanism_itself`,
   `test_app_identity_defines_none_of_the_mechanism_itself` and
   `test_every_tier_is_the_template_s_tier`.
