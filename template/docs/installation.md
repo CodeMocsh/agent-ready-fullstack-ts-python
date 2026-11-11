@@ -594,6 +594,22 @@ What to expect, because it is not all free:
   and [0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md)
   say why.
 
+- **From 0.76.0 a stored failure reaches a person as a declared cause.** `Job.failure` is a
+  `Failure`, `{cause, said}`, and no longer the name of an error class. A job row that holds a
+  class name reads as a cause, so a rolling deploy and a rollback need nothing. After the update:
+  - Add two lines to `LAYERS` in `backend/tests/models/layers.py`: `"failures": frozenset()`,
+    and `"failures"` in the set of `"jobs"`.
+  - Run `make openapi`. The backend loads three more files before it serves. If `make lint`
+    refuses the startup count, record it as the message says.
+  - `make test` names each response field that holds a failure as free text. Make each a
+    `Failure`, or list it in `STILL_FREE_TEXT` in `backend/app/failures.py` and make it one later.
+  - A field named `error` or `failure` in a response is a `Failure` from now on. Declare each
+    cause in `backend/app/failures.py`, and raise it where the work fails.
+  - The line `job dead` names `cause` and `error`, where it named `failure`. Change each alert
+    that reads it.
+  [adr/template/0031](adr/template/0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md)
+  says why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

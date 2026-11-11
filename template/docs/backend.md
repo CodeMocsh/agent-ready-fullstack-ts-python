@@ -16,6 +16,8 @@ backend/
   app/admission.py    how many requests of one actor a process admits, and the 429
   app/admission_limits.py  the numbers admission holds each actor to -- yours
   app/errors.py       every refusal a route can answer, once each -- yours
+  app/failing.py      how a failure reaches a person: Failing and cause_of
+  app/failures.py     every cause of a failure a person reads, once each -- yours
   app/deps.py         what a route is handed
   app/wiring.py       what this deployment configured, read from the environment
   app/deployment.py   the variables' names, and how production refuses

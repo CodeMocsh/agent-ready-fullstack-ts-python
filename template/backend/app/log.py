@@ -348,10 +348,10 @@ def job_failed(*, kind: str, job: str, attempt: int, error: BaseException) -> No
     _LOG.warning("job failed", kind=kind, job=job, attempt=attempt, exc_info=error)
 
 
-def job_dead(*, kind: str, job: str, attempts: int, failure: str) -> None:
+def job_dead(*, kind: str, job: str, attempts: int, cause: str, error: str) -> None:
     """The job `job` of `kind` failed on each of its `attempts` attempts, and runs no more.
-    `failure` names the class of the last error."""
-    _LOG.error("job dead", kind=kind, job=job, attempts=attempts, failure=failure)
+    `cause` is what the job's reader sees, and `error` names the class of the last error."""
+    _LOG.error("job dead", kind=kind, job=job, attempts=attempts, cause=cause, error=error)
 
 
 def attempt_abandoned(*, kind: str, job: str, attempt: int) -> None:

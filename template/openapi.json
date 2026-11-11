@@ -713,6 +713,30 @@
         ],
         "title": "ErrorBody"
       },
+      "Failure": {
+        "properties": {
+          "cause": {
+            "type": "string",
+            "enum": [
+              "internal",
+              "attempts_spent"
+            ],
+            "title": "Cause"
+          },
+          "said": {
+            "type": "string",
+            "title": "Said",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "cause",
+          "said"
+        ],
+        "title": "Failure",
+        "description": "Why some work failed. It holds no text but the sentence its cause declares."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -762,13 +786,12 @@
           "failure": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/Failure"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Failure"
+            ]
           }
         },
         "type": "object",
@@ -780,7 +803,7 @@
           "failure"
         ],
         "title": "Job",
-        "description": "One job, as the tenant that asked for it reads it. `outcome` is set when the job is `done`,\nand `failure` names why it is `dead`."
+        "description": "One job, as the tenant that asked for it reads it. `outcome` is set when the job is `done`,\nand `failure` says why it is `dead`."
       },
       "JsonValue": {},
       "LeftPart": {

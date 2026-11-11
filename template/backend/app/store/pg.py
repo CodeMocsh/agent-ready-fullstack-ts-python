@@ -51,7 +51,15 @@ from uuid import UUID, uuid4
 from app import log
 from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, current_actor
 from app.identity.shared import Actor
-from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
+from app.models import (
+    PAGE_MAX,
+    CreateTaskBody,
+    Job,
+    JsonObject,
+    Task,
+    TaskPage,
+    UpdateTaskBody,
+)
 from app.store import (
     AuditEvents,
     Connections,
@@ -75,6 +83,7 @@ from app.store.jobs import (
     fence,
     handler_of,
     refuse_another_input,
+    stored_failure,
 )
 from app.store.migrate import check, schema_version
 
@@ -378,7 +387,7 @@ def _job(row: Any) -> Job:
         kind=row["kind"],
         state=row["state"],
         outcome=None if outcome is None else json.loads(outcome),
-        failure=row["failure"],
+        failure=None if row["failure"] is None else stored_failure(row["failure"]),
     )
 
 

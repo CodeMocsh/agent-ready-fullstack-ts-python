@@ -4,11 +4,22 @@ and how an attempt ends. `docs/adr/template/0027`."""
 import math
 
 import pytest
+from pydantic import ValidationError
 
+from app.failing import AttemptsSpent
 from app.identity.shared import Actor
-from app.models import JsonObject
+from app.models import Failure, JsonObject
 from app.store import DatabaseUnavailable
-from app.store.jobs import Asked, Deferred, Failed, Leases, UnstorableJson, attempted, encoded
+from app.store.jobs import (
+    Asked,
+    Deferred,
+    Failed,
+    Leases,
+    UnstorableJson,
+    attempted,
+    encoded,
+    stored_failure,
+)
 
 ASKED = Asked(input={}, actor=Actor(issuer="a-test", subject="the-asker", name="The asker"))
 
@@ -68,4 +79,33 @@ async def test_an_attempt_that_answers_what_cannot_be_stored_fails() -> None:
 
     assert await attempted(
         answers_nan, "a-tenant", ASKED, job="1", kind="nan", attempt=1
-    ) == Failed(failure="UnstorableJson")
+    ) == Failed(cause="internal", error="UnstorableJson")
+
+
+async def test_an_attempt_that_raises_a_declared_failure_fails_with_its_cause() -> None:
+    async def spent(_tenant_id: str, _input: JsonObject) -> JsonObject:
+        raise AttemptsSpent
+
+    assert await attempted(spent, "a-tenant", ASKED, job="1", kind="spent", attempt=1) == Failed(
+        cause="attempts_spent", error="AttemptsSpent"
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "cause"),
+    [
+        ("attempts_spent", "attempts_spent"),
+        ("internal", "internal"),
+        ("AttemptsSpent", "attempts_spent"),
+        ("ValueError", "internal"),
+        ("ChildFailed", "internal"),
+    ],
+)
+def test_a_stored_failure_reads_as_its_cause(stored: str, cause: str) -> None:
+    assert stored_failure(stored) == Failure(cause=cause)
+
+
+@pytest.mark.parametrize("stored", ["a_retired_cause", "ChildFailed: node 'review' failed", ""])
+def test_a_stored_failure_that_is_no_cause_and_no_class_name_raises(stored: str) -> None:
+    with pytest.raises(ValidationError, match="is not a declared cause"):
+        _ = stored_failure(stored)

@@ -661,7 +661,7 @@ for path, marker in found:
           f"passing one -- move it into a tier instead", file=sys.stderr)
 sys.exit(1 if found else 0)
 PY
-TEST_FOLDERS="admission audit_events deployment devtools environment errors identity integration lifespan loop_watch loops
+TEST_FOLDERS="admission audit_events deployment devtools environment errors failures identity integration lifespan loop_watch loops
               log main models observe pacing reads responses routes serve started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
@@ -911,6 +911,9 @@ need backend/app/routes/tenant/__init__.py
 need_absent backend/app/routes.py
 need backend/app/errors.py
 need backend/tests/errors/test_errors.py "It holds the rule that every refusal is a class (docs/adr/template/0006)"
+need backend/app/failing.py
+need backend/app/failures.py
+need backend/tests/failures/test_failure_fields.py "It holds the rule that a failure a response carries is a declared cause (docs/adr/template/0031)"
 need backend/app/deps.py
 need backend/app/wiring.py
 need backend/app/environment.py
@@ -983,7 +986,8 @@ need_only f docs/adr/template \
     0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md \
     0028-every-finite-response-has-a-byte-bound.md \
     0029-the-reads-that-start-in-one-task-are-one-request.md \
-    0030-server-events-merge-and-share-a-read-budget.md
+    0030-server-events-merge-and-share-a-read-budget.md \
+    0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

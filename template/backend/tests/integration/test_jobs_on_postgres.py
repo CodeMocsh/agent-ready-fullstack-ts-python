@@ -13,17 +13,17 @@ import os
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 from uuid import UUID
 
 import pytest
 
 from app import log
 from app.audit_events import acting_as
+from app.failing import AttemptsSpent, Internal
 from app.identity.shared import SENTINEL_TENANT, Actor
-from app.models import CreateTaskBody, Job, JsonObject
+from app.models import CreateTaskBody, Failure, Job, JsonObject
 from app.store.jobs import (
-    ATTEMPTS_SPENT,
     MAX_ATTEMPTS,
     Claim,
     Handler,
@@ -37,7 +37,7 @@ from app.store.pg_jobs import JobClaims
 from app.worker import run, work
 from tests.clock import elapse
 from tests.conftest import Logged
-from tests.integration.conftest import ONE_PROCESS, Provisioned, connect, end_session
+from tests.integration.conftest import ONE_PROCESS, Provisioned, acting_on, connect, end_session
 from tests.jobs_contract import ASKER, OTHER_TENANT, contract_kinds
 from tests.pages import every_task
 
@@ -249,7 +249,7 @@ async def test_a_job_whose_attempts_are_spent_with_no_outcome_is_dead(
 
     job = await database.jobs(SENTINEL_TENANT).read(asked.id)
     assert job is not None
-    assert (job.state, job.failure) == ("dead", ATTEMPTS_SPENT)
+    assert (job.state, job.failure) == ("dead", Failure(cause=AttemptsSpent.cause))
 
 
 async def _working(database: PostgresDatabase, leases: Leases = SHORT) -> asyncio.Task[None]:
@@ -371,7 +371,7 @@ async def test_an_outcome_that_cannot_be_stored_fails_its_attempt_and_not_the_wo
     finally:
         await _stopped(working)
 
-    assert (job.state, job.failure) == ("dead", "UnstorableJson")
+    assert (job.state, job.failure) == ("dead", Failure(cause=Internal.cause))
     assert still_working
 
 
@@ -670,3 +670,30 @@ async def test_a_worker_in_another_process_ends_a_job_that_this_process_asked_fo
     assert job.state == "done"
     assert job.outcome is not None
     assert [task.id for task in tasks] == [job.outcome["id"]]
+
+
+async def test_a_job_that_an_earlier_release_ended_reads_as_a_cause(
+    opened: Callable[[Handler], PostgresDatabase], provisioned: Provisioned
+) -> None:
+    """A worker of a release before 0.76.0 stores the class of the error. It can still end a job
+    while the next release serves, and after a rollback. `docs/adr/template/0031`."""
+    jobs = opened(ends_at_once).jobs(SENTINEL_TENANT)
+    spent, raised = await jobs.ask(A_KIND, {}), await jobs.ask(A_KIND, {})
+    conn: Any = await acting_on(await connect(provisioned.admin_dsn))
+    try:
+        for job, failure in ((spent, "AttemptsSpent"), (raised, "ChildFailed")):
+            await conn.execute(
+                f"UPDATE \"{provisioned.schema}\".jobs SET state = 'dead', failure = $2"
+                " WHERE id = $1",
+                UUID(job.id),
+                failure,
+            )
+    finally:
+        await conn.close()
+
+    read = [await jobs.read(job.id) for job in (spent, raised)]
+
+    assert [None if job is None else job.failure for job in read] == [
+        Failure(cause=AttemptsSpent.cause),
+        Failure(cause=Internal.cause),
+    ]

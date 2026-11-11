@@ -105,11 +105,12 @@ More CPU for the same process does not help. One event loop uses one core.
   the input holds. So many writes that change one derived value ask for one derivation, which is
   how [0026](0026-every-store-read-is-a-page.md) says such a value is derived. On the memory
   substrate, a job waits for its first claim until it starts.
-- **A job that fails `MAX_ATTEMPTS` times is dead.** The line `job dead` names it, and its
-  `failure` names the class of the last error. A job that fails fewer times is ready again after
-  `Leases.retry_in`, which doubles with each attempt. A claim past `MAX_ATTEMPTS` ends the job
-  dead with the failure `AttemptsSpent`: its last attempt ended with no outcome, as when its
-  lease ended or its worker stopped.
+- **A job that fails `MAX_ATTEMPTS` times is dead.** Its `failure` is the cause that the last
+  error declares, or `internal`. The line `job dead` names the job, the cause and the class of the
+  last error. A job that fails fewer times is ready again after `Leases.retry_in`, which doubles
+  with each attempt. A claim past `MAX_ATTEMPTS` ends the job dead with the cause
+  `attempts_spent`: its last attempt ended with no outcome, as when its lease ended or its worker
+  stopped. [0031](0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md).
 - **An attempt that the database does not serve does not count.** It got no connection, or its
   connection ended. `attempted` answers `Deferred`, the line `database unavailable` names the
   refusal, and the job is ready again after the refusal's `Retry-After`.

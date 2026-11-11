@@ -23,16 +23,16 @@ from pydantic import JsonValue
 
 from app import log
 from app.audit_events import current_actor
+from app.failing import AttemptsSpent, Internal, cause_of
 from app.identity.shared import Actor
-from app.models import JsonObject
+from app.models import Failure, JsonObject
 from app.store import DatabaseUnavailable
 
 MAX_ATTEMPTS: Final = 5
 """The most attempts a job gets. A job whose last attempt fails is dead."""
 
-ATTEMPTS_SPENT: Final = "AttemptsSpent"
-"""The failure of a job whose last attempt ended with no outcome and no failure it named: its
-lease ended, or its worker stopped."""
+ERROR_CLASS: Final = re.compile(r"^[A-Z][A-Za-z0-9]*$")
+"""How a release before 0.76.0 stored the failure of a job: the name of the error's class."""
 
 Handler = Callable[[str, JsonObject], Awaitable[JsonObject]]
 """What runs a job: the job's tenant and the job's input, to the job's outcome."""
@@ -115,10 +115,11 @@ class Asked:
 
 @dataclass(frozen=True)
 class Failed:
-    """An attempt whose handler raised, or returned an outcome that cannot be stored. `failure`
-    names the class of the error."""
+    """An attempt whose handler raised, or returned an outcome that cannot be stored. `cause` is
+    the cause the error declares, and `error` names its class."""
 
-    failure: str
+    cause: str
+    error: str
 
 
 @dataclass(frozen=True)
@@ -229,5 +230,16 @@ async def attempted(
         return Deferred(after=unavailable.retry_after)
     except Exception as error:
         log.job_failed(kind=kind, job=job, attempt=attempt, error=error)
-        return Failed(failure=type(error).__name__)
+        return Failed(cause=cause_of(error), error=type(error).__name__)
     return outcome
+
+
+def stored_failure(failure: str) -> Failure:
+    """The failure that `jobs.failure` holds. A class name that a release before 0.76.0 stored reads
+    as `attempts_spent` for `AttemptsSpent`, and as `internal` for any other. Any other name that no
+    class declares raises `ValidationError`. `docs/adr/template/0031`."""
+    if ERROR_CLASS.fullmatch(failure) is None:
+        return Failure(cause=failure)
+    return Failure(
+        cause=AttemptsSpent.cause if failure == AttemptsSpent.__name__ else Internal.cause
+    )
