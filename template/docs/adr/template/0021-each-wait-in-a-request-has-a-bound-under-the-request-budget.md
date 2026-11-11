@@ -49,7 +49,9 @@ beside the requests: a request that joins it waits as long as the work.
   `CANCELLED_WITHIN_SECONDS`. The task ends with the result of the work.
 - **`SharedWork[K, T]` runs work that several callers await at once.** `joined(key, start)`
   starts one run at a time for each key, and each caller that arrives before the run ends awaits
-  the same run. A cancelled caller leaves the run for the others. Each run is in a request,
+  the same run. A cancelled caller leaves the run for the others. When the last caller leaves,
+  through a cancel or a timeout, the run is cancelled: no caller awaits its result, and work that
+  runs on holds the event loop with no request in flight. Each run is in a request,
   whoever starts it, because a request may join it. Each failure writes `shared work failed`, and
   each cancellation `shared work cancelled`. `cancel_beside` cancels a run still in flight.
 - **ruff refuses `asyncio.create_task`, `asyncio.ensure_future` and FastAPI's `BackgroundTasks`.**

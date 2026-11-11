@@ -23,7 +23,14 @@ from app.audit_events import acting_as, current_actor
 from app.identity.shared import SENTINEL_TENANT, Actor
 from app.models import CreateTaskBody, JsonObject
 from app.store import Database, TaskStore
-from app.store.jobs import MAX_ATTEMPTS, AskedByNobody, Kinds, UnknownKind, UnstorableJson
+from app.store.jobs import (
+    MAX_ATTEMPTS,
+    AskedAgainWithAnotherInput,
+    AskedByNobody,
+    Kinds,
+    UnknownKind,
+    UnstorableJson,
+)
 from tests.conftest import Logged
 from tests.pages import every_task
 
@@ -210,3 +217,62 @@ class JobsContract:
         read = await jobs.read(asked.id)
         assert read is not None
         assert (read.state, read.failure) == ("dead", "UnstorableJson")
+
+    async def test_asks_once_per_a_key_while_its_job_waits_for_its_first_claim_are_one_job(
+        self, database: Database, finish: Finish
+    ) -> None:
+        jobs = database.jobs(SENTINEL_TENANT)
+
+        first = await jobs.ask("answers who asked", {"n": 5}, once_per="plan 5")
+        second = await jobs.ask("answers who asked", {"n": 5}, once_per="plan 5")
+        await finish()
+
+        assert second.id == first.id
+        read = await jobs.read(first.id)
+        assert read is not None
+        assert read.state == "done"
+
+    async def test_an_ask_once_per_a_key_after_its_job_was_claimed_is_a_new_job(
+        self, database: Database, finish: Finish
+    ) -> None:
+        jobs = database.jobs(SENTINEL_TENANT)
+        first = await jobs.ask("answers who asked", {"n": 6}, once_per="plan 6")
+        await finish()
+
+        later = await jobs.ask("answers who asked", {"n": 6}, once_per="plan 6")
+        await finish()
+
+        assert later.id != first.id
+        read = await jobs.read(later.id)
+        assert read is not None
+        assert read.state == "done"
+
+    async def test_asks_for_other_keys_kinds_or_tenants_are_other_jobs(
+        self, database: Database
+    ) -> None:
+        jobs = database.jobs(SENTINEL_TENANT)
+        plan: JsonObject = {"title": "plan 7"}
+
+        asked = [
+            await jobs.ask("answers who asked", plan, once_per="plan 7"),
+            await jobs.ask("answers who asked", plan, once_per="plan 8"),
+            await jobs.ask("creates a task", plan, once_per="plan 7"),
+            await database.jobs(OTHER_TENANT).ask("answers who asked", plan, once_per="plan 7"),
+            await jobs.ask("answers who asked", plan),
+            await jobs.ask("answers who asked", plan),
+        ]
+
+        assert len({job.id for job in asked}) == len(asked)
+
+    async def test_an_ask_once_per_a_key_with_another_input_is_refused(
+        self, database: Database
+    ) -> None:
+        jobs = database.jobs(SENTINEL_TENANT)
+        _ = await jobs.ask("answers who asked", {"n": 9}, once_per="plan 9")
+
+        with pytest.raises(AskedAgainWithAnotherInput, match="answers who asked"):
+            _ = await jobs.ask("answers who asked", {"n": 10}, once_per="plan 9")
+
+    async def test_an_ask_once_per_no_key_is_refused(self, database: Database) -> None:
+        with pytest.raises(ValueError, match="names no key"):
+            _ = await database.jobs(SENTINEL_TENANT).ask("answers who asked", {}, once_per="")

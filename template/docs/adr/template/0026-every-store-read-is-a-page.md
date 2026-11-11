@@ -50,6 +50,19 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   `tests/integration/test_pages_on_postgres.py` counts the rows that each `fetch` returns, and
   fails on a read that fetches more than `PAGE_MAX + 1`. The bound comes from the code, not from
   the size of the data, so it holds for a fixture of any size.
+- **Every GET route fetches at most a page for each read, on Postgres.**
+  `tests/integration/test_routes_read_pages.py` fills a tenant with more than `PAGE_MAX + 1` rows
+  in each table of `TENANT_TABLES`. It reads each GET route in `openapi.json` once, and counts the
+  rows that each `fetch`, `fetchmany`, `fetchrow` and `fetchval` on a pooled connection returns.
+  It fails when one read returns more than `PAGE_MAX + 1` rows, or when the route does not answer
+  `200`. So a request fetches at most `PAGE_MAX + 1` rows for each read it makes. The count is at
+  the connection, not at a store method, so a new store method cannot escape it. The routes come
+  from `openapi.json`, so a new route cannot either. `GET /reads` is not read, because each part
+  is a GET route that the test reads alone. `tests/integration/filled.py` is the project's list,
+  as [0015](0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says: it fills
+  the tenant, and names the path of each GET route. The test fails on a table that it leaves at
+  one page or less, and on a GET route that it does not name. A second test adds a route that
+  reads every task, and asserts that the count finds it.
 - **The mock pages as the backend does.** `src/mocks/store.ts` holds its own `PAGE_MAX`, and
   `devtools/check_template.sh` fails when it differs from `maxItems` in `openapi.json`.
 - **The screen reads one page on its first draw, and the next page on a person's click.** The
@@ -88,5 +101,11 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   `429`.
 - A read after a task that another person removed answers `404`. The screen draws the error,
   and the next click on "Load more" reads from the first page.
+- The count does not see a read that a route makes on a connection outside the pool, such as
+  `dedicated()`, or through a prepared statement, a cursor or `copy_from_query`. It also does not
+  see a route that makes one read for each row, because each such read returns one row. A review
+  finds these.
+- A new tenant table needs rows in `tests/integration/filled.py`, and a new GET route needs a path
+  there, or the test fails.
 - A read that needs every row is not a list. A count, a sum or a group belongs in SQL. A value
   that only all the rows give is derived once per version of its rows, outside the request.

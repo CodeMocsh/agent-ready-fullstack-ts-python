@@ -27,7 +27,8 @@ from app.store.pg import (
 
 _CLAIM = (
     "UPDATE job_claims SET state = 'running', token = $1, "
-    "lease_ends = now() + make_interval(secs => $2), attempts = attempts + 1 "
+    "lease_ends = now() + make_interval(secs => $2), attempts = attempts + 1, "
+    "key_digest = NULL "
     "WHERE id = (SELECT id FROM job_claims WHERE kind = ANY($3::text[]) AND ("
     "(state = 'ready' AND ready_at <= now()) OR (state = 'running' AND lease_ends <= now())) "
     "ORDER BY ready_at LIMIT 1 FOR UPDATE SKIP LOCKED) "

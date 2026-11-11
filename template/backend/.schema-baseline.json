@@ -6,7 +6,7 @@
   "0031_audit_events_seq_idx": "f4a23a5ae87d72d40205e6e734068c40b43885aa5eebcf2e3cde369feedb68c1",
   "0032_audit_events_append_only": "923358598b13eb7e10b78154bd3de2dc2f83e7bdbb27bd5fd731daf63bc8a2c1",
   "0033_audit_row_change": "b40386fddb0ed7b4986ea483062920d9d5e9451e9998a4976f0f13c4e545c9ec",
-  "0040_job_claims": "943aeb4dc0be211bfacc771100dfb550631c1f9603c2df55404ee9fa50e040ce",
+  "0040_job_claims": "bc038692d04521bc78f542eb7ee9a90b575418503b796e572752d96f16c4cbe8",
   "0041_job_claims_ready_idx": "8609746886d9e0e67cba13c8bf07485df13b5f7a30b7207d39914d89ad104d9d",
   "0042_job_claims_lease_idx": "1610803e95589d69e4a274ae9691c56ecf29fe1a648f410c6d2bb11683f18d61",
   "0050_jobs": "3720ef626db47d6149b6af4be82431b4a8f576d4a236c8d4cc78f2440103cd48",
@@ -26,5 +26,7 @@
   "0205_audit_events_outcome_optional": "0d66df7fb8bb2fe12388de001aaff8ae6cb4d0afa7277c14e23be7e3ac7339fd",
   "0206_audit_events_outcome_no_default": "ed0b31d27a67c02bec61a500d20ebe0292f8b8286c7d846e738adb459d3bf519",
   "0207_audit_events_resource_type_optional": "163a6a8889410f52fba479e966e854e834396cbd613654c4a0293d20b3403c2d",
-  "0208_audit_events_kind_whole": "1a8dd270f28229a1ab53c612b4482152926552bcee55ee00ff49e30e334f3570"
+  "0208_audit_events_kind_whole": "1a8dd270f28229a1ab53c612b4482152926552bcee55ee00ff49e30e334f3570",
+  "0209_job_claims_digest": "1fe60bd34ffa45dc3518d0e1cc4eb02939ed0c32c5e7bd97a809aa6c6a2b5f0e",
+  "0210_job_claims_once_per": "657c272dff651893a173a7828f601791228ce1524e0c5f9336fb7255fbd782ce"
 }

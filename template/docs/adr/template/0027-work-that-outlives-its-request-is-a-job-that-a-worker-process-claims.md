@@ -53,11 +53,11 @@ More CPU for the same process does not help. One event loop uses one core.
   `app/task_jobs.py` holds and `POST /tasks/{id}/close` asks for. That first render imports the
   example, so `copier.yml` excludes `app/jobs.py` with the example on an update. A project that
   declines the example writes its own map.
-- **Two tables hold a job.** `job_claims` holds only what a claim and a sweep read: the id, the
-  tenant, the kind, the state, the lease token, the end of the lease, the attempts, and the time
-  the job is ready. `jobs` is a tenant table. It holds the input, the actor that asked, and the
-  outcome. `jobs` references `job_claims` on `(id, tenant_id)`, so a claim cannot name the job
-  of another tenant.
+- **Two tables hold a job.** `job_claims` holds only what a claim, a sweep and an ask `once_per`
+  a key read: the id, the tenant, the kind, the state, the lease token, the end of the lease, the
+  attempts, the time the job is ready, and the digest of its key. `jobs` is a tenant table. It
+  holds the input, the actor that asked, and the outcome. `jobs` references `job_claims` on
+  `(id, tenant_id)`, so a claim cannot name the job of another tenant.
 - **An input and an outcome are JSON that `jsonb` can hold.** `encoded` refuses a number that is
   not finite, the character U+0000 and a surrogate code point with `UnstorableJson`, on both
   substrates. A route answers
@@ -65,7 +65,8 @@ More CPU for the same process does not help. One event loop uses one core.
 - **`job_claims` is the second exemption from isolation.** A worker claims the next job of any
   tenant, so the claim cannot be scoped to a tenant before it is made. `EXEMPT_FROM_ISOLATION` in
   `tests/store/test_schema.py` names it, and a test asserts that it has only the columns above.
-  The application role can read every tenant id and every job kind. It cannot read an input or
+  The application role can read every tenant id, every job kind and the SHA-256 digest of each
+  key, never the key. It cannot read an input or
   an outcome. `job_claims` has no audit trigger, because it is not a tenant table. The writes
   of a job to `jobs` and to every other tenant table are audited.
 - **A claim takes one row with `FOR UPDATE SKIP LOCKED`, and sets a new lease token.** It takes a
@@ -92,6 +93,18 @@ More CPU for the same process does not help. One event loop uses one core.
   failure to `jobs` also marks the claim `ended`, and the one that makes a job ready again
   clears its token. A worker whose lease ended can do none of them.
 - **A job runs at least once.** A handler is idempotent.
+- **An ask `once_per` a key joins the job of that key that waits for its first claim.**
+  `Jobs.ask(kind, input, once_per=key)` writes the digest of the key in `job_claims`. A unique
+  index on the tenant, the kind and the digest, where the state is `ready`, holds one such job for
+  each key. A second ask while that job waits returns it. The job keeps its input and the actor
+  that asked first. The claim clears the digest. So an ask after the claim writes a new job, and a
+  write during the run is not lost. The new job can run at the same time as the first, on another
+  slot or another worker, so its handler reads the rows when it runs. A job that is ready again
+  after an attempt also takes no ask. An ask with another input raises
+  `AskedAgainWithAnotherInput`, because the job would drop that input. The key names everything
+  the input holds. So many writes that change one derived value ask for one derivation, which is
+  how [0026](0026-every-store-read-is-a-page.md) says such a value is derived. On the memory
+  substrate, a job waits for its first claim until it starts.
 - **A job that fails `MAX_ATTEMPTS` times is dead.** The line `job dead` names it, and its
   `failure` names the class of the last error. A job that fails fewer times is ready again after
   `Leases.retry_in`, which doubles with each attempt. A claim past `MAX_ATTEMPTS` ends the job
@@ -248,6 +261,8 @@ More CPU for the same process does not help. One event loop uses one core.
 - The application role reads every tenant id and every job kind in `job_claims`.
 - The web process reserves the worker's `LISTEN` connection in its share, and does not use it.
 - Nothing checks that a handler is idempotent. A review does.
+- A job asked for `once_per` a key runs as the actor that asked first. A later ask that it takes
+  records no actor of its own on the job.
 - A round and a step of an attempt run again after a connection ended, and the unit may have
   committed. So each is idempotent. When the write that ends a job committed and its connection
   then ended, the write runs again, finds the claim ended, and the line `lease lost` names the

@@ -14,6 +14,7 @@ import math
 from collections.abc import AsyncGenerator, Callable, Coroutine, Generator
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, copy_context
+from dataclasses import dataclass
 from typing import Any, Final
 
 from fastapi import FastAPI
@@ -164,6 +165,12 @@ async def _bounded[T](work: Coroutine[Any, Any, T], name: str, within: float) ->
         return await work
 
 
+@dataclass
+class _Run[T]:
+    task: asyncio.Task[T]
+    callers: int = 0
+
+
 class SharedWork[K, T]:
     """Work that several callers await at once, as runs named `name`: one run at a time for each
     key.
@@ -177,31 +184,50 @@ class SharedWork[K, T]:
 
     def __init__(self, name: str) -> None:
         self._name: Final = name
-        self._runs: Final[dict[K, asyncio.Task[T]]] = {}
+        self._runs: Final[dict[K, _Run[T]]] = {}
 
     async def joined(self, key: K, start: Callable[[], Coroutine[Any, Any, T]]) -> T:
         """The result of the run for `key`. Joins the run in flight, or starts `start()` when
         none is. A call after the run ends starts another run, and nothing keeps the result.
 
-        A cancelled caller stops awaiting, and the run goes on for the others. A failure raises in
-        each caller that awaits the run. `log.shared_failed` names each failure, and
-        `log.shared_cancelled` a cancellation. `cancel_beside` cancels a run at shutdown. Raises
-        `RuntimeError` when the task of a run joins its own key, which would wait for ever.
+        A cancelled caller stops awaiting, and the run goes on for the others. When the last
+        caller leaves, through a cancel or a timeout, the run is cancelled. A call after that
+        starts another run. A failure raises in each caller that awaits the run.
+        `log.shared_failed` names each failure, and `log.shared_cancelled` a cancellation.
+        `cancel_beside` cancels a run at shutdown. Raises `RuntimeError` when the task of a run
+        joins its own key, which would wait for ever.
         """
         run = self._runs.get(key)
         if run is None:
-            run = _started(
+            run = self._new_run(key, start)
+        elif run.task is asyncio.current_task():
+            raise RuntimeError(f"a run of {self._name} joined its own key, and would wait for ever")
+        run.callers += 1
+        try:
+            return await asyncio.shield(run.task)
+        finally:
+            run.callers -= 1
+            if run.callers == 0 and not run.task.done():
+                self._forget(key, run)
+                _ = run.task.cancel()
+
+    def _new_run(self, key: K, start: Callable[[], Coroutine[Any, Any, T]]) -> _Run[T]:
+        run = _Run(
+            _started(
                 start(),
                 self._name,
                 in_a_request=True,
                 failed=log.shared_failed,
                 cancelled=log.shared_cancelled,
             )
-            self._runs[key] = run
-            run.add_done_callback(lambda _: self._runs.pop(key))
-        elif run is asyncio.current_task():
-            raise RuntimeError(f"a run of {self._name} joined its own key, and would wait for ever")
-        return await asyncio.shield(run)
+        )
+        self._runs[key] = run
+        run.task.add_done_callback(lambda _: self._forget(key, run))
+        return run
+
+    def _forget(self, key: K, run: _Run[T]) -> None:
+        if self._runs.get(key) is run:
+            del self._runs[key]
 
 
 async def cancel_beside() -> None:

@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS job_claims (
   lease_ends  timestamptz,
   attempts    integer NOT NULL DEFAULT 0,
   ready_at    timestamptz NOT NULL DEFAULT now(),
+  key_digest bytea,
   CONSTRAINT job_claims_tenant_id_not_empty CHECK (tenant_id <> ''),
   CONSTRAINT job_claims_lease_whole CHECK (
     (state = 'running') = (token IS NOT NULL)
@@ -373,6 +374,14 @@ BEGIN
 END
 $app$;
 INSERT INTO applied_once(key) VALUES('0208_audit_events_kind_whole') ON CONFLICT DO NOTHING;
+
+-- 0209_job_claims_digest
+ALTER TABLE job_claims ADD COLUMN IF NOT EXISTS key_digest bytea;
+INSERT INTO applied_once(key) VALUES('0209_job_claims_digest') ON CONFLICT DO NOTHING;
+
+-- 0210_job_claims_once_per
+CREATE UNIQUE INDEX IF NOT EXISTS job_claims_once_per_key ON job_claims (tenant_id, kind, key_digest) WHERE state = 'ready' AND key_digest IS NOT NULL;
+INSERT INTO applied_once(key) VALUES('0210_job_claims_once_per') ON CONFLICT DO NOTHING;
 
 -- The writes the application role is never granted.
 

@@ -920,6 +920,8 @@ need backend/app/deployment.py
 need backend/app/refusal.py
 need backend/tests/tier.py
 need backend/tests/models/layers.py
+need backend/tests/integration/filled.py
+need backend/tests/integration/test_routes_read_pages.py "It holds every GET route to a page for each read (docs/adr/template/0026)"
 need frontend/tests/read-budgets.ts
 need frontend/tests/signed-in.ts
 need backend/app/lifespan.py

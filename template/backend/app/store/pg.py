@@ -66,7 +66,16 @@ from app.store.acting import SET_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
 from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
-from app.store.jobs import Kinds, LeaseLost, asker, encoded, fence, handler_of
+from app.store.jobs import (
+    Kinds,
+    LeaseLost,
+    asker,
+    digest_of,
+    encoded,
+    fence,
+    handler_of,
+    refuse_another_input,
+)
 from app.store.migrate import check, schema_version
 
 _SET_TENANT = "SELECT set_config($1, $2, true)"
@@ -89,7 +98,12 @@ _AUDIT_EVENTS = (
     "FROM audit_events WHERE seq > $1 ORDER BY seq LIMIT $2"
 )
 _AN_AUDIT_EVENT = "SELECT EXISTS (SELECT 1 FROM audit_events WHERE seq = $1)"
-_ASK_CLAIM = "INSERT INTO job_claims (id, tenant_id, kind) VALUES ($1, $2, $3)"
+_ASK_CLAIM = (
+    "INSERT INTO job_claims (id, tenant_id, kind, key_digest) VALUES ($1, $2, $3, $4) "
+    "ON CONFLICT (tenant_id, kind, key_digest) "
+    "WHERE state = 'ready' AND key_digest IS NOT NULL "
+    "DO UPDATE SET key_digest = EXCLUDED.key_digest RETURNING id"
+)
 _ASK_JOB = (
     "INSERT INTO jobs (id, tenant_id, kind, input, actor_issuer, actor_subject, actor_name, "
     "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name) "
@@ -98,6 +112,7 @@ _ASK_JOB = (
 )
 _WAKE = "SELECT pg_notify($1, '')"
 _A_JOB = "SELECT id, kind, state, outcome, failure FROM jobs WHERE id = $1"
+_A_WAITING_JOB = "SELECT id, kind, state, outcome, failure, input FROM jobs WHERE id = $1"
 _HOLD_CLAIM = (
     "SELECT 1 FROM job_claims WHERE id = $1 AND tenant_id = $2 AND token = $3 "
     "AND state = 'running' AND lease_ends > now() FOR KEY SHARE"
@@ -380,14 +395,19 @@ class PostgresJobs:
         self._database: PostgresDatabase = database
         self._tenant_id: str = tenant_id
 
-    async def ask(self, kind: str, input: JsonObject) -> Job:
+    async def ask(self, kind: str, input: JsonObject, *, once_per: str | None = None) -> Job:
         _ = handler_of(self._database.kinds, kind)
         actor = asker()
         stored = encoded(input)
+        digest = None if once_per is None else digest_of(once_per)
         acted_for = actor.on_behalf_of
         id = uuid4()
         async with self._database.scoped(self._tenant_id) as conn:
-            await conn.execute(_ASK_CLAIM, id, self._tenant_id, kind)
+            claimed: UUID = await conn.fetchval(_ASK_CLAIM, id, self._tenant_id, kind, digest)
+            if claimed != id:
+                waiting = await conn.fetchrow(_A_WAITING_JOB, claimed)
+                refuse_another_input(kind, waiting["input"], stored)
+                return _job(waiting)
             row = await conn.fetchrow(
                 _ASK_JOB,
                 id,

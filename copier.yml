@@ -129,6 +129,7 @@ _exclude:
   # is excluded on update instead, so only a new project receives it.
   - "{% if _copier_operation == 'update' %}backend/tests/tiers.py{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/tests/models/layers.py{% endif %}"
+  - "{% if _copier_operation == 'update' %}backend/tests/integration/filled.py{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/e2e/signed-in.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/tests/read-budgets.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/tests/signed-in.ts{% endif %}"

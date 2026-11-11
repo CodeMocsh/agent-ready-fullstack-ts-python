@@ -245,6 +245,75 @@ async def test_a_run_goes_on_for_the_others_when_one_caller_is_cancelled() -> No
     assert (cancelled.cancelled(), stays.result()) == (True, "draw 1")
 
 
+class Watched:
+    def __init__(self) -> None:
+        self.started: asyncio.Event = asyncio.Event()
+        self.saw_the_cancel: asyncio.Event = asyncio.Event()
+
+    async def draw(self) -> str:
+        self.started.set()
+        try:
+            _ = await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.saw_the_cancel.set()
+            raise
+        return "never"
+
+
+async def nothing_else_runs() -> None:
+    await asyncio.sleep(0)
+    assert asyncio.all_tasks() == {asyncio.current_task()}
+
+
+async def test_a_run_is_cancelled_when_its_last_caller_is_cancelled() -> None:
+    shared: SharedWork[str, str] = SharedWork(SHARED)
+    work = Watched()
+    first = asyncio.create_task(shared.joined("plan", work.draw))
+    second = asyncio.create_task(shared.joined("plan", work.draw))
+    async with asyncio.timeout(1):
+        _ = await work.started.wait()
+
+    _ = first.cancel()
+    _ = await asyncio.wait([first])
+    await asyncio.sleep(0)
+    assert not work.saw_the_cancel.is_set()
+
+    _ = second.cancel()
+    async with asyncio.timeout(1):
+        _ = await work.saw_the_cancel.wait()
+    _ = await asyncio.wait([second])
+    await nothing_else_runs()
+    assert (first.cancelled(), second.cancelled()) == (True, True)
+
+
+async def test_a_run_is_cancelled_when_its_last_caller_times_out() -> None:
+    shared: SharedWork[str, str] = SharedWork(SHARED)
+    work = Watched()
+
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.05):
+            _ = await shared.joined("plan", work.draw)
+
+    async with asyncio.timeout(1):
+        _ = await work.saw_the_cancel.wait()
+    await nothing_else_runs()
+
+
+async def test_a_call_after_its_run_was_cancelled_starts_another() -> None:
+    shared: SharedWork[str, str] = SharedWork(SHARED)
+    cancelled = Watched()
+    caller = asyncio.create_task(shared.joined("plan", cancelled.draw))
+    async with asyncio.timeout(1):
+        _ = await cancelled.started.wait()
+    _ = caller.cancel()
+    _ = await asyncio.wait([caller])
+    draws = Draws()
+    draws.released.set()
+
+    async with asyncio.timeout(1):
+        assert await shared.joined("plan", draws.draw) == "draw 1"
+
+
 async def test_shared_work_started_outside_a_request_is_held_to_the_budget() -> None:
     shared: SharedWork[str, None] = SharedWork(SHARED)
 

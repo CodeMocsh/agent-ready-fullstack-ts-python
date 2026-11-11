@@ -216,6 +216,7 @@ $audit$""",
   lease_ends  timestamptz,
   attempts    integer NOT NULL DEFAULT 0,
   ready_at    timestamptz NOT NULL DEFAULT now(),
+  key_digest bytea,
   CONSTRAINT job_claims_tenant_id_not_empty CHECK (tenant_id <> ''),
   CONSTRAINT job_claims_lease_whole CHECK (
     (state = 'running') = (token IS NOT NULL)
@@ -443,6 +444,16 @@ SCHEMA.extend(
             "      AND (method IS NULL) = (action IS NOT NULL)\n"
             "    );\n"
             "  END IF;\nEND\n$app$",
+        ),
+        (
+            "0209_job_claims_digest",
+            "ALTER TABLE job_claims ADD COLUMN IF NOT EXISTS key_digest bytea",
+        ),
+        (
+            "0210_job_claims_once_per",
+            "CREATE UNIQUE INDEX IF NOT EXISTS job_claims_once_per_key"
+            " ON job_claims (tenant_id, kind, key_digest)"
+            " WHERE state = 'ready' AND key_digest IS NOT NULL",
         ),
     ]
 )

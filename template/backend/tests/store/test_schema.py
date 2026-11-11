@@ -603,9 +603,20 @@ here is how you say "every tenant may read this" -- out loud, in a diff, rather 
 """
 
 CLAIM_COLUMNS = frozenset(
-    {"id", "tenant_id", "kind", "state", "token", "lease_ends", "attempts", "ready_at"}
+    {
+        "id",
+        "tenant_id",
+        "kind",
+        "state",
+        "token",
+        "lease_ends",
+        "attempts",
+        "ready_at",
+        "key_digest",
+    }
 )
-"""What a claim and a sweep read, and nothing a tenant asked or a job answered."""
+"""What a claim, a sweep and an ask `once_per` a key read, and nothing a tenant asked or a job
+answered. `key_digest` is a SHA-256 digest, never the key."""
 
 
 def test_the_claims_hold_only_what_a_claim_reads() -> None:
@@ -624,7 +635,12 @@ def test_the_claims_hold_only_what_a_claim_reads() -> None:
     added = [
         key
         for key, sql in statements(DEFAULT_SCHEMA)
-        if re.search(r"ALTER TABLE job_claims ADD COLUMN", sql)
+        for column in re.findall(
+            r"ALTER TABLE job_claims ADD\s+(?:COLUMN\s+)?"
+            r"(?:IF NOT EXISTS\s+)?(?!CONSTRAINT\b)(\w+)",
+            sql,
+        )
+        if column not in CLAIM_COLUMNS
     ]
     assert columns == CLAIM_COLUMNS, (
         f"job_claims holds {sorted(columns - CLAIM_COLUMNS)} beside what a claim reads. Every "
