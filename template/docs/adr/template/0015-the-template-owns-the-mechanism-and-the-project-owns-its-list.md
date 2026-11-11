@@ -42,9 +42,14 @@ and the bullet on `identity_stub` below says why.
 | `frontend/src/app-providers.tsx`: the providers around the router | `frontend/src/main.tsx`, `frontend/tests/first-draw.tsx`, `frontend/tests/render.tsx` |
 | `app/identity/__init__.py`: its resolver, `principal_for` | `app/identity/shared.py`: `Principal`, `Actor`, `Unauthenticated`, the sentinel, the probe |
 
-- **`_skip_if_exists` in `copier.yml` carries every list module but `app/identity/__init__.py`.**
-  An update adds a list module that is missing, but `app/jobs.py` without the example, and
-  leaves a present one alone.
+- **`_skip_if_exists` in `copier.yml` carries every list module outside a test folder but
+  `app/identity/__init__.py`.** An update adds a list module that is missing, but `app/jobs.py`
+  without the example, and leaves a present one alone.
+- **A list module in a test folder is excluded on update.** A project may move its tests to a
+  layout of its own, and Copier does not follow a move. `_skip_if_exists` wrote each such module
+  again at the template's path on every update, beside the project's moved copy. A new project
+  receives each on its first copy. `check_template.sh` refuses a `_skip_if_exists` entry in a
+  test folder.
 - **The template's code or tests import every list module but `app/log_lines.py`**, so a project
   cannot delete one. `_skip_if_exists` therefore never re-adds a module the project removed.
   `app/log_lines.py` is the exception: no template code imports it, and ruff allows `structlog`
@@ -85,13 +90,17 @@ and the bullet on `identity_stub` below says why.
   the cost this decision removes.
 - **Exclude each list module on update, as `example_resource` excludes the example.** Then a
   project that has no list module never receives one. The template's code that imports it fails.
+  This cost is taken for the list modules in a test folder: each exists in every project
+  generated from 0.51.0 on, and a moved test cannot keep one at the template's path.
 - **`_skip_if_exists` for any file a project may edit.** It re-adds a file the project deleted. It
   is safe only for a module the template's own code imports.
 
 ## Consequences
 
-- A new list costs two modules, an entry in `_skip_if_exists`, and the import that keeps the list
-  module from being deleted.
+- A new list costs two modules, an entry in `copier.yml`, and the import that keeps the list
+  module from being deleted. The entry is in `_skip_if_exists`, or in `_exclude` for an update
+  when the list module is in a test folder. A project generated before the list existed then
+  creates the module by hand.
 - A template update never changes a project's list. When the template's own list changes, such as
   a new refusal the template's code raises, it goes in the mechanism module. `NoSuchAsset` in
   `app/refusal.py` is one.

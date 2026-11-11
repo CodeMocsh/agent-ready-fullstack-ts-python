@@ -92,11 +92,28 @@ generated from, so commit or stash first.
 What to expect, because it is not all free:
 
 - **Files you never touched update cleanly** — tooling, gates, `Makefile` targets, docs, ADRs.
-- **Some files are yours after the first copy.** `copier.yml` lists them under
-  `_skip_if_exists`, and an update never touches them. Each code module holds only your list; the
-  module that reads it is the template's, and keeps updating. `docs/frontend.md`,
+- **Some files are yours after the first copy.** An update never changes them. `copier.yml` lists
+  them under `_skip_if_exists`, which writes one only when it is missing. The lists in your test
+  folders are under `_exclude` for an update, so an update never writes them, and you may move
+  them with your tests. Each code module holds only your list; the module that reads it is the
+  template's, and keeps updating. `docs/frontend.md`,
   `docs/backend.md` and `docs/development.md` are yours too: rewrite them with this project's
   detail. A later template change to one reaches only new projects.
+- **A file you moved or deleted stops receiving the template's changes, and nothing says so.**
+  Copier does not follow a move. It writes nothing for a file the project does not have at the
+  template's path. After each update, list the files the template changed that this project
+  lacks. Run this from the project root. `TEMPLATE` is a clone of the template. `OLD` and `NEW`
+  are the `_commit` values in `.copier-answers.yml` before and after the update:
+
+  ```bash
+  git -C "$TEMPLATE" diff --name-only --diff-filter=d "$OLD" "$NEW" -- template/ \
+    | sed -e 's|^template/||' -e 's|\.jinja$||' \
+    | while read -r file; do [ -e "$file" ] || echo "$file"; done
+  ```
+
+  Port each change to a file you moved by hand. A file you deleted, or that an answer of yours
+  excludes, appears too. So does a path whose name is a Jinja expression, such as the one that
+  becomes `.copier-answers.yml`: Copier renders that name into another.
 - **Stop receiving the example resource once you have replaced it.** Record the answer before
   you update: set `example_resource: false` in `.copier-answers.yml`, commit, then run the
   update. From then on an update leaves the example resource's own files alone, and does not
@@ -541,6 +558,13 @@ What to expect, because it is not all free:
     A client budget cannot enforce the actor limit across clients and tabs.
   - Stop `followNavigations` and clear the old query client when a session ends.
   [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
+
+- **From 0.73.0 an update never writes the lists in your test folders.** These are
+  `backend/tests/tiers.py`, `backend/tests/models/layers.py`, `frontend/tests/read-budgets.ts`,
+  `frontend/tests/signed-in.ts` and `frontend/e2e/signed-in.ts`. If this project lacks one of
+  them, copy it from the template before you update. The template's tests import each, and an
+  update no longer writes one that is missing.
+  [adr/template/0015](adr/template/0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says why.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
