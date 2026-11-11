@@ -165,8 +165,10 @@ fans out to both. Each half works without the other's toolchain.
   merge, a uniqueness rule, a write conditional on what was read, then a short lock. Never check
   in the route and write in the store afterwards. A race only shows on Postgres, so its test goes
   in `tests/integration/`.
-- A store read answers one page: at most `PAGE_MAX` rows, picked in SQL, and the `next` that
-  reads the rest. Never read a whole list to answer part of it. A count, a sum or a group goes in
+- A store read answers one page through `fetch_page`: at most `PAGE_MAX` rows and `PAGE_BYTES`
+  bytes, picked in SQL, and the `next` that reads the rest. Never read a whole list to answer part
+  of it. Every column of variable width has a byte bound, and a file or a whole document goes in
+  object storage, not in a row. A count, a sum or a group goes in
   SQL. [adr/template/0026](docs/adr/template/0026-every-store-read-is-a-page.md) says why.
 - Each finite response has a byte bound. A route exception names its reason and stays under
   the deployment ceiling. A stream declares its own limits.

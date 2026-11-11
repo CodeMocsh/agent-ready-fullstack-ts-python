@@ -24,15 +24,26 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
 
 ## Decision
 
-- **No store method answers more than `PAGE_MAX` rows.** `PAGE_MAX` is 100, in
-  `app/models/shared.py`. A list takes `after`, and answers a page: at most `PAGE_MAX` rows and
-  `next`. `next` names where the page after this one starts, and is `None` on the last page.
+- **No store method answers more than one page.** A page holds at most `PAGE_MAX` rows, 100,
+  and at most `PAGE_BYTES` bytes, 1 MiB, both in `app/models/shared.py`. It always holds its
+  first row. A list takes `after`, and answers a page and `next`. `next` names where the page after this one starts, and is `None` on the last page.
   `TaskPage.tasks` has `max_length=PAGE_MAX`, so `openapi.json` carries the bound as `maxItems`,
   and a route that answers more fails with a `500`.
-- **The database does the picking.** A page is one `LIMIT` in SQL, on the index that leads with
-  `tenant_id` and ends with `seq`. The store reads `PAGE_MAX + 1` rows, answers `PAGE_MAX`, and
-  knows from the extra row whether a next page exists. No code reads a whole list to answer part
-  of it.
+- **The database does the picking, and one function reads every page.** `fetch_page` in
+  `app/store/pages.py` runs one `LIMIT` of `PAGE_MAX + 1` rows, on the index that leads with
+  `tenant_id` and ends with `seq`. In the same statement, Postgres adds up the bytes of each row,
+  `octet_length(row::text)`, and drops each row after the one that passes `PAGE_BYTES`. So a row
+  that the page does not answer never leaves the database. The function knows from the rows it
+  read whether a next page exists. No code reads a whole list to answer part of it.
+  `tests/store/test_pages.py` fails on a read of many rows anywhere in `app/` but `fetch_page`,
+  except in a module that `ELSEWHERE` names with the reason its rows are bounded.
+- **A page fits its first row.** The bounds on one row's columns add up to at most `PAGE_BYTES`,
+  [adr/template/0031](0031-the-database-bounds-the-bytes-of-every-value.md) says how, so no row is
+  too wide for a page of its own.
+- **Each request counts the pages it reads.** `fetch_page` counts each page on the request's
+  `request completed` line, as `pages_read`. A route that reads every page reads one page for
+  each `PAGE_MAX` rows, so the count grows with the data, and an alert on the line sees it.
+  `test_a_request_line_counts_the_pages_a_list_read` reads `GET /tasks` at one row a page.
 - **Tasks are newest first.** A task that a person creates is on the first page, so the screen
   shows it at once, whatever the tenant holds. Audit events stay in the order they were recorded.
 - **A cursor names a row, never a position.** The `after` of a task page is the id of the last
@@ -48,8 +59,10 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   asserts that the first page holds `PAGE_MAX`, that `next` reads the rest, and that the order
   holds across the pages. It asserts that a cursor that names no row is reported.
   `tests/integration/test_pages_on_postgres.py` counts the rows that each `fetch` returns, and
-  fails on a read that fetches more than `PAGE_MAX + 1`. The bound comes from the code, not from
-  the size of the data, so it holds for a fixture of any size.
+  fails on a read that fetches more than `PAGE_MAX + 1`. It lowers `PAGE_BYTES` and asserts that
+  a page stops at it, that a row wider than it is a page of its own, and that `next` reads the
+  rest. The bound comes from the code, not from the size of the data, so it holds for a fixture
+  of any size.
 - **The mock pages as the backend does.** `src/mocks/store.ts` holds its own `PAGE_MAX`, and
   `devtools/check_template.sh` fails when it differs from `maxItems` in `openapi.json`.
 - **The screen reads one page on its first draw, and the next page on a person's click.** The
@@ -69,6 +82,11 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   needs a fixture ten times the size.
 - **A `limit` that the client sends.** Nothing in the app needs a smaller page. One fixed bound
   is less code, and is the same on every call.
+- **Measure the bytes of a page in Python, after the fetch.** asyncpg builds the whole result
+  before `fetch` returns, so the bytes are already in the process when Python counts them.
+- **A smaller `PAGE_MAX` for a collection of wide rows, from the bounds on its columns.** Most
+  rows are much smaller than their bound, so each page would hold a few rows where it could hold
+  `PAGE_MAX`.
 - **`OFFSET`.** It reads and drops every row before the page, so its cost grows with the page
   number. A row that is removed before the offset moves every later row by one.
 - **`seq` as the cursor.** It discloses the writes of other tenants, as above.

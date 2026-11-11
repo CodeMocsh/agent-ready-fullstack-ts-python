@@ -8,7 +8,7 @@ from app import response_bound, serve
 from app.audit_events import acting_as
 from app.identity.shared import SENTINEL_PRINCIPAL, SENTINEL_TENANT
 from app.main import ROUTERS
-from app.models import PAGE_MAX, CreateTaskBody
+from app.models import PAGE_MAX, TITLE_MAX, CreateTaskBody
 from app.response_limits import DEFAULT_BYTES
 from app.store import Database
 from tests.pages import every_event
@@ -20,7 +20,7 @@ async def test_a_full_page_of_large_rows_still_answers_a_complete_page(database:
     store = database.store(SENTINEL_TENANT)
     with acting_as(SENTINEL_PRINCIPAL.actor):
         for _ in range(PAGE_MAX + 1):
-            await store.create(CreateTaskBody(title="界" * 2000))
+            await store.create(CreateTaskBody(title="界" * TITLE_MAX))
     app = await asyncio.to_thread(assembled, *ROUTERS, database=database)
     client = TestClient(app)
 
@@ -30,13 +30,13 @@ async def test_a_full_page_of_large_rows_still_answers_a_complete_page(database:
     assert len(response.content) <= DEFAULT_BYTES
     assert len(response.json()["tasks"]) == PAGE_MAX
     assert response.json()["next"] is not None
-    assert all(task["title"] == "界" * 2000 for task in response.json()["tasks"])
+    assert all(task["title"] == "界" * TITLE_MAX for task in response.json()["tasks"])
 
 
 async def test_a_refused_read_records_the_status_the_client_received(database: Database) -> None:
     store = database.store(SENTINEL_TENANT)
     with acting_as(SENTINEL_PRINCIPAL.actor):
-        await store.create(CreateTaskBody(title="x" * (DEFAULT_BYTES + 1)))
+        await store.create(CreateTaskBody.model_construct(title="x" * (DEFAULT_BYTES + 1)))
     app = await asyncio.to_thread(assembled, *ROUTERS, database=database)
     client = TestClient(app)
 

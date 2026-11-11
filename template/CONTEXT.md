@@ -202,8 +202,9 @@ process has a bound under it.
 _Avoid_: request timeout, deadline.
 
 **Page**:
-At most `PAGE_MAX` rows of a list, and `next`: the cursor where the page after it starts, or
-`None` on the last page. Every list a store answers is a page. `docs/adr/template/0026`.
+At most `PAGE_MAX` rows and `PAGE_BYTES` bytes of a list, and `next`: the cursor where the page
+after it starts, or `None` on the last page. Every list a store answers is a page, and
+`fetch_page` reads it. `docs/adr/template/0026`.
 _Avoid_: batch, chunk, slice. A screen is never a page.
 
 **Connection budget**:

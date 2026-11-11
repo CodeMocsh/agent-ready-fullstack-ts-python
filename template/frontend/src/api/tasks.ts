@@ -7,6 +7,8 @@ export type TaskPage = components["schemas"]["TaskPage"];
 export type CreateTaskBody = components["schemas"]["CreateTaskBody"];
 export type UpdateTaskBody = components["schemas"]["UpdateTaskBody"];
 
+export const TITLE_MAX = 500;
+
 export const tasksApi = {
   list: (after: string | null, signal: AbortSignal | null = null) =>
     request<TaskPage>(after === null ? "/tasks" : `/tasks?after=${encodeURIComponent(after)}`, {

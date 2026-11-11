@@ -14,7 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.store import pages
 from tests.clock import hold_the_thread
+from tests.conftest import Logged
 from tests.integration.conftest import Provisioned
 
 BACKEND: Final = Path(__file__).resolve().parents[2]
@@ -55,6 +57,25 @@ def test_the_whole_stack_serves_a_task_round_trip(
 
         assert client.delete(f"/tasks/{task['id']}").status_code == 204
         assert client.get("/tasks").json() == {"tasks": [], "next": None}
+
+
+def test_a_request_line_counts_the_pages_a_list_read(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, logged: Logged
+) -> None:
+    """At one row a page, a route that read every page would read one page for each task."""
+    monkeypatch.setenv("DATABASE_URL", provisioned.app_dsn)
+    monkeypatch.setenv("DB_SCHEMA", provisioned.schema)
+    monkeypatch.setattr(pages, "PAGE_MAX", 1)
+
+    with TestClient(create_app()) as client:
+        for n in range(3):
+            assert client.post("/tasks", json={"title": f"{n}"}).status_code == 201
+        _ = logged()
+        listed = client.get("/tasks")
+
+    assert len(listed.json()["tasks"]) == 1
+    [line] = [one for one in logged() if one["message"] == "request completed"]
+    assert line["pages_read"] == 1
 
 
 def test_a_task_closes_through_a_job_that_the_worker_process_ends(

@@ -1,9 +1,13 @@
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, JsonValue
 
 JsonObject = dict[str, JsonValue]
 """The input of a job, and the outcome of a job that is done."""
+
+JSON_BYTES: Final = 256 * 1024
+"""The most bytes a job's input or outcome takes as JSON, and the bound on each column that holds
+one."""
 
 JobState = Literal["pending", "done", "dead"]
 """`pending` until a worker ends the job. `done` with an outcome, or `dead` with a failure."""

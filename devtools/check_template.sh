@@ -975,7 +975,8 @@ need_only f docs/adr/template \
     0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md \
     0028-every-finite-response-has-a-byte-bound.md \
     0029-the-reads-that-start-in-one-task-are-one-request.md \
-    0030-server-events-merge-and-share-a-read-budget.md
+    0030-server-events-merge-and-share-a-read-budget.md \
+    0031-the-database-bounds-the-bytes-of-every-value.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."
@@ -1054,6 +1055,10 @@ page_max = schemas['TaskPage']['properties']['tasks']['maxItems']
 mocked = re.search(r'^export const PAGE_MAX = (\\d+);$', open('frontend/src/mocks/store.ts').read(), re.M)
 assert mocked, 'frontend/src/mocks/store.ts no longer says export const PAGE_MAX = <n>;, so nothing holds the mock page to the contract'
 assert int(mocked.group(1)) == page_max, f'the mock pages {mocked.group(1)} tasks and the contract {page_max}: set PAGE_MAX in frontend/src/mocks/store.ts to the maxItems of TaskPage.tasks in openapi.json'
+title_max = schemas['CreateTaskBody']['properties']['title']['maxLength']
+typed = re.search(r'^export const TITLE_MAX = (\\d+);$', open('frontend/src/api/tasks.ts').read(), re.M)
+assert typed, 'frontend/src/api/tasks.ts no longer says export const TITLE_MAX = <n>;, so nothing holds the title field to the contract'
+assert int(typed.group(1)) == title_max, f'the title field takes {typed.group(1)} characters and the contract {title_max}: set TITLE_MAX in frontend/src/api/tasks.ts to the maxLength of CreateTaskBody.title in openapi.json'
 "
 need_grep '"/tasks"' openapi.json "The proxy strips the /api prefix, so the spec must not carry it."
 need_grep 'rewrite' frontend/vite.config.ts

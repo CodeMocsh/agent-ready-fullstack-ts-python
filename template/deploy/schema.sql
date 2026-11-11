@@ -374,6 +374,442 @@ END
 $app$;
 INSERT INTO applied_once(key) VALUES('0208_audit_events_kind_whole') ON CONFLICT DO NOTHING;
 
+-- 0300_applied_once_key_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'applied_once'::regclass AND conname = 'applied_once_key_bytes') THEN
+    ALTER TABLE applied_once ADD CONSTRAINT applied_once_key_bytes
+      CHECK (octet_length(key::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_applied_once_key_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_action_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_action_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_action_bytes
+      CHECK (octet_length(action::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_action_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_actor_issuer_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_actor_issuer_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_actor_issuer_bytes
+      CHECK (octet_length(actor_issuer::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_actor_issuer_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_actor_name_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_actor_name_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_actor_name_bytes
+      CHECK (octet_length(actor_name::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_actor_name_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_actor_subject_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_actor_subject_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_actor_subject_bytes
+      CHECK (octet_length(actor_subject::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_actor_subject_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_fields_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_fields_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_fields_bytes
+      CHECK (octet_length(fields::text) <= 65536) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_fields_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_method_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_method_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_method_bytes
+      CHECK (octet_length(method::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_method_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_on_behalf_of_issuer_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_on_behalf_of_issuer_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_on_behalf_of_issuer_bytes
+      CHECK (octet_length(on_behalf_of_issuer::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_on_behalf_of_issuer_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_on_behalf_of_name_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_on_behalf_of_name_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_on_behalf_of_name_bytes
+      CHECK (octet_length(on_behalf_of_name::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_on_behalf_of_name_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_on_behalf_of_subject_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_on_behalf_of_subject_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_on_behalf_of_subject_bytes
+      CHECK (octet_length(on_behalf_of_subject::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_on_behalf_of_subject_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_outcome_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_outcome_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_outcome_bytes
+      CHECK (octet_length(outcome::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_outcome_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_request_id_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_request_id_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_request_id_bytes
+      CHECK (octet_length(request_id::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_request_id_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_resource_ids_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_resource_ids_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_resource_ids_bytes
+      CHECK (octet_length(resource_ids::text) <= 524288) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_resource_ids_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_resource_type_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_resource_type_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_resource_type_bytes
+      CHECK (octet_length(resource_type::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_resource_type_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_route_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_route_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_route_bytes
+      CHECK (octet_length(route::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_route_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_tenant_id_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_tenant_id_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_tenant_id_bytes
+      CHECK (octet_length(tenant_id::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_tenant_id_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_audit_events_trace_id_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'audit_events'::regclass AND conname = 'audit_events_trace_id_bytes') THEN
+    ALTER TABLE audit_events ADD CONSTRAINT audit_events_trace_id_bytes
+      CHECK (octet_length(trace_id::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_audit_events_trace_id_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_job_claims_kind_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'job_claims'::regclass AND conname = 'job_claims_kind_bytes') THEN
+    ALTER TABLE job_claims ADD CONSTRAINT job_claims_kind_bytes
+      CHECK (octet_length(kind::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_job_claims_kind_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_job_claims_state_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'job_claims'::regclass AND conname = 'job_claims_state_bytes') THEN
+    ALTER TABLE job_claims ADD CONSTRAINT job_claims_state_bytes
+      CHECK (octet_length(state::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_job_claims_state_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_job_claims_tenant_id_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'job_claims'::regclass AND conname = 'job_claims_tenant_id_bytes') THEN
+    ALTER TABLE job_claims ADD CONSTRAINT job_claims_tenant_id_bytes
+      CHECK (octet_length(tenant_id::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_job_claims_tenant_id_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_actor_issuer_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_actor_issuer_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_actor_issuer_bytes
+      CHECK (octet_length(actor_issuer::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_actor_issuer_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_actor_name_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_actor_name_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_actor_name_bytes
+      CHECK (octet_length(actor_name::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_actor_name_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_actor_subject_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_actor_subject_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_actor_subject_bytes
+      CHECK (octet_length(actor_subject::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_actor_subject_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_failure_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_failure_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_failure_bytes
+      CHECK (octet_length(failure::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_failure_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_input_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_input_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_input_bytes
+      CHECK (octet_length(input::text) <= 262144) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_input_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_kind_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_kind_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_kind_bytes
+      CHECK (octet_length(kind::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_kind_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_on_behalf_of_issuer_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_on_behalf_of_issuer_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_on_behalf_of_issuer_bytes
+      CHECK (octet_length(on_behalf_of_issuer::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_on_behalf_of_issuer_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_on_behalf_of_name_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_on_behalf_of_name_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_on_behalf_of_name_bytes
+      CHECK (octet_length(on_behalf_of_name::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_on_behalf_of_name_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_on_behalf_of_subject_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_on_behalf_of_subject_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_on_behalf_of_subject_bytes
+      CHECK (octet_length(on_behalf_of_subject::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_on_behalf_of_subject_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_outcome_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_outcome_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_outcome_bytes
+      CHECK (octet_length(outcome::text) <= 262144) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_outcome_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_state_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_state_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_state_bytes
+      CHECK (octet_length(state::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_state_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_jobs_tenant_id_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'jobs'::regclass AND conname = 'jobs_tenant_id_bytes') THEN
+    ALTER TABLE jobs ADD CONSTRAINT jobs_tenant_id_bytes
+      CHECK (octet_length(tenant_id::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_jobs_tenant_id_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_tasks_tenant_id_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'tasks'::regclass AND conname = 'tasks_tenant_id_bytes') THEN
+    ALTER TABLE tasks ADD CONSTRAINT tasks_tenant_id_bytes
+      CHECK (octet_length(tenant_id::text) <= 1024) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_tasks_tenant_id_bytes') ON CONFLICT DO NOTHING;
+
+-- 0300_tasks_title_bytes
+DO $app$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'tasks'::regclass AND conname = 'tasks_title_bytes') THEN
+    ALTER TABLE tasks ADD CONSTRAINT tasks_title_bytes
+      CHECK (octet_length(title::text) <= 2000) NOT VALID;
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0300_tasks_title_bytes') ON CONFLICT DO NOTHING;
+
+-- 0399_bounds_validated
+DO $app$
+DECLARE
+  bound record;
+  over text[] := '{}';
+BEGIN
+  FOR bound IN
+    SELECT conrelid::regclass AS bounded, conname, pg_get_constraintdef(oid) AS rule
+      FROM pg_constraint
+     WHERE connamespace = current_schema()::regnamespace AND contype = 'c'
+       AND conname LIKE '%\_bytes' AND NOT convalidated
+     ORDER BY conname
+  LOOP
+    BEGIN
+      EXECUTE format('ALTER TABLE %s VALIDATE CONSTRAINT %I', bound.bounded, bound.conname);
+    EXCEPTION WHEN check_violation THEN
+      over := over || format('%s %s', bound.conname, bound.rule);
+    END;
+  END LOOP;
+  IF cardinality(over) > 0 THEN
+    RAISE EXCEPTION 'stored values are longer than their bound: %',
+      array_to_string(over, '; ')
+      USING HINT = 'Shorten those values, or move them out of the row, and migrate again.';
+  END IF;
+END
+$app$;
+INSERT INTO applied_once(key) VALUES('0399_bounds_validated') ON CONFLICT DO NOTHING;
+
 -- The writes the application role is never granted.
 
 DO $app$

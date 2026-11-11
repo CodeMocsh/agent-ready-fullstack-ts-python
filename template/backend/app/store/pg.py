@@ -51,7 +51,7 @@ from uuid import UUID, uuid4
 from app import log
 from app.audit_events import AuditEventPage, RecordedAuditEvent, RequestEvent, current_actor
 from app.identity.shared import Actor
-from app.models import PAGE_MAX, CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
+from app.models import CreateTaskBody, Job, JsonObject, Task, TaskPage, UpdateTaskBody
 from app.store import (
     AuditEvents,
     Connections,
@@ -68,10 +68,11 @@ from app.store.conn import resolve_schema
 from app.store.ddl import TENANT_GUC
 from app.store.jobs import Kinds, LeaseLost, asker, encoded, fence, handler_of
 from app.store.migrate import check, schema_version
+from app.store.pages import fetch_page
 
 _SET_TENANT = "SELECT set_config($1, $2, true)"
-_LIST = "SELECT id, title, done FROM tasks ORDER BY seq DESC LIMIT $1"
-_LIST_AFTER = "SELECT id, title, done FROM tasks WHERE seq < $1 ORDER BY seq DESC LIMIT $2"
+_TASKS = "SELECT id, title, done, seq FROM tasks"
+_TASKS_BEFORE = "SELECT id, title, done, seq FROM tasks WHERE seq < $1"
 _SEQ_OF_TASK = "SELECT seq FROM tasks WHERE id = $1"
 _CREATE = "INSERT INTO tasks (id, tenant_id, title) VALUES ($1, $2, $3) RETURNING id, title, done"
 _UPDATE = "UPDATE tasks SET done = $2 WHERE id = $1 RETURNING id, title, done"
@@ -86,7 +87,7 @@ _AUDIT_EVENTS = (
     "SELECT seq, tenant_id, recorded_at, actor_issuer, actor_subject, actor_name, "
     "on_behalf_of_issuer, on_behalf_of_subject, on_behalf_of_name, action, outcome, "
     "resource_type, method, route, status, resource_ids, fields, request_id, trace_id "
-    "FROM audit_events WHERE seq > $1 ORDER BY seq LIMIT $2"
+    "FROM audit_events WHERE seq > $1"
 )
 _AN_AUDIT_EVENT = "SELECT EXISTS (SELECT 1 FROM audit_events WHERE seq = $1)"
 _ASK_CLAIM = "INSERT INTO job_claims (id, tenant_id, kind) VALUES ($1, $2, $3)"
@@ -283,15 +284,15 @@ class PostgresTaskStore:
     async def list(self, after: str | None) -> TaskPage | None:
         async with self._database.scoped(self._tenant_id) as conn:
             if after is None:
-                rows = await conn.fetch(_LIST, PAGE_MAX + 1)
+                page = await fetch_page(conn, _TASKS, "seq DESC")
             else:
                 parsed = _as_id(after)
                 seq = None if parsed is None else await conn.fetchval(_SEQ_OF_TASK, parsed)
                 if seq is None:
                     return None
-                rows = await conn.fetch(_LIST_AFTER, seq, PAGE_MAX + 1)
-        tasks = [_task(row) for row in rows[:PAGE_MAX]]
-        return TaskPage(tasks=tasks, next=tasks[-1].id if len(rows) > PAGE_MAX else None)
+                page = await fetch_page(conn, _TASKS_BEFORE, "seq DESC", seq)
+        tasks = [_task(row) for row in page.rows]
+        return TaskPage(tasks=tasks, next=tasks[-1].id if page.more else None)
 
     async def create(self, body: CreateTaskBody) -> Task:
         async with self._database.scoped(self._tenant_id) as conn:
@@ -347,12 +348,10 @@ class PostgresAuditEvents:
         async with self._database.scoped(self._tenant_id) as conn:
             if after is not None and not await conn.fetchval(_AN_AUDIT_EVENT, seq):
                 raise _no_such_event(after)
-            rows = await conn.fetch(_AUDIT_EVENTS, seq, PAGE_MAX + 1)
-        page = rows[:PAGE_MAX]
-        more = len(rows) > PAGE_MAX
+            page = await fetch_page(conn, _AUDIT_EVENTS, "seq", seq)
         return AuditEventPage(
-            events=tuple(_recorded(row) for row in page),
-            next=str(page[-1]["seq"]) if more else None,
+            events=tuple(_recorded(row) for row in page.rows),
+            next=str(page.rows[-1]["seq"]) if page.more else None,
         )
 
 

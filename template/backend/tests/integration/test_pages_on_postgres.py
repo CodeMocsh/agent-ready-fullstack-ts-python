@@ -9,8 +9,8 @@ from uuid import uuid4
 import pytest
 
 from app.audit_events import acting_as
-from app.models import PAGE_MAX, CreateTaskBody
-from app.store import Database
+from app.models import PAGE_MAX, TITLE_MAX, CreateTaskBody
+from app.store import Database, TaskStore, pages
 from app.store.pg import PostgresDatabase
 from tests.pages import every_event, every_task
 from tests.store_contract import A_REQUEST, ACTOR
@@ -79,3 +79,41 @@ async def test_no_read_of_audit_events_fetches_more_than_one_row_past_the_page(
 
     assert len(recorded) == 2 * PAGE_MAX + 1
     assert fetched == [PAGE_MAX + 1, PAGE_MAX + 1, 1]
+
+
+async def page_lengths(store: TaskStore) -> list[int]:
+    """How many tasks each page of the store's tenant holds, first page first."""
+    lengths: list[int] = []
+    after: str | None = None
+    while True:
+        page = await store.list(after)
+        assert page is not None
+        lengths.append(len(page.tasks))
+        if page.next is None:
+            return lengths
+        after = page.next
+
+
+async def test_a_page_stops_at_its_byte_bound_and_the_next_page_reads_on(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pages, "PAGE_BYTES", 3 * TITLE_MAX)
+    store = database.store(f"paged-{uuid4().hex}")
+    for n in range(7):
+        await store.create(CreateTaskBody(title=f"{n}" * TITLE_MAX))
+
+    lengths = await page_lengths(store)
+
+    assert lengths == [2, 2, 2, 1]
+    assert [task.title[0] for task in await every_task(store)] == list("6543210")
+
+
+async def test_a_row_wider_than_the_byte_bound_is_a_page_of_its_own(
+    database: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pages, "PAGE_BYTES", TITLE_MAX // 2)
+    store = database.store(f"paged-{uuid4().hex}")
+    for n in range(3):
+        await store.create(CreateTaskBody(title=f"{n}" * TITLE_MAX))
+
+    assert await page_lengths(store) == [1, 1, 1]

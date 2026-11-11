@@ -153,7 +153,7 @@ async def test_each_part_is_a_request_event_with_the_request_id_of_its_group(
     events = await every_event(database.audit_events(SENTINEL_TENANT))
 
     group = response.headers["x-request-id"]
-    assert [(event.route, event.status, event.request_id) for event in events] == [
+    assert sorted((event.route, event.status, event.request_id) for event in events) == [
         ("/widgets", 200, group),
         ("/widgets/{id}", 404, group),
     ]

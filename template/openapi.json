@@ -691,6 +691,7 @@
         "properties": {
           "title": {
             "type": "string",
+            "maxLength": 500,
             "title": "Title"
           }
         },

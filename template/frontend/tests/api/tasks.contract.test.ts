@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { API_BASE_URL } from "@/api/base";
 import { type Job, jobsApi } from "@/api/jobs";
-import { type Task, tasksApi } from "@/api/tasks";
+import { type Task, TITLE_MAX, tasksApi } from "@/api/tasks";
 import { againstLiveBackend } from "./target";
 
 async function ended(id: string): Promise<Job> {
@@ -120,26 +120,11 @@ describe(`jobs contract (${againstLiveBackend ? "live backend" : "mock handlers"
 });
 
 if (againstLiveBackend) {
-  it("refuses an oversized page through the live HTTP path", async () => {
-    const created: string[] = [];
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    try {
-      for (let index = 0; index < 9; index += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        const task = await tasksApi.create({ title: "x".repeat(512 * 1024) });
-        created.push(task.id);
-      }
-      const answered = await fetch(`${API_BASE_URL}/tasks`);
-      expect(answered.status).toBe(500);
-      expect(await answered.json()).toEqual({ detail: "Response exceeds its byte limit" });
-      await expect(tasksApi.list(null)).rejects.toThrow("Response exceeds its byte limit");
-    } finally {
-      for (const id of created) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
-        await tasksApi.remove(id);
-      }
-    }
-    expect((await tasksApi.list(null)).tasks.every((task) => !created.includes(task.id))).toBe(
+  it("refuses a title over its bound through the live HTTP path", async () => {
+    await expect(tasksApi.create({ title: "x".repeat(TITLE_MAX + 1) })).rejects.toThrow(
+      "POST /tasks failed with 422",
+    );
+    expect((await tasksApi.list(null)).tasks.every((task) => task.title.length <= TITLE_MAX)).toBe(
       true,
     );
   });
