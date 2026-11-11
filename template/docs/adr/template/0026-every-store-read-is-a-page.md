@@ -63,6 +63,12 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   the tenant, and names the path of each GET route. The test fails on a table that it leaves at
   one page or less, and on a GET route that it does not name. A second test adds a route that
   reads every task, and asserts that the count finds it.
+- **A route that reads more than a page today is named, with its reason, until it reads a page.**
+  `OVER_A_PAGE` in `tests/integration/filled.py` maps a GET route template to its reason. The
+  template ships it empty. The test fails on a route over the bound that the list does not name.
+  It also fails on a route that the list names and that reads a page, so an entry leaves the list
+  when its route reads a page. It fails on an entry that names no GET route that the test reads,
+  and on an empty reason. A named route is still read, and still answers `200`.
 - **The mock pages as the backend does.** `src/mocks/store.ts` holds its own `PAGE_MAX`, and
   `devtools/check_template.sh` fails when it differs from `maxItems` in `openapi.json`.
 - **The screen reads one page on its first draw, and the next page on a person's click.** The
@@ -87,6 +93,11 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
 - **`seq` as the cursor.** It discloses the writes of other tenants, as above.
 - **Oldest first.** A task that a person creates goes on the last page. When the screen has not
   read that page, the task does not appear, and nothing tells the person why.
+- **A baseline of the routes over the bound that the gate writes.** A gate that writes its own
+  baseline drifts, as [0029](0029-the-reads-that-start-in-one-task-are-one-request.md) says. A
+  person writes each entry of `OVER_A_PAGE`, with its reason, and the test removes none.
+- **No list, and a project that edits the test.** The test is the template's. An edited copy stops
+  receiving the template's changes.
 - **An exception for the audit events, which no route serves.** A read with no bound is where
   the next unbounded read starts. The audit cursor is the event's `seq`, because an audit event
   has no id. Give the events an id before a route serves them.
@@ -107,5 +118,6 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   finds these.
 - A new tenant table needs rows in `tests/integration/filled.py`, and a new GET route needs a path
   there, or the test fails.
+- A new entry in `OVER_A_PAGE` passes the test. A review sees it.
 - A read that needs every row is not a list. A count, a sum or a group belongs in SQL. A value
   that only all the rows give is derived once per version of its rows, outside the request.

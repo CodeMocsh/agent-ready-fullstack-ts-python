@@ -610,6 +610,12 @@ What to expect, because it is not all free:
   [adr/template/0031](adr/template/0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md)
   says why.
 
+- **From 0.77.0 a GET route that reads more than a page today is named until it reads a page.**
+  Add `OVER_A_PAGE: dict[str, str] = {}` to `backend/tests/integration/filled.py`. Name each GET
+  route template whose read fetches more than `PAGE_MAX + 1` rows, with its reason. Remove a
+  route when it reads a page: the test fails on an entry whose route reads a page.
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

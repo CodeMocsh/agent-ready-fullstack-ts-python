@@ -2,11 +2,12 @@
 a request fetches more than `PAGE_MAX + 1` rows. `docs/adr/template/0026`.
 
 The template owns this module. `tests/integration/filled.py` is the project's list: how it fills a
-tenant, the path of each GET route in `openapi.json`, and who reads.
+tenant, the path of each GET route in `openapi.json`, who reads, and each route that may fetch
+more than a page until it reads a page.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator, Generator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from typing import Any, Final
 from uuid import uuid4
@@ -25,7 +26,7 @@ from app.store.ddl import TENANT_TABLES
 from app.store.jobs import Kinds
 from app.store.pg import PostgresDatabase
 from tests.integration.conftest import ONE_PROCESS, Provisioned
-from tests.integration.filled import filled, reader
+from tests.integration.filled import OVER_A_PAGE, filled, reader
 from tests.jobs_contract import contract_kinds
 
 READ_ALONE: Final = frozenset({"/reads"})
@@ -124,18 +125,32 @@ def served(
         yield client
 
 
-def over_a_page(client: TestClient, paths: dict[str, str], fetched: list[int]) -> dict[str, Any]:
-    """Each route whose read fetched more than `PAGE_MAX + 1` rows, with the rows of each read,
-    and each route that did not answer `200`, with its status."""
-    found: dict[str, Any] = {}
+def over_a_page(
+    client: TestClient, paths: dict[str, str], fetched: list[int]
+) -> dict[str, list[int]]:
+    """Each route whose read fetched more than `PAGE_MAX + 1` rows, with the rows of each read.
+    Fails on a path that does not answer `200`."""
+    found: dict[str, list[int]] = {}
     for route, path in sorted(paths.items()):
         fetched.clear()
         answered = client.get(path)
-        if answered.status_code != 200:
-            found[route] = f"{path} answered {answered.status_code}: {answered.text}"
-        elif max(fetched, default=0) > PAGE_MAX + 1:
+        assert answered.status_code == 200, (
+            f"{path} answered {answered.status_code} for {route}: {answered.text}"
+        )
+        if max(fetched, default=0) > PAGE_MAX + 1:
             found[route] = list(fetched)
     return found
+
+
+def against_the_list(
+    found: dict[str, list[int]], listed: Mapping[str, str]
+) -> tuple[dict[str, list[int]], list[str]]:
+    """Each route in `found` that `listed` does not name, with its rows, and each route that
+    `listed` names and `found` does not."""
+    return (
+        {route: rows for route, rows in found.items() if route not in listed},
+        sorted(set(listed) - set(found)),
+    )
 
 
 async def reads_every_task(request: Request, principal: PrincipalDep) -> int:
@@ -161,12 +176,36 @@ def test_each_get_route_fetches_at_most_a_page_for_each_read(
         f"tests/integration/filled.py names no path for {sorted(routes - set(paths))}, and "
         f"names {sorted(set(paths) - routes)}, which openapi.json has no GET route for"
     )
+    assert sorted(set(OVER_A_PAGE) - routes) == [], (
+        f"OVER_A_PAGE in tests/integration/filled.py names "
+        f"{sorted(set(OVER_A_PAGE) - routes)}, which is no GET route that this test reads"
+    )
 
     with served(provisioned, tenant_id, monkeypatch, app) as client:
-        assert over_a_page(client, paths, fetched) == {}
+        unlisted, listed_in_vain = against_the_list(
+            over_a_page(client, paths, fetched), OVER_A_PAGE
+        )
+
+    assert unlisted == {}, (
+        f"A read of each of these GET routes fetched more than {PAGE_MAX + 1} rows: {unlisted}. "
+        f"Read a page, or name the route in OVER_A_PAGE in tests/integration/filled.py, with "
+        f"its reason."
+    )
+    assert listed_in_vain == [], (
+        f"OVER_A_PAGE in tests/integration/filled.py names {listed_in_vain}. No read of these "
+        f"routes fetched more than {PAGE_MAX + 1} rows. Remove each from the list."
+    )
 
 
-def test_a_route_that_reads_every_row_is_found(
+def test_each_route_over_a_page_names_its_reason() -> None:
+    unreasoned = [route for route, reason in OVER_A_PAGE.items() if reason.strip() == ""]
+    assert unreasoned == [], (
+        f"OVER_A_PAGE in tests/integration/filled.py gives {unreasoned} an empty reason. Write "
+        f"the reason."
+    )
+
+
+def test_a_route_that_reads_every_row_is_found_unless_the_list_names_it(
     provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, fetched: list[int]
 ) -> None:
     tenant_id = f"filled-{uuid4().hex}"
@@ -180,3 +219,6 @@ def test_a_route_that_reads_every_row_is_found(
 
     assert list(found) == [PLANTED]
     assert max(found[PLANTED]) > PAGE_MAX + 1
+    assert against_the_list(found, {}) == (found, [])
+    assert against_the_list(found, {PLANTED: "reads every task"}) == ({}, [])
+    assert against_the_list({}, {PLANTED: "reads every task"}) == ({}, [PLANTED])
