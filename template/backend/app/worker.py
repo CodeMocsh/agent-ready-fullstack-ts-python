@@ -24,7 +24,7 @@ import signal
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from app import log
 from app.audit_events import acting_as
@@ -47,7 +47,10 @@ from app.store.jobs import (
 )
 from app.store.pg import PostgresDatabase
 from app.store.pg_jobs import JobClaims
-from app.wiring import build, build_service_version
+from app.wiring import TelemetrySettings, build, build_service_version, build_telemetry
+
+if TYPE_CHECKING:
+    from app.telemetry import Meters
 
 AT_ONCE: Final = 4
 """How many jobs one worker process runs at once."""
@@ -191,7 +194,16 @@ async def _main() -> None:
             "DATABASE_URL is unset. The memory substrate runs its own jobs in the web process, "
             "and no other process can see them. Set DATABASE_URL, or run no worker."
         )
+    await serve(database, _meters(build_telemetry()))
+
+
+async def serve(database: PostgresDatabase, meters: "Meters | None") -> None:
+    """Check the schema, then claim and run jobs until SIGTERM or SIGINT. With `meters`, report
+    the pool, each wait for a connection and how late the event loop ran. Stop `meters`, then
+    close `database`."""
     try:
+        if meters is not None:
+            meters.observe(database)
         version = await database.check()
         log.serving(database.name, version)
         log.working(
@@ -200,17 +212,31 @@ async def _main() -> None:
             kinds=tuple(database.kinds),
             at_once=AT_ONCE,
         )
-        await _until_stopped(JobClaims(database))
+        await _until_stopped(JobClaims(database), meters)
     finally:
-        await database.close()
+        try:
+            if meters is not None:
+                await asyncio.to_thread(meters.shutdown)
+        finally:
+            await database.close()
 
 
-async def _until_stopped(claims: JobClaims) -> None:
+def _meters(settings: TelemetrySettings | None) -> "Meters | None":
+    """The meters that `settings` names, or `None` without settings. Imports `app.telemetry`
+    only with settings."""
+    if settings is None:
+        return None
+    from app import telemetry
+
+    return telemetry.meters(settings, telemetry.otlp_metrics(settings))
+
+
+async def _until_stopped(claims: JobClaims, meters: "Meters | None") -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for stopping in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(stopping, stop.set)
-    with LoopWatch(None):
+    with LoopWatch(None if meters is None else meters.loop_delay()):
         async with asyncio.TaskGroup() as group:
             working = group.create_task(work(claims))
             _ = await stop.wait()

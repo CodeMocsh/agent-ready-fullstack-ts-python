@@ -378,6 +378,12 @@ says why.
   scales on CPU then starts instances for requests because of the work of jobs.
 - **Give the worker CPU while no request is open.** It claims jobs while nobody has the app
   open. On Cloud Run, instance-based billing. The web process no longer needs it.
+- **Give the worker the telemetry settings, with a service name of its own.** With
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, it reports `db.client.connection.count`,
+  `db.client.connection.wait_time` and `asyncio.event_loop.delay` under `OTEL_SERVICE_NAME`. It
+  starts no trace. Each tick of its event loop adds one to the count of the delay. The count stops
+  when the worker stops, or when something holds its event loop. Alert when the count has not
+  risen for ten minutes.
 - **Keep one worker running at least.** When no worker runs, each job stays `pending`. Alert on
   the age of the oldest job that is ready: `SELECT min(ready_at) FROM job_claims WHERE state =
   'ready'`.
