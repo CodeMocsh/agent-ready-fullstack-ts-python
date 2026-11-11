@@ -559,17 +559,40 @@ What to expect, because it is not all free:
   - Stop `followNavigations` and clear the old query client when a session ends.
   [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
 
-- **From 0.74.0 the worker reports its pool and its event loop's delay.** It does so when
-  `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Give the worker the telemetry settings of the web process,
-  with its own `OTEL_SERVICE_NAME`. `telemetry.meters` builds the same metrics for any other
-  process that serves no request.
-
 - **From 0.73.0 an update never writes the lists in your test folders.** These are
   `backend/tests/tiers.py`, `backend/tests/models/layers.py`, `frontend/tests/read-budgets.ts`,
   `frontend/tests/signed-in.ts` and `frontend/e2e/signed-in.ts`. If this project lacks one of
   them, copy it from the template before you update. The template's tests import each, and an
   update no longer writes one that is missing.
   [adr/template/0015](adr/template/0015-the-template-owns-the-mechanism-and-the-project-owns-its-list.md) says why.
+
+- **From 0.74.0 the worker reports its pool and its event loop's delay.** It does so when
+  `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Give the worker the telemetry settings of the web process,
+  with its own `OTEL_SERVICE_NAME`. `telemetry.meters` builds the same metrics for any other
+  process that serves no request.
+
+- **From 0.75.0 every GET route reads a page, a job can be asked for once per a key, and shared
+  work stops when its last caller leaves.**
+  - Copy `backend/tests/integration/filled.py` from the template before you update.
+    `tests/integration/test_routes_read_pages.py` imports it, and an update does not write it.
+    Rewrite it for this project. Fill more than `PAGE_MAX + 1` rows of the tenant in each of your
+    tenant tables. Name a path that answers `200` for each of your GET routes. Make `reader`
+    answer a principal that each route serves. The template's copy writes tasks and asks for a
+    job of a kind in `tests/jobs_contract.py`. A project without the example writes its own rows.
+    `make db-test` then fails on a route whose read fetches more than `PAGE_MAX + 1` rows.
+  - Take the template's hash of `0040_job_claims` in `backend/.schema-baseline.json`. Keep
+    `key_digest` in the `CREATE` of `job_claims` in `ddl.py`, and keep the entries `0209` and
+    `0210`. Then run `make migrate`. It adds `key_digest` and its unique index to `job_claims`.
+  - Stop the workers of the earlier release before you ask with `once_per`. Their claim leaves the
+    digest of the key, and a retry of theirs can then break the unique index.
+  - `Jobs.ask` takes `once_per`. A class of yours that implements `Jobs`, such as a double in a
+    test, takes it too.
+  - A run of `SharedWork` whose last caller is cancelled or times out is now cancelled. Work
+    that must end without a caller is a job.
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md),
+  [0027](adr/template/0027-work-that-outlives-its-request-is-a-job-that-a-worker-process-claims.md)
+  and [0021](adr/template/0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md)
+  say why.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

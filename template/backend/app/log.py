@@ -326,8 +326,8 @@ def shared_failed(work: str, error: BaseException) -> None:
 
 
 def shared_cancelled(work: str) -> None:
-    """A run of the shared work `app.waits.SharedWork` named `work` was cancelled before it ended,
-    as at shutdown."""
+    """A run of the shared work `app.waits.SharedWork` named `work` was cancelled before it ended:
+    at shutdown, or when its last caller left."""
     _LOG.warning("shared work cancelled", work=work)
 
 

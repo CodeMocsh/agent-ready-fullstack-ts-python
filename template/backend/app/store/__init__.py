@@ -116,10 +116,16 @@ class AuditEvents(Protocol):
 class Jobs(Protocol):
     """One tenant's jobs. `docs/adr/template/0027`."""
 
-    async def ask(self, kind: str, input: JsonObject) -> Job:
+    async def ask(self, kind: str, input: JsonObject, *, once_per: str | None = None) -> Job:
         """Write a job of `kind` on `input`, asked by the actor that acts here, and return it
         `pending`. Raises `UnknownKind` when no handler runs `kind`, and `AskedByNobody` when no
-        actor acts here."""
+        actor acts here.
+
+        With `once_per`, the ask names a key. A job of `kind` with that key that waits for its
+        first claim takes the ask. The ask then returns that job. The job keeps its input and the
+        actor that asked first. A job that a worker claimed takes no ask, so an ask after the
+        claim writes a new job. Raises `AskedAgainWithAnotherInput` when the input of the ask is
+        not the input of the job that waits. Raises `ValueError` on an empty key."""
         ...
 
     async def read(self, id: str) -> Job | None:

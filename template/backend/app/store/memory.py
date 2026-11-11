@@ -29,8 +29,10 @@ from app.store.jobs import (
     Kinds,
     asker,
     attempted,
+    digest_of,
     encoded,
     handler_of,
+    refuse_another_input,
 )
 from app.store.migrate import known_version
 
@@ -143,8 +145,8 @@ class MemoryJobs:
         self._database: MemoryDatabase = database
         self._tenant_id: str = tenant_id
 
-    async def ask(self, kind: str, input: JsonObject) -> Job:
-        return self._database.asked(self._tenant_id, kind, input)
+    async def ask(self, kind: str, input: JsonObject, *, once_per: str | None = None) -> Job:
+        return self._database.asked(self._tenant_id, kind, input, once_per=once_per)
 
     async def read(self, id: str) -> Job | None:
         return self._database.job(self._tenant_id, id)
@@ -184,6 +186,7 @@ class MemoryDatabase:
         self._jobs: dict[str, dict[str, Job]] = {}
         self._asked: list[int] = [0]
         self._running: set[asyncio.Task[None]] = set()
+        self._waiting: dict[tuple[str, str, bytes], tuple[str, str]] = {}
         self._kinds: Kinds = kinds(self)
 
     def store(self, tenant_id: str) -> TaskStore:
@@ -198,20 +201,36 @@ class MemoryDatabase:
         _refuse_unset(tenant_id)
         return MemoryJobs(self, tenant_id)
 
-    def asked(self, tenant_id: str, kind: str, input: JsonObject) -> Job:
+    def asked(
+        self, tenant_id: str, kind: str, input: JsonObject, *, once_per: str | None = None
+    ) -> Job:
         """Write a job of `kind` in `tenant_id`, and start it in this process, outside every
-        request, as the actor that asked. Returns the job, `pending`."""
+        request, as the actor that asked. Returns the job, `pending`. With `once_per`, a job of
+        `kind` with that key that waits for its first claim takes the ask, as `Jobs.ask` says.
+        Here a job waits for its first claim until it starts."""
         handler = handler_of(self._kinds, kind)
         actor = asker()
-        _ = encoded(input)
+        stored = encoded(input)
+        once = None if once_per is None else (tenant_id, kind, digest_of(once_per))
+        if once is not None and once in self._waiting:
+            id, waiting = self._waiting[once]
+            refuse_another_input(kind, waiting, stored)
+            return self._jobs[tenant_id][id].model_copy(deep=True)
         self._asked[0] += 1
         job = Job(id=str(self._asked[0]), kind=kind, state="pending", outcome=None, failure=None)
         self._jobs.setdefault(tenant_id, {})[job.id] = job
-        run = self._run(tenant_id, job, handler, Asked(input=deepcopy(input), actor=actor))
+        if once is not None:
+            self._waiting[once] = (job.id, stored)
+        run = self._run(tenant_id, job, handler, Asked(input=deepcopy(input), actor=actor), once)
         task = asyncio.get_running_loop().create_task(run, name=f"job {kind}", context=Context())
         self._running.add(task)
         task.add_done_callback(self._running.discard)
+        task.add_done_callback(lambda _: self._no_longer_waiting(once, job.id))
         return job.model_copy(deep=True)
+
+    def _no_longer_waiting(self, once: tuple[str, str, bytes] | None, id: str) -> None:
+        if once is not None and once in self._waiting and self._waiting[once][0] == id:
+            del self._waiting[once]
 
     def job(self, tenant_id: str, id: str) -> Job | None:
         """The job `id` of `tenant_id`, or `None`."""
@@ -224,7 +243,15 @@ class MemoryDatabase:
         while self._running:
             await asyncio.gather(*self._running)
 
-    async def _run(self, tenant_id: str, job: Job, handler: Handler, asked: Asked) -> None:
+    async def _run(
+        self,
+        tenant_id: str,
+        job: Job,
+        handler: Handler,
+        asked: Asked,
+        once: tuple[str, str, bytes] | None,
+    ) -> None:
+        self._no_longer_waiting(once, job.id)
         with acting_as(asked.actor):
             attempt, result = await self._attempts(tenant_id, job, handler, asked)
         if isinstance(result, Failed):

@@ -34,6 +34,7 @@ and the bullet on `identity_stub` below says why.
 | `app/request_line.py`: its fields on `request completed`, beyond the tenant and the actor | `app/log.py`: `name_on_request_line`, `request_completed` |
 | `tests/tiers.py`: its tiers | `tests/tier.py`: what a tier is |
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |
+| `tests/integration/filled.py`: how it fills a tenant past one page, and the path of each GET route | `tests/integration/test_routes_read_pages.py` |
 | `app/log_lines.py`: its own log lines | `app/log.py`: the format, the request line, the template's lines |
 | `app/jobs.py`: its kinds of job, and the handler of each | `app/store/jobs.py`, `app/store/pg_jobs.py`, `app/worker.py` |
 | `frontend/e2e/signed-in.ts`: how its live specs sign in | the live specs that use its `test` |
@@ -91,7 +92,8 @@ and the bullet on `identity_stub` below says why.
 - **Exclude each list module on update, as `example_resource` excludes the example.** Then a
   project that has no list module never receives one. The template's code that imports it fails.
   This cost is taken for the list modules in a test folder: each exists in every project
-  generated from 0.51.0 on, and a moved test cannot keep one at the template's path.
+  generated from 0.51.0 on. The exception is `tests/integration/filled.py`. A project generated
+  before 0.75.0 copies it by hand. A moved test cannot keep one at the template's path.
 - **`_skip_if_exists` for any file a project may edit.** It re-adds a file the project deleted. It
   is safe only for a module the template's own code imports.
 

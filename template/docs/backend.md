@@ -123,7 +123,10 @@ backend/
   the job's tenant and the job's input, and returns the outcome. Build the handler in `kinds`, and
   take each store there, for the job's tenant. A route asks for the job with
   `Database.jobs(tenant_id).ask(kind, input)`, through `JobsDep`, and answers `202` with the
-  job. The browser reads `GET /jobs/{id}` again until the job is `done` or `dead`. On Postgres the
+  job. Ask with `once_per=key` for work that many writes ask for, such as a value derived from
+  rows. A job of that key that waits for its first claim takes each later ask. An ask after the
+  claim writes a new job. The browser reads `GET /jobs/{id}` again until the job is `done` or
+  `dead`. On Postgres the
   worker process, `python -m app.worker`, runs it as the actor that asked. A job runs at least
   once, so a handler does on a second run what it did on the first. A handler that raises is
   tried again, and after `MAX_ATTEMPTS` attempts the job is `dead`. An input and an outcome are
@@ -144,7 +147,8 @@ backend/
   `shared: SharedWork[K, T] = SharedWork(name)` for each kind of work, and
   `await shared.joined(key, start)`. The first call for `key` starts `start()`, and each call
   that arrives before the run ends awaits the same run. A cancelled caller stops awaiting, and
-  the run goes on for the others. Each run is in a request, whoever starts it, so each `waiting`
+  the run goes on for the others. When the last caller leaves, through a cancel or a timeout,
+  the run is cancelled. Each run is in a request, whoever starts it, so each `waiting`
   in it has a bound under the budget. A wait that may last longer is a job.
 - **The key names everything the result of shared work depends on.** Each caller gets the result of
   the work that the first caller started, in the context of the first caller: its actor, its
@@ -217,8 +221,10 @@ backend/
   its id, never by `seq`. The audit events, which no route serves, page by `seq`. A task cursor
   that names no task of the tenant answers `None`, and the route answers `404`. An audit cursor
   that names no event raises `NoSuchAuditEvent`. `tests/store_contract.py` holds both substrates
-  to it, and `tests/integration/test_pages_on_postgres.py` holds Postgres to the `LIMIT`. A test
-  that needs the whole list reads it with `tests/pages.py`.
+  to it, and `tests/integration/test_pages_on_postgres.py` holds Postgres to the `LIMIT`.
+  `tests/integration/test_routes_read_pages.py` holds each GET route to a page for each read. Give
+  each new tenant table rows, and each new GET route a path, in `tests/integration/filled.py`. A
+  test that needs the whole list reads it with `tests/pages.py`.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
   the row makes Postgres evaluate it for every row, and the index cannot help.

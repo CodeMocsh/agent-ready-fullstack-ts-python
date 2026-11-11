@@ -328,6 +328,37 @@ async def test_a_job_that_failed_is_tried_again_once_its_delay_has_passed(
     assert delayed.retry_in(1) <= waited < WITHIN
 
 
+async def test_a_job_that_is_ready_again_after_its_claim_takes_no_ask_once_per_its_key(
+    opened: Callable[[Handler], PostgresDatabase],
+) -> None:
+    database = opened(ends_at_once)
+    jobs = database.jobs(SENTINEL_TENANT)
+    claims = JobClaims(database, LONG)
+    first = await jobs.ask(A_KIND, {"key": "again"}, once_per="again")
+    claim = await claims.claim(database.kinds)
+    assert claim is not None
+    assert claim.id == first.id
+
+    await claims.again(claim)
+    later = await jobs.ask(A_KIND, {"key": "again"}, once_per="again")
+    joined = await jobs.ask(A_KIND, {"key": "again"}, once_per="again")
+
+    assert later.id != first.id
+    assert joined.id == later.id
+
+
+async def test_asks_once_per_a_key_at_the_same_time_are_one_job(
+    opened: Callable[[Handler], PostgresDatabase],
+) -> None:
+    jobs = opened(ends_at_once).jobs(SENTINEL_TENANT)
+
+    asked = await asyncio.gather(
+        *(jobs.ask(A_KIND, {"key": "at once"}, once_per="at once") for _ in range(8))
+    )
+
+    assert len({job.id for job in asked}) == 1
+
+
 async def test_an_outcome_that_cannot_be_stored_fails_its_attempt_and_not_the_worker(
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:

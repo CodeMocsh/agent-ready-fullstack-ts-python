@@ -9,6 +9,7 @@ A job runs at least once, so a handler is idempotent. A handler that raises is t
 `MAX_ATTEMPTS` attempts, and the job is then dead.
 """
 
+import hashlib
 import json
 import re
 from collections.abc import Awaitable, Callable, Generator, Mapping
@@ -51,6 +52,11 @@ class AskedByNobody(RuntimeError):
 class UnstorableJson(ValueError):
     """An input or an outcome holds a value that a `jsonb` column cannot hold: a number that is
     not finite, the character U+0000, or a surrogate code point, U+D800 to U+DFFF."""
+
+
+class AskedAgainWithAnotherInput(ValueError):
+    """A job was asked for `once_per` a key while a job of the same kind and key waited for its
+    first claim, and the input of the ask is not the input of that job."""
 
 
 class LeaseLost(RuntimeError):
@@ -159,6 +165,24 @@ def asker() -> Actor:
             "app.audit_events.acting_as(actor)."
         )
     return actor
+
+
+def digest_of(key: str) -> bytes:
+    """The SHA-256 digest of `key`, which `job_claims` holds in place of the key. Raises
+    `ValueError` on an empty key."""
+    if key == "":
+        raise ValueError("a job asked for once per a key names no key")
+    return hashlib.sha256(key.encode()).digest()
+
+
+def refuse_another_input(kind: str, waiting: str, asked: str) -> None:
+    """Raise `AskedAgainWithAnotherInput` when `asked`, the encoded input of an ask, is not
+    `waiting`, the encoded input of the job of `kind` that the ask joins."""
+    if json.loads(waiting) != json.loads(asked):
+        raise AskedAgainWithAnotherInput(
+            f"a job of {kind!r} with this key waits for its first claim with another input. "
+            f"Put everything the input holds in the key."
+        )
 
 
 def encoded(value: JsonObject) -> str:

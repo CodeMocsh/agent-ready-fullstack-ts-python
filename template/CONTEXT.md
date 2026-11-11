@@ -228,7 +228,8 @@ _Avoid_: background work, async work.
 **Job**:
 One unit of durable work: a kind, an input, the actor that asked, and an outcome or a failure.
 Its state is `pending`, `done` or `dead`. `app/jobs.py` maps each kind to its handler, which runs
-at least once.
+at least once. A job waits for its first claim until a worker claims it. On the memory substrate,
+it waits until it starts. While it waits, an ask of its kind `once_per` its key returns it.
 _Avoid_: task (the example resource is a task), queue item, message.
 
 **Lease**:
@@ -263,8 +264,9 @@ _Avoid_: background task (FastAPI's `BackgroundTasks` run inside the request).
 
 **Shared work**:
 Work that several callers await at once, which `app.waits.SharedWork` runs one run at a time for
-each key. A run is one execution of it. A cancelled caller does not stop a run for the others. A
-run is in a request, whoever starts it. `cancel_beside` cancels a run at shutdown.
+each key. A run is one execution of it. A cancelled caller does not stop a run for the others. The
+last caller to leave cancels the run. A run is in a request, whoever starts it. `cancel_beside`
+cancels a run at shutdown.
 _Avoid_: single-flight, dedupe.
 
 **Startup count**:

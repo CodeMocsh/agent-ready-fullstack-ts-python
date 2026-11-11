@@ -437,9 +437,9 @@ and that ends within the budget, starts with `app.waits.beside(work, name=..., w
   task that raises, or that outlasts `within`, writes the ERROR line
   `work beside the requests failed`, with its traceback.
 - **Shared work ends with its process too.** At shutdown the lifespan cancels each run still in
-  flight, and each caller that awaits it is cancelled. The WARNING line `shared work cancelled`
-  names the run. A run that raises writes the ERROR line `shared work failed`, with its
-  traceback.
+  flight, and each caller that awaits it is cancelled. A run whose last caller left is cancelled
+  too. The WARNING line `shared work cancelled` names the run. A run that raises writes the ERROR
+  line `shared work failed`, with its traceback.
 
 ## Logs
 
