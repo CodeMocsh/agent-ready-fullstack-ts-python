@@ -285,6 +285,10 @@ for line in found:
 sys.exit(1 if found else 0)
 PY
 
+echo "==> assert _skip_if_exists names no file in a test folder"
+IN_TEST_FOLDER="$(sed -n '/^_skip_if_exists:$/,/^$/p' "$REPO/copier.yml" | sed -n -E 's#^  - (.*(tests|e2e)/.*)$#\1#p')"
+[ -z "$IN_TEST_FOLDER" ] || fail "_skip_if_exists names a file in a test folder: $(echo $IN_TEST_FOLDER). A project may move its tests, and every update then writes the file again at the template's path. Exclude it on update instead (docs/adr/template/0015)."
+
 echo "==> assert a backend module in _skip_if_exists imports the example only when the example's _exclude names it"
 KEPT_STATUS=0
 python3 - "$REPO/copier.yml" "$OUT/backend" <<'PY' || KEPT_STATUS=$?
@@ -916,6 +920,8 @@ need backend/app/deployment.py
 need backend/app/refusal.py
 need backend/tests/tier.py
 need backend/tests/models/layers.py
+need frontend/tests/read-budgets.ts
+need frontend/tests/signed-in.ts
 need backend/app/lifespan.py
 need_grep 'refuse_development_settings' backend/app/lifespan.py "Unset APP_ENV is production, and production refuses the in-memory substrate (docs/adr/template/0010)."
 need_grep 'APP_ENV=development' devtools/dev.sh
