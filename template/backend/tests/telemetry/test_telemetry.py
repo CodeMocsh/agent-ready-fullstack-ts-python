@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from opentelemetry import trace
 from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
+from opentelemetry.propagate import get_global_textmap
 from opentelemetry.sdk.metrics.export import HistogramDataPoint, InMemoryMetricReader
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -364,11 +365,14 @@ def test_a_loop_delay_is_recorded_in_seconds_in_its_own_buckets(untrusting: Inst
 
 def test_a_process_that_serves_no_request_measures_its_loop_and_instruments_nothing_else() -> None:
     metrics = InMemoryMetricReader()
-    measured = telemetry.meters(telemetry_settings(), metrics)
+    propagator = get_global_textmap()
+    meters = telemetry.meters(telemetry_settings(), metrics)
+    try:
+        meters.loop_delay()(0.3)
+        collected = metrics.get_metrics_data()
+    finally:
+        meters.shutdown()
 
-    measured.loop_delay()(0.3)
-
-    collected = metrics.get_metrics_data()
     assert collected is not None
     [resource] = collected.resource_metrics
     [point] = [
@@ -382,7 +386,7 @@ def test_a_process_that_serves_no_request_measures_its_loop_and_instruments_noth
     assert point.sum == 0.3
     assert resource.resource.attributes["service.name"] == "tasks-test"
     assert not AsyncPGInstrumentor().is_instrumented_by_opentelemetry
-    measured.shutdown()
+    assert get_global_textmap() is propagator
 
 
 class CountsItsConnections(MemoryDatabase):

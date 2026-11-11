@@ -196,19 +196,37 @@ def by_state(collected: MetricsData | None, *, pool: str) -> dict[tuple[str, str
 
 async def test_a_worker_reports_its_loop_and_its_pool(provisioned: Provisioned) -> None:
     metrics = InMemoryMetricReader()
-    measured = telemetry.meters(telemetry_settings(), metrics)
+    meters = telemetry.meters(telemetry_settings(), metrics)
     database = await a_postgres_database(provisioned)
 
     async with asyncio.TaskGroup() as group:
-        _ = group.create_task(worker.serve(database, measured))
-        await elapse(3 * TICK_SECONDS)
-        collected = metrics.get_metrics_data()
+        _ = group.create_task(worker.serve(database, meters))
+        reported = await _until_reported(metrics, telemetry.LOOP_DELAY)
         signal.raise_signal(signal.SIGTERM)
 
-    assert collected is not None
-    assert {telemetry.LOOP_DELAY, "db.client.connection.count"} <= {
-        metric.name
-        for resource in collected.resource_metrics
-        for scope in resource.scope_metrics
-        for metric in scope.metrics
-    }
+    assert {
+        telemetry.LOOP_DELAY,
+        telemetry.CONNECTION_WAIT,
+        "db.client.connection.count",
+    } <= reported
+
+
+async def _until_reported(metrics: InMemoryMetricReader, name: str) -> set[str]:
+    """The names of the metrics `metrics` holds, once `name` is one of them. The worker handles
+    SIGTERM before its first tick records the delay. Raises `TimeoutError` after 10 s."""
+    async with asyncio.timeout(10):
+        while True:
+            collected = metrics.get_metrics_data()
+            names = (
+                set()
+                if collected is None
+                else {
+                    metric.name
+                    for resource in collected.resource_metrics
+                    for scope in resource.scope_metrics
+                    for metric in scope.metrics
+                }
+            )
+            if name in names:
+                return names
+            await elapse(TICK_SECONDS)

@@ -7,7 +7,7 @@ request starts a trace. A query exports a span only inside a traced request. A p
 reports its connections as `db.client.connection.count`, by state, and as
 `db.client.connection.max`, and each wait for one to `CONNECTION_WAIT`. Each tick of
 `app.loop_watch` adds how late it ran to `LOOP_DELAY`. A process that serves no request, such as
-`app.worker`, gets `meters`: its pool, its waits and its loop's delay, and no trace. This module
+`app.worker`, gets `meters`: the same metrics of its pool and its loop, and no trace. This module
 instruments and `app.log` reads the current span; ruff refuses `opentelemetry` anywhere else.
 
 **What leaves the process is declared here.** A span keeps only the attributes in
@@ -113,8 +113,8 @@ _CALLER: Final = create_key("untrusted-caller")
 @dataclass(frozen=True)
 class Meters:
     """The metrics of one process: its pool, its waits for a connection and how late its event
-    loop ran. `meters` builds them for a process that serves no request, and `Instruments` adds
-    a request's traces and metrics to them."""
+    loop ran. `meters` builds them for a process that serves no request. `Instruments` adds the
+    traces and metrics of a request."""
 
     meter_provider: MeterProvider
 
@@ -168,8 +168,7 @@ class Meters:
 
     def shutdown(self) -> None:
         """Flush and stop the meter provider. Waits up to the export timeout when the Collector
-        does not answer. Call it before the database closes, because the last collection counts
-        its connections."""
+        does not answer. Call it before the database that `observe` reports closes."""
         self.meter_provider.shutdown()
 
 
@@ -197,11 +196,13 @@ class Instruments(Meters):
 def otlp(settings: TelemetrySettings) -> tuple[SpanExporter, MetricReader]:
     """Exporters that post to the Collector over OTLP/HTTP. Headers, timeouts and certificates
     are the SDK's own `OTEL_EXPORTER_OTLP_*` variables, which it reads itself."""
-    return (
-        OTLPSpanExporter(endpoint=f"{settings.endpoint}/v1/traces"),
-        PeriodicExportingMetricReader(
-            OTLPMetricExporter(endpoint=f"{settings.endpoint}/v1/metrics")
-        ),
+    return OTLPSpanExporter(endpoint=f"{settings.endpoint}/v1/traces"), otlp_metrics(settings)
+
+
+def otlp_metrics(settings: TelemetrySettings) -> MetricReader:
+    """The metric exporter of `otlp`, alone, for a process that exports no trace."""
+    return PeriodicExportingMetricReader(
+        OTLPMetricExporter(endpoint=f"{settings.endpoint}/v1/metrics")
     )
 
 
@@ -249,7 +250,7 @@ def instrument(
 
 def meters(settings: TelemetrySettings, metrics: MetricReader) -> Meters:
     """The metrics of a process that serves no request, exported through `metrics`. It starts no
-    trace, because only a request starts one, and it leaves asyncpg and the propagator alone."""
+    trace. It leaves the asyncpg instrumentation and the propagator as they are."""
     return Meters(_meter_provider(Resource.create({"service.name": settings.service}), metrics))
 
 

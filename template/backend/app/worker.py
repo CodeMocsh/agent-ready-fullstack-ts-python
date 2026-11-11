@@ -194,13 +194,13 @@ async def _main() -> None:
             "DATABASE_URL is unset. The memory substrate runs its own jobs in the web process, "
             "and no other process can see them. Set DATABASE_URL, or run no worker."
         )
-    await serve(database, _measured(build_telemetry()))
+    await serve(database, _meters(build_telemetry()))
 
 
 async def serve(database: PostgresDatabase, meters: "Meters | None") -> None:
     """Check the schema, then claim and run jobs until SIGTERM or SIGINT. With `meters`, report
-    the pool, each wait for a connection and how late the event loop ran. Then stop `meters`, and
-    close `database` after them, because their last collection counts its connections."""
+    the pool, each wait for a connection and how late the event loop ran. Stop `meters`, then
+    close `database`."""
     try:
         if meters is not None:
             meters.observe(database)
@@ -221,15 +221,14 @@ async def serve(database: PostgresDatabase, meters: "Meters | None") -> None:
             await database.close()
 
 
-def _measured(settings: TelemetrySettings | None) -> "Meters | None":
-    """The meters `settings` names, or `None`. Imports `app.telemetry` only with settings, so a
-    worker with no endpoint loads no exporter."""
+def _meters(settings: TelemetrySettings | None) -> "Meters | None":
+    """The meters that `settings` names, or `None` without settings. Imports `app.telemetry`
+    only with settings."""
     if settings is None:
         return None
     from app import telemetry
 
-    _, metrics = telemetry.otlp(settings)
-    return telemetry.meters(settings, metrics)
+    return telemetry.meters(settings, telemetry.otlp_metrics(settings))
 
 
 async def _until_stopped(claims: JobClaims, meters: "Meters | None") -> None:
