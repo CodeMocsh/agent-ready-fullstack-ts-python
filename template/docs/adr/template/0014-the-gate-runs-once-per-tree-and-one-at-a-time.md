@@ -37,7 +37,7 @@ Worktrees of one project queue. Different projects have different locks.
 `test_gate_wait.py` proves that a waiter reuses a completed pass and fingerprints after waiting.
 It also proves that an already-passed tree does not wait behind another checkout.
 
-The runner stores a matching tree in `gate-commit-passed` only after the checks succeed.
+The runner stores a matching tree in `gate-commit-passed` only after the checks succeed and the run fits `BUDGET`.
 The tree includes tracked edits and untracked files. It excludes ignored files.
 The runner records no pass if the tree changes during the run.
 The record certifies only the commit gate. The full suite does not use it.
@@ -45,7 +45,8 @@ The record certifies only the commit gate. The full suite does not use it.
 The runner measures CPU against `BUDGET`. Lock wait time consumes none of that budget.
 The 2026-11-07 reference run on macOS used 46.6 CPU-seconds and 61.8 elapsed seconds.
 The 60 CPU-second budget leaves margin above that measured commit gate.
-An over-budget run fails after recording its successful checks. A retry can reuse that record.
+An over-budget run fails and records no pass. A retry runs the gate again and fails again.
+The run stops the commit until a change removes the cost, or raises `BUDGET` and says what costs more.
 A partial installation runs the available checks, names the omissions and records no pass.
 CI calls the full target directly, so a missing half fails.
 
@@ -67,6 +68,7 @@ CI calls the full target directly, so a missing half fails.
 - Run only the hook. A fresh clone can have no hooks installed. CI checks that clone too.
 - Skip the gate when nothing is staged. The working directory can still contain unchecked changes.
 - Remove the budget. Small cost increases accumulate without a failing check.
+- Let a retry reuse an over-budget pass. A retry costs less than a fix, so the budget stops no increase.
 
 ## Consequences
 

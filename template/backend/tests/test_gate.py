@@ -509,18 +509,17 @@ def test_a_red_gate_is_remembered_as_nothing(tmp_path: Path):
     assert times_the_gate_ran(clone) == 2
 
 
-def test_a_green_run_over_budget_fails_and_is_still_remembered_as_passed(tmp_path: Path):
-    """Over budget is a regression to find, not a reason to run the same tree again: the retried
-    commit of that tree skips the gate."""
+def test_a_green_run_over_budget_fails_and_is_remembered_as_nothing(tmp_path: Path):
+    """Over budget stops the commit until a change removes the cost or raises the budget: the
+    retried commit of that tree runs the gate again, and fails again."""
     clone = a_clone_with_a_gate(tmp_path, "echo ran >> ran.log", budget=-1)
 
     first = run_the_gate(clone)
     second = run_the_gate(clone)
 
-    assert first.returncode != 0
-    assert "Over budget" in first.stderr
-    assert second.returncode == 0, second.stderr
-    assert times_the_gate_ran(clone) == 1
+    assert first.returncode != 0 and second.returncode != 0
+    assert "Over budget" in first.stderr and "Over budget" in second.stderr
+    assert times_the_gate_ran(clone) == 2
 
 
 def test_a_gate_that_waited_its_turn_is_not_charged_for_the_wait(tmp_path: Path):
