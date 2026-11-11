@@ -731,10 +731,12 @@
         "properties": {
           "id": {
             "type": "string",
+            "maxLength": 36,
             "title": "Id"
           },
           "kind": {
             "type": "string",
+            "maxLength": 1024,
             "title": "Kind"
           },
           "state": {
@@ -758,12 +760,14 @@
                 "type": "null"
               }
             ],
-            "title": "Outcome"
+            "title": "Outcome",
+            "x-max-bytes": 262144
           },
           "failure": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 1024
               },
               {
                 "type": "null"
@@ -843,10 +847,12 @@
         "properties": {
           "id": {
             "type": "string",
+            "maxLength": 36,
             "title": "Id"
           },
           "title": {
             "type": "string",
+            "maxLength": 2000,
             "title": "Title"
           },
           "done": {
@@ -860,7 +866,8 @@
           "title",
           "done"
         ],
-        "title": "Task"
+        "title": "Task",
+        "description": "A title the API took holds `TITLE_MAX` characters. A title that another writer stored holds\nat most what `tasks.title` holds, four bytes for each of those characters, so at most that\nmany characters."
       },
       "TaskPage": {
         "properties": {
@@ -875,7 +882,8 @@
           "next": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 36
               },
               {
                 "type": "null"

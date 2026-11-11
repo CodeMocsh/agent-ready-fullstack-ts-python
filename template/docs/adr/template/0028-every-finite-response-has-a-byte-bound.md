@@ -74,6 +74,17 @@ Observed bytes mean bytes seen before stopping, not the producer's hypothetical 
 The guard does not log the body. The existing 5xx signal counts the refusal.
 A route must still supply a useful bounded representation after this guard exposes its failure.
 
+Each successful answer also has a largest size before the app runs.
+`tests/models/test_response_bounds.py` reads the schema of each route's `2xx` answer in `openapi.json`.
+It works out the most bytes that answer can take, and fails when that is over `DEFAULT_BYTES`.
+A list needs `maxItems`, a string needs `maxLength`, a format or an `enum`, and a map needs `maxProperties`.
+A value that is any JSON gives its bound under `MAX_BYTES`, and the code that writes it holds it to that bound.
+A route whose schema cannot bound it, such as `GET /reads`, is in `BOUNDED_ELSEWHERE` with the code that bounds it.
+The test fails on a route in that list whose schema bounds it.
+The message names the route and the path in the answer that has no bound.
+So a route that answers a whole document fails in the gate, not in production.
+The runtime guard stays, for an answer that a schema does not describe.
+
 `tests/responses/` checks finite limits, exceptions, mounted applications, assets, headers and stream declarations.
 It checks complete pages separately from deliberate overflow.
 The telemetry test checks the final span and metric status.
@@ -88,6 +99,8 @@ The normal gate runs these tests in a generated project.
 - An unlimited finite exception removes the guarantee. A larger finite limit must fit the deployment ceiling.
 - Status `413` describes excessive request content. Oversized server output is a server failure.
 - Logging and continuing leaves the edge in charge of the refusal.
+- The OWASP ruleset of Spectral needs a bound on each field, and adds no sizes. A route whose fields each have a bound can still answer more than its limit. The rules add a large dependency to every project for what one walk of the schema also does.
+- Only the runtime guard. It finds an answer too large after the route has shipped, and only for the data that production holds.
 
 ## Consequences
 

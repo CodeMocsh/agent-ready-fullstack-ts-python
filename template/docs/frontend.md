@@ -73,7 +73,8 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   mutation of the key, read again each page the screen holds, one after another. The read budget
   counts only the first draw, so it does not count these. A list read never asks for every row.
   `src/mocks/store.ts` pages as the backend does, and its `PAGE_MAX` is the `maxItems` of
-  `TaskPage.tasks` in `openapi.json`. [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
+  `TaskPage.tasks` in `openapi.json`. A mock of a list reads `pageRows()`, because each first draw
+  holds one row a page: a screen that reads every page by itself then fails its read budget. [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 - **A burst costs more than its requests.** Each query that a draw or a focus starts reaches the
   backend at the same moment. An instance serves the ones it takes in turn.
   [deployment.md](deployment.md#a-burst-of-requests) says what that costs on a host that adds

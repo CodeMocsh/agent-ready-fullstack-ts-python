@@ -1,6 +1,7 @@
 import { acceptsClientEvents } from "@/mocks/client-events";
 import { http } from "@/mocks/http";
 import { jobHandlers, jobStore } from "@/mocks/jobs";
+import { PAGE_MAX, pageAtMost } from "@/mocks/store";
 import { resetTasks, taskHandlers } from "@/mocks/tasks";
 
 export const handlers = [
@@ -15,6 +16,7 @@ export const handlers = [
 ];
 
 export function resetMockState(): void {
+  pageAtMost(PAGE_MAX);
   resetTasks();
   jobStore.reset();
 }

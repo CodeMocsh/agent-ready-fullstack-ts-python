@@ -218,7 +218,12 @@ export interface components {
             /** Parts */
             parts: (components["schemas"]["AnsweredPart"] | components["schemas"]["LeftPart"])[];
         };
-        /** Task */
+        /**
+         * Task
+         * @description A title the API took holds `TITLE_MAX` characters. A title that another writer stored holds
+         *     at most what `tasks.title` holds, four bytes for each of those characters, so at most that
+         *     many characters.
+         */
         Task: {
             /** Id */
             id: string;
