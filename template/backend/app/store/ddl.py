@@ -27,6 +27,7 @@ Statements are written **unqualified**; `conn.search_path_sql` selects the schem
 that does not exist yet.
 """
 
+from app.models import JSON_BYTES, PAGE_BYTES
 from app.store.conn import quote_ident, resolve_schema
 from app.store.roles import APPEND_ONLY_TABLE, app_role
 
@@ -56,6 +57,10 @@ AUDIT_FUNCTION_ENTRY_KEY = "0033_audit_row_change"
 REPAIR_BAND = 200
 """Where an `ALTER TABLE … ADD COLUMN` goes. Above the table it repairs, so the table exists
 by the time it runs, and grouped so a reader sees every repair in one place."""
+
+BOUND_BAND = 300
+"""Where the bound on each column goes, keyed by the bound's name. Above the repairs, so every
+column a repair adds exists by the time its bound runs."""
 
 APPLIED_ONCE_DDL = """CREATE TABLE IF NOT EXISTS applied_once (
   key         text PRIMARY KEY,
@@ -447,3 +452,122 @@ SCHEMA.extend(
     ]
 )
 """The repairs, keyed above the policies so the list stays in the order it is applied."""
+
+NAME_BYTES = 1024
+"""The bound on a column that holds a name or an id: a tenant, an actor, a kind, a route."""
+
+COLUMN_BYTES: dict[str, dict[str, int]] = {
+    "applied_once": {"key": NAME_BYTES},
+    "tasks": {"tenant_id": NAME_BYTES, "title": 2000},
+    "audit_events": {
+        **dict.fromkeys(
+            (
+                "tenant_id",
+                "actor_issuer",
+                "actor_subject",
+                "actor_name",
+                "on_behalf_of_issuer",
+                "on_behalf_of_subject",
+                "on_behalf_of_name",
+                "action",
+                "outcome",
+                "method",
+                "route",
+                "resource_type",
+                "request_id",
+                "trace_id",
+            ),
+            NAME_BYTES,
+        ),
+        "resource_ids": PAGE_BYTES // 2,
+        "fields": PAGE_BYTES // 16,
+    },
+    "job_claims": dict.fromkeys(("tenant_id", "kind", "state"), NAME_BYTES),
+    "jobs": {
+        **dict.fromkeys(
+            (
+                "tenant_id",
+                "kind",
+                "actor_issuer",
+                "actor_subject",
+                "actor_name",
+                "on_behalf_of_issuer",
+                "on_behalf_of_subject",
+                "on_behalf_of_name",
+                "state",
+                "failure",
+            ),
+            NAME_BYTES,
+        ),
+        "input": JSON_BYTES,
+        "outcome": JSON_BYTES,
+    },
+}
+"""The most bytes each column of variable width holds, by table. A title of the 500 characters
+`CreateTaskBody` allows fits at four bytes each. One statement names every row it writes in one
+audit event, so `resource_ids` bounds how many rows one audited statement may write."""
+
+
+BOUND_SUFFIX = "_bytes"
+"""What the name of every constraint on the bytes of a column ends in."""
+
+
+def bound_name(table: str, column: str) -> str:
+    """The name of the constraint that bounds the bytes of `column` in `table`."""
+    return f"{table}_{column}{BOUND_SUFFIX}"
+
+
+BOUNDS_VALIDATED_ENTRY_KEY = f"{BOUND_BAND + 99:04d}_bounds_validated"
+"""The entry that validates every bound added since it last ran. It runs after them all."""
+
+
+def bound_sql(table: str, column: str, most: int) -> str:
+    """A `CHECK` that `column` of `table` holds at most `most` bytes, created once and `NOT VALID`.
+    A write from then on is held to it at once. `BOUNDS_VALIDATED_ENTRY_KEY` checks the rows
+    already stored."""
+    name = bound_name(table, column)
+    return (
+        "DO $app$\nBEGIN\n"
+        "  IF NOT EXISTS (SELECT 1 FROM pg_constraint\n"
+        f"                 WHERE conrelid = '{table}'::regclass AND conname = '{name}') THEN\n"
+        f"    ALTER TABLE {table} ADD CONSTRAINT {name}\n"
+        f"      CHECK (octet_length({column}::text) <= {most}) NOT VALID;\n"
+        "  END IF;\nEND\n$app$"
+    )
+
+
+BOUNDS_VALIDATED_SQL = (
+    "DO $app$\nDECLARE\n  bound record;\n  over text[] := '{}';\nBEGIN\n"
+    "  FOR bound IN\n"
+    "    SELECT conrelid::regclass AS bounded, conname, pg_get_constraintdef(oid) AS rule\n"
+    "      FROM pg_constraint\n"
+    "     WHERE connamespace = current_schema()::regnamespace AND contype = 'c'\n"
+    f"       AND conname LIKE '%\\{BOUND_SUFFIX}' AND NOT convalidated\n"
+    "     ORDER BY conname\n"
+    "  LOOP\n"
+    "    BEGIN\n"
+    "      EXECUTE format('ALTER TABLE %s VALIDATE CONSTRAINT %I', bound.bounded, bound.conname);\n"
+    "    EXCEPTION WHEN check_violation THEN\n"
+    "      over := over || format('%s %s', bound.conname, bound.rule);\n"
+    "    END;\n"
+    "  END LOOP;\n"
+    "  IF cardinality(over) > 0 THEN\n"
+    "    RAISE EXCEPTION 'stored values are longer than their bound: %',\n"
+    "      array_to_string(over, '; ')\n"
+    "      USING HINT = 'Shorten those values, or move them out of the row, and migrate again.';\n"
+    "  END IF;\nEND\n$app$"
+)
+"""Validates each bound not yet valid, against the rows already stored. A stored value over its
+bound refuses the whole statement and rolls it back, naming every bound such a value breaks.
+`docs/adr/template/0026`."""
+
+
+SCHEMA.extend(
+    sorted(
+        (f"{BOUND_BAND:04d}_{bound_name(table, column)}", bound_sql(table, column, most))
+        for table, columns in COLUMN_BYTES.items()
+        for column, most in columns.items()
+    )
+)
+SCHEMA.append((BOUNDS_VALIDATED_ENTRY_KEY, BOUNDS_VALIDATED_SQL))
+"""Each column's bound, after every table and every repair, then the entry that validates them."""

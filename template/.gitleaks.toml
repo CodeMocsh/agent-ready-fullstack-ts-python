@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "backend/.schema-baseline.json holds a hash of each schema entry, by key, and no secret. A key names a column, and a column named key or token makes the hash look like a credential."
+paths = ['''^backend/\.schema-baseline\.json$''']

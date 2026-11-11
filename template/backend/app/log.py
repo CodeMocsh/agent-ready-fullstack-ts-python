@@ -19,6 +19,7 @@ import logging
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from contextvars import ContextVar
 from typing import Final, TextIO, final, override
 
 import structlog
@@ -46,6 +47,13 @@ ACTOR_SUBJECT: Final = "actor.subject"
 TEMPLATE_FIELDS: Final = (TENANT_ID, ACTOR_ISSUER, ACTOR_SUBJECT)
 """The fields `name_principal` names on `request completed`, before the project's own. They
 never include the actor's name."""
+
+
+PAGES_READ: Final = "pages_read"
+"""The field counting the pages a request read through `app.store.pages.fetch_page`, on every
+`request completed` line. `docs/adr/template/0026`."""
+
+_PAGES_READ: Final[ContextVar[list[int] | None]] = ContextVar("pages_read", default=None)
 
 
 class UndeclaredRequestField(RuntimeError):
@@ -256,11 +264,17 @@ def request_cancelled(method: str, route: str | None, duration_ms: float) -> Non
 
 
 def request_completed(
-    method: str, route: str | None, status: int, duration_ms: float, named: Mapping[str, str]
+    method: str,
+    route: str | None,
+    status: int,
+    duration_ms: float,
+    named: Mapping[str, str],
+    pages_read: int,
 ) -> None:
     """One request, by the route that answered it -- never by its path, which carries values.
     Every field of `request_line_fields` is on it, `None` when the request did not name it: no
-    principal on a public route, or when the identity seam refused the request."""
+    principal on a public route, or when the identity seam refused the request. `pages_read`
+    counts the pages it read."""
     _LOG.info(
         "request completed",
         **{
@@ -268,9 +282,18 @@ def request_completed(
             "http.route": route,
             "http.response.status_code": status,
             "duration_ms": duration_ms,
+            PAGES_READ: pages_read,
         },
         **{field: named.get(field) for field in request_line_fields()},
     )
+
+
+def page_read() -> None:
+    """Count one page read on the `request completed` line of the request this runs in. A job, a
+    loop or a test outside a request has no line, and counts nothing."""
+    read = _PAGES_READ.get()
+    if read is not None:
+        read[0] += 1
 
 
 def client_event(event: ClientEvent) -> None:
@@ -470,15 +493,18 @@ async def _completed(
     status = 500
     named: dict[str, str] = {}
     request.state.request_line = named
+    read = [0]
+    counting = _PAGES_READ.set(read)
     try:
         response = await call_next(request)
         status = response.status_code
         return response
     finally:
+        _PAGES_READ.reset(counting)
         if cancelling():
             request_cancelled(request.method, route, _since(started))
         else:
-            request_completed(request.method, route, status, _since(started), named)
+            request_completed(request.method, route, status, _since(started), named, read[0])
 
 
 def _since(started: float) -> float:

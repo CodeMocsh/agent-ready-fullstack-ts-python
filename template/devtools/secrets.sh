@@ -67,4 +67,4 @@ git archive -o "$scratch/tree.tar" "$tree"
 mkdir "$scratch/tree"
 tar -xf "$scratch/tree.tar" -C "$scratch/tree"
 cd "$scratch/tree"
-"$tool" dir . --no-banner --redact --log-level warn --verbose --exit-code 1
+"$tool" dir . --config .gitleaks.toml --no-banner --redact --log-level warn --verbose --exit-code 1

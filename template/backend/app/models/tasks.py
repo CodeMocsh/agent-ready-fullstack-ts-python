@@ -1,6 +1,11 @@
+from typing import Final
+
 from pydantic import BaseModel, Field
 
 from app.models.shared import PAGE_MAX
+
+TITLE_MAX: Final = 500
+"""The most characters a task's title holds. Four bytes each fit the bound on `tasks.title`."""
 
 
 class Task(BaseModel):
@@ -15,7 +20,7 @@ class TaskPage(BaseModel):
 
 
 class CreateTaskBody(BaseModel):
-    title: str
+    title: str = Field(max_length=TITLE_MAX)
 
 
 class UpdateTaskBody(BaseModel):

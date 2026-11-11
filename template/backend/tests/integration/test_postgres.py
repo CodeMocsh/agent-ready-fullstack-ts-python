@@ -86,7 +86,7 @@ async def test_a_database_missing_a_later_column_is_repaired(
         assert await _column_exists(pool, schema, "note") is False
 
         monkeypatch.setattr(ddl, "SCHEMA", [*ddl.SCHEMA, NOTE_REPAIR])
-        assert await apply_schema(postgres_dsn(), schema) == NOTE_REPAIR[0]
+        await apply_schema(postgres_dsn(), schema)
 
         assert await _column_exists(pool, schema, "note") is True
     finally:

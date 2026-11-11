@@ -542,6 +542,25 @@ What to expect, because it is not all free:
   - Stop `followNavigations` and clear the old query client when a session ends.
   [adr/template/0030](adr/template/0030-server-events-merge-and-share-a-read-budget.md) states the contract.
 
+- **From 0.73.0 every column has a byte bound, and every page has a byte bound.**
+  - `make migrate` adds a `CHECK` on the bytes of each column of the template's tables, then
+    validates it against the rows already stored. A stored value over its bound stops the
+    migration, and the error names each bound such a value breaks. Measure the largest values
+    in a copy of production before you deploy. Shorten each one over its bound, or move it out of
+    the row, and migrate again.
+  - `POST /tasks` refuses a title of more than `TITLE_MAX`, 500 characters, with a `422`. A job
+    input or outcome over `JSON_BYTES`, 256 KiB as JSON, is `UnstorableJson`.
+  - Give each column of variable width in your own tables a bound: add it to `COLUMN_BYTES` in
+    `app/store/ddl.py`. `tests/integration/test_bounds_on_postgres.py` names each column with
+    none. A column whose stored values are over the bound it should have goes in
+    `UNBOUNDED_COLUMNS` in that test, with the reason, until its values move out of the row.
+  - Read each list of yours with `fetch_page` from `app/store/pages.py`.
+    `tests/store/test_pages.py` names each other read of many rows. `TaskStore` and
+    `AuditEvents` already use it.
+  - `request completed` has a new field, `pages_read`. Alert on a route whose count grows.
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) and
+  [adr/template/0031](adr/template/0031-the-database-bounds-the-bytes-of-every-value.md) say why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

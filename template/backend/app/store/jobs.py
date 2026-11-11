@@ -23,7 +23,7 @@ from pydantic import JsonValue
 from app import log
 from app.audit_events import current_actor
 from app.identity.shared import Actor
-from app.models import JsonObject
+from app.models import JSON_BYTES, JsonObject
 from app.store import DatabaseUnavailable
 
 MAX_ATTEMPTS: Final = 5
@@ -50,7 +50,8 @@ class AskedByNobody(RuntimeError):
 
 class UnstorableJson(ValueError):
     """An input or an outcome holds a value that a `jsonb` column cannot hold: a number that is
-    not finite, the character U+0000, or a surrogate code point, U+D800 to U+DFFF."""
+    not finite, the character U+0000, or a surrogate code point, U+D800 to U+DFFF. Or it takes
+    more than `JSON_BYTES` as JSON."""
 
 
 class LeaseLost(RuntimeError):
@@ -163,13 +164,16 @@ def asker() -> Actor:
 
 def encoded(value: JsonObject) -> str:
     """`value` as JSON that a `jsonb` column can hold. Raises `UnstorableJson` on a number that is
-    not finite, on the character U+0000, and on a surrogate code point."""
+    not finite, on the character U+0000, on a surrogate code point, and on a value that takes more
+    than `JSON_BYTES`."""
     try:
         text = json.dumps(value, allow_nan=False)
     except ValueError as error:
         raise UnstorableJson("a value holds a number that is not finite") from error
     if _holds_unstorable_text(value):
         raise UnstorableJson("a value holds the character U+0000 or a surrogate code point")
+    if len(text.encode()) > JSON_BYTES:
+        raise UnstorableJson(f"a value takes more than {JSON_BYTES} bytes as JSON")
     return text
 
 

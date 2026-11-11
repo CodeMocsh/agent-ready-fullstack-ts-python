@@ -211,15 +211,26 @@ backend/
   method. A store you can hold is a store already scoped.
 - Every index on a tenant table leads with `tenant_id`, or the policy's predicate cannot be
   satisfied and Postgres scans.
-- **A store read answers one page.** A list takes `after` and answers at most `PAGE_MAX` rows
-  and `next`. The SQL reads `PAGE_MAX + 1` rows on an index that leads with `tenant_id` and ends
-  with the column the list is ordered by, such as `tasks_seq_idx`. A task cursor names a task by
+- **A store read answers one page.** A list takes `after` and answers at most `PAGE_MAX` rows,
+  at most `PAGE_BYTES` bytes, and `next`. `fetch_page` in `app/store/pages.py` reads it: its SQL
+  reads `PAGE_MAX + 1` rows on an index that leads with `tenant_id` and ends with the column the
+  list is ordered by, such as `tasks_seq_idx`, and stops at `PAGE_BYTES`. Give it a `SELECT` with
+  no `ORDER BY` and no `LIMIT`, and the one column to order by. Nothing else in `app/` reads many
+  rows, and `tests/store/test_pages.py` fails on a read that does. `pages_read` on the request
+  line counts the pages each request read. A task cursor names a task by
   its id, never by `seq`. The audit events, which no route serves, page by `seq`. A task cursor
   that names no task of the tenant answers `None`, and the route answers `404`. An audit cursor
   that names no event raises `NoSuchAuditEvent`. `tests/store_contract.py` holds both substrates
   to it, and `tests/integration/test_pages_on_postgres.py` holds Postgres to the `LIMIT`. A test
   that needs the whole list reads it with `tests/pages.py`.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
+- **Every column of variable width has a byte bound.** `COLUMN_BYTES` in `app/store/ddl.py`
+  declares it, and Postgres refuses a write over it, from any writer. Give a new column its bound
+  in the same change, and bound the request model that writes it more tightly, so the API answers
+  a `422` first. The bounds on one row add up to at most `PAGE_BYTES`. A file, or a copy of a
+  whole document, goes in object storage, and the row holds a reference to it.
+  `tests/integration/test_bounds_on_postgres.py` fails on a column with no valid bound.
+  [adr/template/0031](adr/template/0031-the-database-bounds-the-bytes-of-every-value.md) says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
   the row makes Postgres evaluate it for every row, and the index cannot help.
 - `MemoryDatabase` stays. The gate runs on it and must not need a daemon, and one implementation
