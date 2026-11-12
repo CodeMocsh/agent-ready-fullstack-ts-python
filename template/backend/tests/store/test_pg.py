@@ -3,6 +3,7 @@
 import math
 import socket
 
+import asyncpg
 import pytest
 
 from app.store.budget import Draws
@@ -33,3 +34,33 @@ async def test_an_address_nothing_answers_is_refused_with_a_time_to_try_again() 
 
     assert refused.value.retry_after == math.ceil(TIMEOUTS.acquire)
     assert refused.value.cause == "ConnectionRefusedError"
+
+
+class _EndedBeforeItIsLent:
+    """A pool whose pooled session Postgres ended before the driver read its end."""
+
+    async def acquire(self, timeout: float) -> None:
+        raise asyncpg.InternalClientError(
+            f"cannot switch to state 12; another operation (2) is in progress, within {timeout}"
+        )
+
+
+async def test_a_pooled_session_that_ended_before_it_is_lent_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = PostgresDatabase(
+        dsn="postgresql://app@127.0.0.1:1/app",
+        draws=Draws(instances=1, in_process={}, outside={}),
+        kinds=lambda _: {},
+    )
+
+    async def ended_pool() -> _EndedBeforeItIsLent:
+        return _EndedBeforeItIsLent()
+
+    monkeypatch.setattr(database, "pool", ended_pool)
+
+    with pytest.raises(ConnectionRefused, match="InternalClientError") as refused:
+        async with database.connection():
+            pass
+
+    assert refused.value.cause == "InternalClientError"
