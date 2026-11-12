@@ -69,6 +69,14 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   It also fails on a route that the list names and that reads a page, so an entry leaves the list
   when its route reads a page. It fails on an entry that names no GET route that the test reads,
   and on an empty reason. A named route is still read, and still answers `200`.
+- **A table or a route that the fill does not reach today is named, with its reason, until it
+  does.** `NOT_FILLED_YET` names each tenant table that `filled` leaves at one page or less, and
+  `NOT_READ_YET` each GET route that it answers no path for. The test reads no route that
+  `NOT_READ_YET` names. It fails on a table or a route that it does not reach and that no list
+  names. It fails on a listed table that `filled` fills, on a listed route that `filled` answers a
+  path for, on an entry that is no tenant table or no GET route, and on an empty reason. So a
+  project of real size takes the test with its lists full, and each entry leaves when the fill
+  reaches it.
 - **The mock pages as the backend does.** `src/mocks/store.ts` holds its own `PAGE_MAX`, and
   `devtools/check_template.sh` fails when it differs from `maxItems` in `openapi.json`.
 - **The screen reads one page on its first draw, and the next page on a person's click.** The
@@ -118,6 +126,7 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
   finds these.
 - A new tenant table needs rows in `tests/integration/filled.py`, and a new GET route needs a path
   there, or the test fails.
-- A new entry in `OVER_A_PAGE` passes the test. A review sees it.
+- A new entry in `OVER_A_PAGE`, `NOT_FILLED_YET` or `NOT_READ_YET` passes the test. A review sees
+  it. A route in `NOT_READ_YET` is held to no bound.
 - A read that needs every row is not a list. A count, a sum or a group belongs in SQL. A value
   that only all the rows give is derived once per version of its rows, outside the request.

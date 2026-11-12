@@ -616,6 +616,19 @@ What to expect, because it is not all free:
   route when it reads a page: the test fails on an entry whose route reads a page.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
 
+- **From 0.78.0 each of two checks has a list of what a project has not fixed yet.** Each list
+  only shrinks.
+  - Add `STILL_SAYS_A_CAUGHT_ERROR: Final[Mapping[str, int]] = {}` to `backend/app/failures.py`.
+    `make test` names each module whose refusals say an error that their `except` caught. Fix
+    each, or count it there as `"app/<path>.py": <count>`.
+  - Add `NOT_FILLED_YET: dict[str, str] = {}` and `NOT_READ_YET: dict[str, str] = {}` to
+    `backend/tests/integration/filled.py`. Name each tenant table that `filled` does not fill past
+    a page yet, and each GET route that it answers no path for yet, each with its reason. A
+    project without `filled.py` copies it from the template and lists what it does not reach.
+  [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) and
+  [adr/template/0031](adr/template/0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md)
+  say why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

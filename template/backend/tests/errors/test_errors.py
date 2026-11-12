@@ -5,13 +5,14 @@ Read from the source rather than driven, so a raise on a branch no test reaches 
 """
 
 import ast
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import ClassVar, NamedTuple
 
 from fastapi import HTTPException
 
 from app import errors, refusal
+from app.failures import STILL_SAYS_A_CAUGHT_ERROR
 from app.main import create_app
 from app.refusal import ApiError, responses
 from tests.routes.walk import endpoints_of
@@ -234,20 +235,56 @@ def _says_a_caught_error(tree: ast.AST) -> list[int]:
     )
 
 
+def _said_by_module() -> dict[str, list[int]]:
+    """The lines of each module under `app/` that builds a refusal from an error it caught."""
+    said: dict[str, list[int]] = {}
+    for path in sorted(SOURCE.rglob("*.py")):
+        if "__pycache__" not in path.parts:
+            lines = _says_a_caught_error(ast.parse(path.read_text()))
+            if lines:
+                said[str(path.relative_to(SOURCE.parent))] = lines
+    return said
+
+
+def against_the_count(
+    said: Mapping[str, list[int]], listed: Mapping[str, int]
+) -> tuple[dict[str, list[int]], dict[str, int]]:
+    """Each module that says more caught errors than `listed` counts for it, with its lines, and
+    each module that `listed` counts more for than it says, with what it says."""
+    return (
+        {module: lines for module, lines in said.items() if len(lines) > listed.get(module, 0)},
+        {
+            module: len(said.get(module, []))
+            for module, count in listed.items()
+            if len(said.get(module, [])) < count
+        },
+    )
+
+
 def test_no_refusal_says_the_words_of_an_error_it_caught() -> None:
     """A refusal's `detail` reaches a person, and an error's own words reach only the log.
+    `STILL_SAYS_A_CAUGHT_ERROR` in `app/failures.py` counts each module that does today.
     `docs/adr/template/0031`."""
-    said = [
-        f"{path.relative_to(SOURCE.parent)}:{line}"
-        for path in sorted(SOURCE.rglob("*.py"))
-        if "__pycache__" not in path.parts
-        for line in _says_a_caught_error(ast.parse(path.read_text()))
-    ]
+    more, fewer = against_the_count(_said_by_module(), STILL_SAYS_A_CAUGHT_ERROR)
 
-    assert said == [], (
-        f"{said} build a refusal from an error they caught. Pass no detail, or a sentence of "
+    assert more == {}, (
+        f"{more} build a refusal from an error they caught, at these lines, more often than "
+        f"STILL_SAYS_A_CAUGHT_ERROR in app/failures.py counts. Pass no detail, or a sentence of "
         f"your own, and let the log carry the error."
     )
+    assert fewer == {}, (
+        f"STILL_SAYS_A_CAUGHT_ERROR in app/failures.py counts more for these modules than they "
+        f"say now: {fewer}. Lower each count to what the module says, and remove a module at 0."
+    )
+
+
+def test_a_module_over_its_count_is_named_and_one_under_it_is_named() -> None:
+    said = {"app/a.py": [4, 9], "app/b.py": [7]}
+
+    assert against_the_count(said, {"app/a.py": 2, "app/b.py": 1}) == ({}, {})
+    assert against_the_count(said, {"app/a.py": 1}) == (said, {})
+    assert against_the_count({}, {"app/a.py": 2}) == ({}, {"app/a.py": 0})
+    assert against_the_count(said, {"app/a.py": 3, "app/b.py": 1}) == ({}, {"app/a.py": 2})
 
 
 def test_a_refusal_built_from_a_caught_error_is_found() -> None:
