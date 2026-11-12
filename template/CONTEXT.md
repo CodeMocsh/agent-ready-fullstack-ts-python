@@ -4,6 +4,17 @@ The glossary: what a word means here, and which words to avoid because they mean
 else. The template writes the terms below. Add yours the moment two people use two words for
 one thing, which is earlier than it feels.
 
+The terms above the first `## Context:` section belong to one bounded context, the base context.
+The `##` sections that hold them are topics in the base context.
+
+A project that adds a second domain model adds a `## Context: <name>` section at the end of this
+file. The first line of that section names the paths that hold the domain model's code. Inside
+those paths, a term that the section defines has the meaning that the section gives it. No
+`_Avoid_` line outside the section applies to that term. Every other term keeps its meaning from
+the base context. When two contexts give one word two meanings, each entry names the other
+context. A log line, a commit message or a decision record that concerns both contexts names the
+context of each term that has two meanings.
+
 ## Tenancy
 
 **Tenant**:

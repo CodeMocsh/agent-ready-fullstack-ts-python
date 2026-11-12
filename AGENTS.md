@@ -60,7 +60,9 @@ state a contract -- behaviour, failure, timing, ownership, safe use -- never the
 Write every word a person or an agent reads the way ASD-STE100 says: one idea per sentence,
 active voice, one meaning per term. That covers docs, commit messages, decisions, identifiers,
 test names, log lines and failure messages. `CONTEXT.md` is the word list: one term per concept,
-and that term every time.
+and that term every time. A term has one meaning inside its bounded context. Domain-Driven Design
+defines a bounded context as the boundary of one domain model. Another bounded context can give
+the same word a different meaning.
 
 ## The template is inert
 

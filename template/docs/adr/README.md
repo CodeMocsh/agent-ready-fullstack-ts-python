@@ -37,7 +37,7 @@ Every record has the same parts:
 
 **Write in Simplified Technical English.** Put one idea in each sentence. Keep most sentences to 20
 words or fewer. Use the active voice and the present tense. Use the words in `CONTEXT.md`, and use
-one word for one meaning. Do not use idioms or metaphors.
+one word for one meaning in its bounded context. Do not use idioms or metaphors.
 
 **A record states the decision as it is now.** When the decision changes, change the record. Git
 holds the earlier text. Do not add dated amendments, and do not tell the history of the decision.
