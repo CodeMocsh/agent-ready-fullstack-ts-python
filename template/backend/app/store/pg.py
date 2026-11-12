@@ -218,6 +218,13 @@ def _refused_by_the_server() -> tuple[type[BaseException], ...]:
     )
 
 
+def _not_lent() -> tuple[type[BaseException], ...]:
+    """What `Pool.acquire` raises when it lends no connection: each of `_refused_by_the_server`, and
+    `InternalClientError` from the pool's setup on a pooled session that Postgres ended before the
+    driver read its end. asyncpg closes that session, and the next acquire opens a new one."""
+    return (*_refused_by_the_server(), _driver().InternalClientError)
+
+
 def failed_on_a_connection() -> tuple[type[BaseException], ...]:
     """What a statement raises from the driver or the socket. Each is `ConnectionLost` when the
     connection ended with it."""
@@ -557,7 +564,7 @@ class PostgresDatabase:
                 f"stayed in use, or a new one did not open in time",
                 retry_after=retry_after,
             ) from waited
-        except _refused_by_the_server() as refused:
+        except _not_lent() as refused:
             raise self._refused(refused) from refused
         try:
             self._record_wait(started)

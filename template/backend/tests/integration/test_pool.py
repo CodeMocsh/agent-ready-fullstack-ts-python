@@ -3,6 +3,7 @@ raises, a connection the server refuses or ends is a refusal of one unit of work
 connections can be counted."""
 
 import asyncio
+import contextlib
 import math
 import time
 from collections.abc import AsyncIterator, Callable
@@ -300,6 +301,26 @@ async def test_a_connection_ended_during_a_statement_is_lost_and_gives_its_slot_
                     await ending
 
         assert lost.value.retry_after == math.ceil(TIMEOUTS.acquire)
+
+    assert await one_connection.check() == known_version()
+
+
+ENDINGS = 100
+"""How many times a test ends the pooled session and asks for a connection again. Over a Unix
+socket, about one in seven asks found the ended session before the driver read its end."""
+
+
+async def test_a_pooled_session_that_postgres_ended_is_refused_or_replaced(
+    provisioned: Provisioned, one_connection: PostgresDatabase
+) -> None:
+    """Any other error stops each loop of a worker. `docs/adr/template/0027`."""
+    for _ in range(ENDINGS):
+        async with one_connection.connection() as conn:
+            pid = await conn.fetchval("SELECT pg_backend_pid()")
+        await end_session(provisioned.admin_dsn, pid)
+        with contextlib.suppress(ConnectionRefused):
+            async with one_connection.connection() as conn:
+                _ = await conn.fetchval("SELECT 1")
 
     assert await one_connection.check() == known_version()
 
