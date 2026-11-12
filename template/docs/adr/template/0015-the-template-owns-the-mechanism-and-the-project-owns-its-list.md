@@ -31,11 +31,11 @@ and the bullet on `identity_stub` below says why.
 | `devtools/contract-test.env`: the admission numbers of the backend its contract suite runs | `devtools/contract-test.sh` |
 | `app/admission_limits.py`: what a process admits for one actor | `app/admission.py`: `Limits`, `Admission`, `admit`, `stream` |
 | `app/read_limits.py`: what one `GET /reads` runs | `app/reads.py`: `Limits`, `PART`, `answer` |
-| `app/failures.py`: its failures, and the response fields that are still free text | `app/failing.py`: `Failing`, `cause_of` |
+| `app/failures.py`: its failures, the response fields that are still free text, and the modules whose refusals still say a caught error | `app/failing.py`: `Failing`, `cause_of` |
 | `app/request_line.py`: its fields on `request completed`, beyond the tenant and the actor | `app/log.py`: `name_on_request_line`, `request_completed` |
 | `tests/tiers.py`: its tiers | `tests/tier.py`: what a tier is |
 | `tests/models/layers.py`: its model layering | `tests/models/test_layering.py` |
-| `tests/integration/filled.py`: how it fills a tenant past one page, the path of each GET route, who reads, and each GET route that may read more than a page | `tests/integration/test_routes_read_pages.py` |
+| `tests/integration/filled.py`: how it fills a tenant past one page, the path of each GET route, who reads, each GET route that may read more than a page, and each table and GET route that it does not fill or read yet | `tests/integration/test_routes_read_pages.py` |
 | `app/log_lines.py`: its own log lines | `app/log.py`: the format, the request line, the template's lines |
 | `app/jobs.py`: its kinds of job, and the handler of each | `app/store/jobs.py`, `app/store/pg_jobs.py`, `app/worker.py` |
 | `frontend/e2e/signed-in.ts`: how its live specs sign in | the live specs that use its `test` |

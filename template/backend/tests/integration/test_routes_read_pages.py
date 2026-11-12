@@ -2,8 +2,8 @@
 a request fetches more than `PAGE_MAX + 1` rows. `docs/adr/template/0026`.
 
 The template owns this module. `tests/integration/filled.py` is the project's list: how it fills a
-tenant, the path of each GET route in `openapi.json`, who reads, and each route that may fetch
-more than a page until it reads a page.
+tenant, the path of each GET route in `openapi.json`, who reads, each route that may fetch more
+than a page until it reads a page, and each table and route that it does not fill or read yet.
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from app.store.ddl import TENANT_TABLES
 from app.store.jobs import Kinds
 from app.store.pg import PostgresDatabase
 from tests.integration.conftest import ONE_PROCESS, Provisioned
-from tests.integration.filled import OVER_A_PAGE, filled, reader
+from tests.integration.filled import NOT_FILLED_YET, NOT_READ_YET, OVER_A_PAGE, filled, reader
 from tests.jobs_contract import contract_kinds
 
 READ_ALONE: Final = frozenset({"/reads"})
@@ -125,6 +125,36 @@ def served(
         yield client
 
 
+def gaps(
+    short: Mapping[str, int],
+    paths: Mapping[str, str],
+    every_get: frozenset[str],
+    not_filled: Mapping[str, str],
+    not_read: Mapping[str, str],
+) -> dict[str, list[str]]:
+    """Each way that `tests/integration/filled.py` and its two lists disagree with the tables it
+    left at one page or less, `short`, and with each GET route the test reads, `every_get`. Each
+    key says what to do."""
+    found = {
+        f"Write more than {PAGE_MAX + 1} rows of the tenant to each table, or name it in "
+        "NOT_FILLED_YET with its reason": set(short) - set(not_filled),
+        "Remove each table from NOT_FILLED_YET: it is filled, or is no tenant table": set(
+            not_filled
+        )
+        - set(short),
+        "Remove each route from NOT_READ_YET: it is no GET route that this test reads": set(
+            not_read
+        )
+        - every_get,
+        "Answer a path for each route, or name it in NOT_READ_YET with its reason": every_get
+        - set(not_read)
+        - set(paths),
+        "Remove each route from NOT_READ_YET: filled answers its path": set(paths) & set(not_read),
+        "Answer no path for each: openapi.json has no GET route for it": set(paths) - every_get,
+    }
+    return {problem: sorted(names) for problem, names in found.items() if names}
+
+
 def over_a_page(
     client: TestClient, paths: dict[str, str], fetched: list[int]
 ) -> dict[str, list[int]]:
@@ -166,16 +196,11 @@ def test_each_get_route_fetches_at_most_a_page_for_each_read(
 ) -> None:
     tenant_id = f"filled-{uuid4().hex}"
     paths, short = asyncio.run(fill(provisioned, tenant_id))
-    assert short == {}, (
-        f"tests/integration/filled.py leaves these tables at one page or less: {short}. "
-        f"Write more than {PAGE_MAX + 1} rows of the tenant to each."
-    )
     app = create_app()
-    routes = read_by_get(app)
-    assert set(paths) == routes, (
-        f"tests/integration/filled.py names no path for {sorted(routes - set(paths))}, and "
-        f"names {sorted(set(paths) - routes)}, which openapi.json has no GET route for"
-    )
+    every_get = read_by_get(app)
+    found = gaps(short, paths, every_get, NOT_FILLED_YET, NOT_READ_YET)
+    assert found == {}, f"tests/integration/filled.py disagrees with the app: {found}"
+    routes = every_get - set(NOT_READ_YET)
     assert sorted(set(OVER_A_PAGE) - routes) == [], (
         f"OVER_A_PAGE in tests/integration/filled.py names "
         f"{sorted(set(OVER_A_PAGE) - routes)}, which is no GET route that this test reads"
@@ -197,11 +222,19 @@ def test_each_get_route_fetches_at_most_a_page_for_each_read(
     )
 
 
-def test_each_route_over_a_page_names_its_reason() -> None:
-    unreasoned = [route for route, reason in OVER_A_PAGE.items() if reason.strip() == ""]
+@pytest.mark.parametrize(
+    ("named", "listed"),
+    [
+        ("OVER_A_PAGE", OVER_A_PAGE),
+        ("NOT_FILLED_YET", NOT_FILLED_YET),
+        ("NOT_READ_YET", NOT_READ_YET),
+    ],
+)
+def test_each_entry_of_a_list_names_its_reason(named: str, listed: Mapping[str, str]) -> None:
+    unreasoned = [entry for entry, reason in listed.items() if reason.strip() == ""]
     assert unreasoned == [], (
-        f"OVER_A_PAGE in tests/integration/filled.py gives {unreasoned} an empty reason. Write "
-        f"the reason."
+        f"{named} in tests/integration/filled.py gives {unreasoned} an empty reason. Write the "
+        f"reason."
     )
 
 
@@ -222,3 +255,14 @@ def test_a_route_that_reads_every_row_is_found_unless_the_list_names_it(
     assert against_the_list(found, {}) == (found, [])
     assert against_the_list(found, {PLANTED: "reads every task"}) == ({}, [])
     assert against_the_list({}, {PLANTED: "reads every task"}) == ({}, [PLANTED])
+
+
+def test_each_gap_between_the_lists_and_the_app_is_named() -> None:
+    every_get = frozenset({"/a", "/b", "/c"})
+    paths = {"/a": "/a", "/b": "/b"}
+
+    assert gaps({}, paths, every_get, {}, {"/c": "reads a document"}) == {}
+    assert gaps({"t": 3}, paths, every_get, {"t": "no store yet"}, {"/c": "x"}) == {}
+    found = gaps({"t": 3}, {**paths, "/c": "/c", "/d": "/d"}, every_get, {"u": "x"}, {"/c": "x"})
+    assert sorted(found.values()) == [["/c"], ["/d"], ["t"], ["u"]]
+    assert sorted(gaps({}, paths, every_get, {}, {"/e": "x"}).values()) == [["/c"], ["/e"]]

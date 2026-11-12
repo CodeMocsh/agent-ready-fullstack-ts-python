@@ -7,6 +7,8 @@ answers the path that the test reads for each GET route in `openapi.json`: a rou
 the key, and a path that answers `200` as the value. A table or a route that it does not cover
 fails the test, and the failure names it. `reader` answers the principal of each read.
 `OVER_A_PAGE` names each GET route whose read may fetch more than a page until it reads a page.
+`NOT_FILLED_YET` names each tenant table that `filled` does not fill past a page yet, and
+`NOT_READ_YET` each GET route that it answers no path for yet. Each list only shrinks.
 """
 
 from app.audit_events import acting_as
@@ -27,6 +29,16 @@ OVER_A_PAGE: dict[str, str] = {}
 """Each GET route template whose read fetches more than `PAGE_MAX + 1` rows, and the reason. The
 test fails on a route that the list names and that reads a page, and on a reason that is empty.
 Remove a route when it reads a page."""
+
+NOT_FILLED_YET: dict[str, str] = {}
+"""Each tenant table that `filled` leaves at one page or less, and the reason. The test fails on a
+table that the list names and that `filled` fills past a page, and on a reason that is empty.
+Remove a table when `filled` fills it."""
+
+NOT_READ_YET: dict[str, str] = {}
+"""Each GET route template that `filled` answers no path for, and the reason. The test reads no
+such route. It fails on a route that the list names and that `filled` answers a path for, and on
+a reason that is empty. Remove a route when `filled` answers its path."""
 
 A_KIND = "answers who asked"
 """A kind of job in `tests.jobs_contract.contract_kinds`. Nothing runs it here."""

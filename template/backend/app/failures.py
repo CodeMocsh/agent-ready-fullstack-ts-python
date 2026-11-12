@@ -8,10 +8,18 @@ add your failures here. Raise one where the work fails. `app/failing.py` is the 
 `STILL_FREE_TEXT` names each response field, as `Schema.property`, that holds a failure as free
 text today. `tests/failures/test_failure_fields.py` passes each one listed, and fails on one
 that is not listed or no longer holds free text. The list only shrinks.
+
+`STILL_SAYS_A_CAUGHT_ERROR` counts, for each module as `app/<path>.py`, the refusals it builds
+today from an error that its `except` caught. `tests/errors/test_errors.py` fails on a module
+that builds more than its count, and on a count above what the module builds. The list only
+shrinks.
 """
 
+from collections.abc import Mapping
 from typing import Final
 
 from app.failing import Failing as Failing
 
 STILL_FREE_TEXT: Final[frozenset[str]] = frozenset()
+
+STILL_SAYS_A_CAUGHT_ERROR: Final[Mapping[str, int]] = {}
