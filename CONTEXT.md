@@ -8,6 +8,9 @@ which doubles the number of words that can be used loosely.
 This file is a glossary. It carries no implementation detail and no decisions; those live in
 commit messages and `docs/adr/`.
 
+This file is the word list for this repo outside `template/`. `template/CONTEXT.md` is the word
+list for everything under `template/`.
+
 ## Language
 
 **Generator**:
