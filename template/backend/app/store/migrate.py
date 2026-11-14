@@ -18,14 +18,25 @@ entry added below an existing key runs on the next release step like any other.
 
 `known_version` and `schema_version` still answer `max(key)`. That string is what `make migrate`
 prints and what `Database.schema_version()` reports. No decision reads it.
+
+**Every wait of `apply` has a bound.** `MigrationBounds` says how long each attempt to take a lock
+lasts, how long `apply` waits for one lock, and how long one statement may run. When a wait for a
+lock passes its bound, `LockNotGrantedError` names each session that holds a lock on the schema or
+the migration lock. `docs/deployment.md` says why an attempt is short.
 """
 
 import hashlib
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import Any, Final
 
+from app.pacing import backoff
 from app.store.acting import MIGRATION_ACTING_SQL
 from app.store.conn import Conn, migration_lock, quote_ident, resolve_schema, search_path_sql
 from app.store.ddl import APPLIED_ONCE_DDL, SCHEMA_ENTRY_KEY, statements
 from app.store.roles import owner_role, writes_withheld_sql
+from app.store.timeouts import SMALLEST_BOUND, milliseconds
 
 _RECORD = "INSERT INTO applied_once(key) VALUES($1) ON CONFLICT DO NOTHING"
 
@@ -39,6 +50,51 @@ Roles are cluster-wide, so the role existing says nothing about this database â€
 `pg_has_role` raises outright on a role that is not there. `AND` does not promise to evaluate
 the existence test first; `CASE` does.
 """
+
+
+_TRY_LOCK = "SELECT pg_try_advisory_lock($1)"
+
+_HOLDERS = """
+SELECT string_agg(
+  format('pid %s, role %s, application %L, %s, transaction since %s: %s',
+         a.pid, a.usename, a.application_name, coalesce(a.state, 'state hidden'),
+         CASE WHEN a.state IS NULL THEN 'hidden' ELSE coalesce(a.xact_start::text, 'none') END,
+         a.query),
+  chr(10) ORDER BY a.xact_start NULLS LAST, a.pid)
+FROM pg_stat_activity a
+WHERE a.pid <> pg_backend_pid() AND a.pid IN (
+  SELECT l.pid FROM pg_locks l
+  LEFT JOIN pg_class c ON c.oid = l.relation
+  LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE l.granted
+    AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+    AND (n.nspname = $1
+         OR (l.locktype = 'advisory' AND l.classid = $2 AND l.objid = $3 AND l.objsubid = 1)))
+"""
+
+
+@dataclass(frozen=True)
+class MigrationBounds:
+    """How long each wait of `apply` may last, in seconds.
+
+    An attempt to take a lock ends after `attempt`. The next attempt starts after a pause that
+    starts at `attempt` and doubles up to `longest_pause`. `apply` raises `LockNotGrantedError`
+    when a further pause would end more than `lock_wait` after the first attempt for that lock.
+    Postgres cancels a statement of `apply` that runs longer than `statement`, and asyncpg raises
+    `QueryCanceledError`.
+    """
+
+    attempt: float = 1.0
+    longest_pause: float = 8.0
+    lock_wait: float = 600.0
+    statement: float = 600.0
+
+    def __post_init__(self) -> None:
+        if min(self.attempt, self.longest_pause, self.lock_wait, self.statement) < SMALLEST_BOUND:
+            raise ValueError(f"{self} holds a bound under a millisecond, which Postgres ignores")
+
+
+MIGRATION_BOUNDS: Final = MigrationBounds()
 
 
 class MigrationError(RuntimeError):
@@ -55,6 +111,15 @@ class SchemaTooNewError(MigrationError):
     Raised by both `check` and `apply`. A newer schema means a newer release has already
     migrated this database, and neither serving queries written against the older shape nor
     re-applying the older entries over it is something to guess at.
+    """
+
+
+class LockNotGrantedError(MigrationError):
+    """`apply` stopped waiting for a lock after `MigrationBounds.lock_wait`.
+
+    Each statement ran whole or did not run, and running `apply` again applies what is missing.
+    The message names the statement, and each session that held a lock on the schema or the
+    migration lock when `apply` stopped, oldest transaction first.
     """
 
 
@@ -137,14 +202,21 @@ async def check(conn: Conn, schema: str | None = None) -> str:
     return known_version(schema)
 
 
-async def apply(conn: Conn, schema: str | None = None) -> str:
+async def apply(
+    conn: Conn, schema: str | None = None, bounds: MigrationBounds = MIGRATION_BOUNDS
+) -> str:
     """Bring the database up to this code's schema. What `make migrate` runs.
 
     Every entry runs on every call. Each one is idempotent, so a database that is already
     current is unchanged by the run, and a release hook that fires more than once costs one
     pass over the entries. Nothing here compares a version and decides to skip: that is what
     makes an entry sorting below an existing key run at all.
+
+    Every statement it runs, the first included, has the bounds in `bounds`. Raises
+    `LockNotGrantedError` when a lock it needs stays held past `bounds.lock_wait`.
     """
+    await conn.execute(f"SET lock_timeout = {milliseconds(bounds.attempt)}")
+    await conn.execute(f"SET statement_timeout = {milliseconds(bounds.statement)}")
     unknown = _unknown_keys(await applied_keys(conn, schema), known_keys(schema))
     if unknown:
         raise SchemaTooNewError(
@@ -152,12 +224,68 @@ async def apply(conn: Conn, schema: str | None = None) -> str:
             f"a newer release has already migrated it. Running an older release's migration "
             f"step against it is a deploy-order mistake, not something to reconcile here."
         )
-    return await _apply_all(conn, schema)
+    return await _apply_all(conn, schema, bounds)
 
 
 def _unknown_keys(applied: set[str], known: list[str]) -> list[str]:
     """Keys the ledger holds that this build does not carry, sorted for the message."""
     return sorted(applied - set(known))
+
+
+def _lock_not_available() -> type[Exception]:
+    import asyncpg
+
+    return asyncpg.LockNotAvailableError
+
+
+async def _executed(conn: Conn, query: str, args: tuple[Any, ...]) -> bool:
+    """Whether `query` ran. False when its lock wait passed `lock_timeout`."""
+    try:
+        await conn.execute(query, *args)
+    except _lock_not_available():
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class _Locks:
+    """One run of `apply`: its connection, its schema and its bounds."""
+
+    conn: Conn
+    schema: str
+    bounds: MigrationBounds
+
+    async def run(self, what: str, query: str, *args: Any) -> None:
+        """Run `query`, again after each wait for a lock that passes `MigrationBounds.attempt`."""
+        await self._until(what, lambda: _executed(self.conn, query, args))
+
+    async def take(self, lock: int) -> None:
+        """Take the session advisory lock `lock`."""
+        await self._until("the migration lock", lambda: self.conn.fetchval(_TRY_LOCK, lock))
+
+    async def _until(self, what: str, granted: Callable[[], Awaitable[bool]]) -> None:
+        stops = time.monotonic() + self.bounds.lock_wait
+        pause = self.bounds.attempt
+        while not await granted():
+            if time.monotonic() + pause > stops:
+                raise LockNotGrantedError(
+                    f"{what}: no lock within {self.bounds.lock_wait:g} s. The sessions that hold a "
+                    f"lock on the schema or the migration lock:\n{await self._holders()}"
+                )
+            await backoff(pause)
+            pause = min(2 * pause, self.bounds.longest_pause)
+
+    async def _holders(self) -> str:
+        """Each holder, read as the role that connected, which `RESET ROLE` restores. A role
+        without `pg_read_all_stats` reads no query of another role's session."""
+        await self.conn.execute("RESET ROLE")
+        lock = migration_lock(self.schema)
+        holders = await self.conn.fetchval(
+            _HOLDERS, self.schema, (lock >> 32) & 0xFFFFFFFF, lock & 0xFFFFFFFF
+        )
+        if holders is None:
+            return "no session holds one now."
+        return str(holders)
 
 
 async def _become_owner(conn: Conn, schema: str | None) -> None:
@@ -174,7 +302,7 @@ async def _become_owner(conn: Conn, schema: str | None) -> None:
         await conn.execute(f"SET ROLE {quote_ident(owner)}")
 
 
-async def _withhold_writes(conn: Conn, schema: str | None) -> None:
+async def _withhold_writes(locks: _Locks) -> None:
     """Run `writes_withheld_sql`: no write on the ledger for the application role, and only an
     insert on the audit events into the columns the database does not fill.
 
@@ -183,11 +311,11 @@ async def _withhold_writes(conn: Conn, schema: str | None) -> None:
     every column a repair adds, and a database whose roles were provisioned after its first
     migration is caught up by the next one.
     """
-    for statement in writes_withheld_sql(schema):
-        await conn.execute(statement)
+    for statement in writes_withheld_sql(locks.schema):
+        await locks.run("the writes withheld from the application role", statement)
 
 
-async def _apply_all(conn: Conn, schema: str | None = None) -> str:
+async def _apply_all(conn: Conn, schema: str | None, bounds: MigrationBounds) -> str:
     """Every entry in order under an advisory lock, recording each in the ledger, acting as
     `MIGRATION_ACTOR`.
 
@@ -198,22 +326,23 @@ async def _apply_all(conn: Conn, schema: str | None = None) -> str:
     """
     name = resolve_schema(schema)
     entries = statements(name)
+    locks = _Locks(conn, name, bounds)
     lock = migration_lock(name)
-    await conn.execute("SELECT pg_advisory_lock($1)", lock)
+    await locks.take(lock)
     try:
         first_key, first_sql = entries[0]
         if first_key != SCHEMA_ENTRY_KEY:
             raise MigrationError(f"{SCHEMA_ENTRY_KEY} must sort first, not {first_key!r}")
-        await conn.execute(first_sql)
+        await locks.run(first_key, first_sql)
         await _become_owner(conn, name)
         await conn.execute(search_path_sql(name))
         await conn.execute(MIGRATION_ACTING_SQL)
-        await conn.execute(APPLIED_ONCE_DDL)
-        await conn.execute(_RECORD, first_key)
+        await locks.run("the ledger", APPLIED_ONCE_DDL)
+        await locks.run("the ledger", _RECORD, first_key)
         for key, sql in entries[1:]:
-            await conn.execute(sql)
-            await conn.execute(_RECORD, key)
-        await _withhold_writes(conn, name)
+            await locks.run(key, sql)
+            await locks.run("the ledger", _RECORD, key)
+        await _withhold_writes(locks)
         return known_version(name)
     finally:
         await conn.execute("SELECT pg_advisory_unlock($1)", lock)

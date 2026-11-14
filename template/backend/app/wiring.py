@@ -61,7 +61,8 @@ from app.store import Database
 from app.store.budget import TEMPLATE_IN_PROCESS, Draws
 from app.store.conn import SCHEMA_ENV
 from app.store.memory import MemoryDatabase
-from app.store.pg import SMALLEST_BOUND, TIMEOUTS, PostgresDatabase, Timeouts
+from app.store.pg import PostgresDatabase
+from app.store.timeouts import SMALLEST_BOUND, TIMEOUTS, Timeouts
 from app.waits import REQUEST_BUDGET_SECONDS
 
 DENIALS: Final = frozenset({"", "0", "false", "no", "off"})

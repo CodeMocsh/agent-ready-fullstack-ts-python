@@ -234,6 +234,37 @@ application refuses to start if it can see `DATABASE_OWNER_URL`, so a single con
 migrates and then serves must drop the credential in between:
 `env -u DATABASE_OWNER_URL uvicorn ...`.
 
+**Every wait of the step has a bound**, and `MigrationBounds` in `app/store/migrate.py` sets each
+one. An attempt to take a lock ends after one second. The step pauses, doubles the pause up to
+eight seconds, and tries again. When it has waited ten minutes for one lock, it stops with
+`LockNotGrantedError`. The message names the statement that waited, and each session that holds a
+lock on the schema or the migration lock, oldest transaction first: its pid, its role, its
+application, its state, when its transaction started, and its last query. End that session with
+`pg_terminate_backend(pid)` if nothing should hold it, and run the step again. The step reads the
+state, the transaction start and the query of another role's session when its login is a
+superuser, has `pg_read_all_stats`, or has the privileges of that role. Grant
+`pg_read_all_stats` to the login that runs the step.
+
+A statement of the step that runs longer than ten minutes is cancelled, and the step stops with
+`QueryCanceledError`. To give a long statement, such as an index on a large table, more time,
+raise the default of `statement` in `MigrationBounds`.
+
+An attempt is short for a reason. A statement such as `ALTER TABLE` waits for every other lock
+on its table to end, and while it waits, every new query on that table waits behind it. So a
+long attempt stops the application on that table for as long as the attempt lasts. An attempt
+of one second keeps each query under the five seconds that `DATABASE_STATEMENT_TIMEOUT` ships
+with. Keep that bound at two seconds or more. The application's transactions are short, so a later
+attempt finds a gap between them. A long attempt is the danger, not a busy application.
+
+**Give every login a bound that the server enforces.** `deploy/roles.sql` gives `<schema>_app`
+the bounds that `Timeouts` ships with, and each session that logs in as it starts with them. A
+role setting binds only the role that logs in, not its members: a login that is a member of
+`<schema>_app` and logs in as itself gets none. Every other login, such as the one that runs this
+step, gets none from the template either. Set them yourself, with
+`ALTER ROLE <login> SET statement_timeout = ...` and `idle_in_transaction_session_timeout`. The
+step sets its own bounds, so a short default on its login does not stop it. A query with no
+bound can hold a lock for hours after its client is gone, and every migration then waits for it.
+
 **The database must have applied exactly the entries the build carries**, in both directions
 ([adr/template/0003](adr/template/0003-the-application-never-applies-ddl.md)). The cost, worth knowing before
 your first rolling deploy: between the release step and the last old instance being replaced,
@@ -286,7 +317,7 @@ Removing audit events needs no actor: `audit_events` records nothing of its own.
 
 ## Timeouts
 
-Every wait on Postgres has a bound, and `Timeouts` in `app/store/pg.py` sets each one:
+Every wait on Postgres has a bound, and `Timeouts` in `app/store/timeouts.py` sets each one:
 
 - **A statement** that runs too long is cancelled by Postgres, which raises `QueryCanceledError`.
 - **A server that does not answer** at all makes asyncpg raise `TimeoutError`.

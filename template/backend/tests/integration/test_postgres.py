@@ -14,6 +14,7 @@ Every test takes a schema of its own and drops it afterwards. Run the suite with
 `make db-test`, which supplies the server and the `TEST_DATABASE_URL` pointing at it.
 """
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -22,7 +23,15 @@ from fastapi.testclient import TestClient
 from app.jobs import kinds
 from app.main import create_app
 from app.store import Database, ddl
-from app.store.migrate import emit_sql, known_version
+from app.store.conn import migration_lock
+from app.store.migrate import (
+    LockNotGrantedError,
+    MigrationBounds,
+    apply,
+    emit_sql,
+    known_version,
+)
+from tests.clock import elapse
 from tests.integration.conftest import (
     ONE_PROCESS,
     Provisioned,
@@ -40,6 +49,13 @@ NOTE_REPAIR = (
 """A repair entry injected by one test, keyed after every repair the template ships. The failure it
 guards against -- a column added to a shipped `CREATE TABLE IF NOT EXISTS`, which reaches no
 database that already had the table -- bites on the first schema change rather than later."""
+
+
+SHORT_BOUNDS = MigrationBounds(attempt=0.05, longest_pause=0.1, lock_wait=1.0)
+"""Bounds a test outlasts in about a second."""
+
+WITHIN = 30.0
+"""How long a test of a lock wait may take before it fails rather than hangs."""
 
 
 def a_database(schema: str) -> Any:
@@ -152,3 +168,88 @@ def test_the_app_reports_postgres_as_its_substrate(
     app = create_app()
     with TestClient(app):
         assert app.state.database.name == "postgres"
+
+
+async def test_a_migration_stops_and_names_a_reader_of_another_role_that_keeps_its_table(
+    provisioned: Provisioned,
+) -> None:
+    reader = await connect(provisioned.app_dsn)
+    try:
+        await reader.execute("BEGIN")
+        await reader.execute(f'SELECT count(*) FROM "{provisioned.schema}".tasks')
+
+        async with asyncio.timeout(WITHIN):
+            with pytest.raises(LockNotGrantedError, match="_tasks_") as stopped:
+                await apply_schema(provisioned.admin_dsn, provisioned.schema, SHORT_BOUNDS)
+
+        message = str(stopped.value)
+        assert f"pid {reader.get_server_pid()}, role {provisioned.app}," in message
+        assert "idle in transaction, transaction since 2" in message
+        assert f'SELECT count(*) FROM "{provisioned.schema}".tasks' in message
+        await reader.execute("ROLLBACK")
+        assert await apply_schema(provisioned.admin_dsn, provisioned.schema) == known_version()
+    finally:
+        await reader.close()
+
+
+async def test_a_migration_waits_out_a_reader_that_ends_inside_the_bound() -> None:
+    schema = a_fresh_schema_name()
+    await apply_schema(postgres_dsn(), schema)
+    reader = await connect(postgres_dsn())
+    try:
+        await reader.execute("BEGIN")
+        await reader.execute(f'SELECT count(*) FROM "{schema}".tasks')
+        async with asyncio.timeout(WITHIN), asyncio.TaskGroup() as group:
+            migration = group.create_task(
+                apply_schema(
+                    postgres_dsn(), schema, MigrationBounds(attempt=0.05, longest_pause=0.1)
+                )
+            )
+            await elapse(0.3)
+            assert not migration.done()
+            await reader.execute("ROLLBACK")
+
+        assert migration.result() == known_version()
+    finally:
+        await reader.close()
+        await drop_schema(postgres_dsn(), schema)
+
+
+async def test_a_migration_stops_and_names_another_migration_that_keeps_the_lock() -> None:
+    schema = a_fresh_schema_name()
+    other = await connect(postgres_dsn())
+    try:
+        await other.execute("SELECT pg_advisory_lock($1)", migration_lock(schema))
+
+        async with asyncio.timeout(WITHIN):
+            with pytest.raises(LockNotGrantedError, match="the migration lock") as stopped:
+                await apply_schema(postgres_dsn(), schema, SHORT_BOUNDS)
+
+        assert f"pid {other.get_server_pid()}," in str(stopped.value)
+        assert "idle, transaction since none" in str(stopped.value)
+    finally:
+        await other.close()
+        await drop_schema(postgres_dsn(), schema)
+
+
+async def test_a_migration_sets_its_own_statement_bound_over_the_one_its_login_has() -> None:
+    import asyncpg
+
+    schema = a_fresh_schema_name()
+    conn = await asyncpg.connect(dsn=postgres_dsn(), server_settings={"statement_timeout": "1"})
+    try:
+        assert await apply(conn, schema) == known_version()
+    finally:
+        await conn.close()
+        await drop_schema(postgres_dsn(), schema)
+
+
+async def test_a_session_of_the_application_role_is_bounded_before_it_sets_anything(
+    provisioned: Provisioned,
+) -> None:
+    conn = await connect(provisioned.app_dsn)
+    try:
+        assert await conn.fetchval("SHOW statement_timeout") == "5s"
+        assert await conn.fetchval("SHOW idle_in_transaction_session_timeout") == "10s"
+    finally:
+        await conn.close()

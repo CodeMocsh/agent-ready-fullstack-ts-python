@@ -33,7 +33,7 @@ from app.deployment import (
 )
 from app.migrate import OWNER_URL_ENV
 from app.store.budget import TEMPLATE_IN_PROCESS, Draws
-from app.store.pg import TIMEOUTS, Timeouts
+from app.store.timeouts import TIMEOUTS, Timeouts
 from app.wiring import (
     AdmissionMisconfigured,
     InstancesMisconfigured,

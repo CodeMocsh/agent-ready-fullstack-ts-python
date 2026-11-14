@@ -9,7 +9,9 @@ Wire it into whatever your platform calls a release command — `release_command
 pre-deploy command on Railway or Render, a `pre-upgrade` Job on Kubernetes, a one-off task on
 ECS, the `migrate` service in `deploy/compose.yaml` here. It is idempotent, it serialises on
 an advisory lock so two releases cannot race, and it exits 0 when the database is already
-current, which is what makes it safe to wire into a hook that may fire more than once.
+current, which is what makes it safe to wire into a hook that may fire more than once. It
+exits non-zero with `LockNotGrantedError` when a lock it needs stays held past
+`MigrationBounds.lock_wait`.
 
 Skip it and the new version refuses to start, naming the entries it needs. That refusal is the
 enforcement: a release step nobody wired up fails the deploy instead of quietly serving

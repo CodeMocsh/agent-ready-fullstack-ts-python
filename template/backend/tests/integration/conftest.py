@@ -34,7 +34,7 @@ from app.store import Database
 from app.store.acting import SET_ACTING, acting
 from app.store.budget import Draws
 from app.store.conn import resolve_schema
-from app.store.migrate import apply
+from app.store.migrate import MIGRATION_BOUNDS, MigrationBounds, apply
 from app.store.roles import app_role, emit_roles_sql, owner_role
 
 TEST_DATABASE_URL = "TEST_DATABASE_URL"
@@ -96,7 +96,7 @@ async def drop_schema(dsn: str, schema: str) -> None:
         await conn.close()
 
 
-async def apply_schema(dsn: str, schema: str) -> str:
+async def apply_schema(dsn: str, schema: str, bounds: MigrationBounds = MIGRATION_BOUNDS) -> str:
     """Apply the DDL the way a release does: a separate, privileged, one-off connection.
 
     Never through `Database`. The application cannot apply DDL and the fixtures must not
@@ -104,7 +104,7 @@ async def apply_schema(dsn: str, schema: str) -> str:
     """
     conn: Any = await connect(dsn)
     try:
-        return await apply(conn, schema)
+        return await apply(conn, schema, bounds)
     finally:
         await conn.close()
 

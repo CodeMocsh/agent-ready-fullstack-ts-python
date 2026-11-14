@@ -9,7 +9,8 @@ is, what it deliberately will not do, and how to leave when you outgrow it.
 a single SQL statement, every one idempotent and additive.
 
 - **`make migrate`** applies every entry, in key order, on every run, under one advisory lock.
-  There is no "already current" shortcut, so an entry keyed anywhere runs.
+  There is no "already current" shortcut, so an entry keyed anywhere runs. Each wait for a lock
+  has a bound: [deployment.md](deployment.md#the-release-step).
 - **`applied_once`** records the key of each entry that ran. Once the release step has run
   against a database that has its roles, the application role holds `SELECT` on that table and
   nothing else, so the process that verifies the schema cannot forge its own answer.
