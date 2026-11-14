@@ -217,6 +217,17 @@ At most `PAGE_MAX` rows of a list, and `next`: the cursor where the page after i
 `None` on the last page. Every list a store answers is a page. `docs/adr/template/0026`.
 _Avoid_: batch, chunk, slice. A screen is never a page.
 
+**Set read**:
+One statement that reads one kind of fact for many keys, and answers one value for each key, as
+`= ANY($1)` does. A `SetRead` in `app/store/loads.py`. `docs/adr/template/0032`.
+_Avoid_: batch, bulk read, multi-get.
+
+**Loader**:
+What reads the keys that the items of one request ask for in one turn of the event loop: one set
+read for each kind, one after another, in one transaction. It keeps nothing past the turn.
+`PostgresDatabase.loader` answers the loader of a tenant in a request, or in an attempt of a job.
+_Avoid_: DataLoader, batcher, identity map, cache.
+
 **Connection budget**:
 The share of the server's `max_connections` that each process may hold, and the template's pool
 inside it. Each web process and each worker gets one. `app/store/budget.py` calculates it from
