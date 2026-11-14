@@ -233,7 +233,8 @@ backend/
 - **A request's reads do not grow with its rows.** Code for one item of a page asks
   `PostgresDatabase.loader(tenant_id).load(read, key)` for each fact, and the items start in one
   `asyncio.TaskGroup`. `read` is a set read: one statement that answers one value for each key it
-  is handed. A fact of many rows for each key is a `GROUP BY` of the key. The loader runs each set
+  is handed. A fact of many rows for each key is a `GROUP BY` of the key. A key whose value this
+  build cannot read answers an exception, which raises in that item only. The loader runs each set
   read of a turn of the event loop once, in one transaction.
   `tests/integration/test_routes_read_a_fixed_count.py` reads each GET route at one row and past a
   page, and fails on a route that makes more statements past a page, or holds more than one

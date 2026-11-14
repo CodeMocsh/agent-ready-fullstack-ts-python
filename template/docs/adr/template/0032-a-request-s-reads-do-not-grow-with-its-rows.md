@@ -45,6 +45,11 @@ page could hold every connection of a process.
   ([0021](0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md)). A failure raises
   in each caller of the turn. When each caller is cancelled, the turn is cancelled, and its
   transaction rolls back. `cancel_beside` cancels a turn at shutdown.
+- **A failure of one key's value fails that key only.** Work for many items catches a failure at
+  the item, as `AGENTS.md` says, so a set read answers that failure for its key: an exception,
+  such as a row that this build cannot read. `Loader.load` raises it in the callers of that key,
+  and each other key answers its value. A set read raises only when its statement fails. That
+  fails every caller of the turn, as `NotAnswered` and `DatabaseUnavailable` do.
 - **A set read answers each key it is handed, and only those.** The loader raises `NotAnswered`
   in each caller of the turn when a set read answers no value for a key, or a value for a key it
   was not handed. A fact that a key may not have is a value that says so, such as `None` or `0`.
@@ -88,6 +93,9 @@ page could hold every connection of a process.
 - **A cache of each value for the whole request.** The rule of a constant count needs only the
   keys of one turn. A cache must forget what a write changes. A trigger, a job and another store
   also write, and nothing could check that each one clears the cache.
+- **A refusal value for a key, which the caller checks.** A caller that does not check it passes
+  the refusal on as a value. An exception for the key raises in its caller, and code that catches
+  a failure at its item today catches it the same way behind a loader.
 - **A set read on each store port, which the route calls with every key.** Each screen must then
   collect the keys of its items before it reads, and code for one item becomes code for a set.
   The loader keeps the code for one item, and reads its keys as a set.

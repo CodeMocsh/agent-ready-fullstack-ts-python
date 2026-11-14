@@ -47,6 +47,15 @@ async def named(conn: Units, keys: Sequence[int]) -> Mapping[int, str]:
     return {key: f"item {key}" for key in keys}
 
 
+class Unreadable(LookupError):
+    pass
+
+
+async def unreadable_at_two(conn: Units, keys: Sequence[int]) -> Mapping[int, int | Exception]:
+    conn.statements.append(("unreadable at two", list(keys)))
+    return {key: Unreadable(f"item {key}") if key == 2 else key for key in keys}
+
+
 async def answers_one_less(_conn: Units, keys: Sequence[int]) -> Mapping[int, int]:
     return {key: key for key in keys[1:]}
 
@@ -112,6 +121,23 @@ async def test_a_key_asked_after_its_turn_started_waits_for_the_next_unit() -> N
     assert (first.result(), later.result()) == (1, 2)
     assert units.statements == [("held", [1]), ("held", [2])]
     assert (units.opened, units.most_open) == (2, 1)
+
+
+async def test_a_key_whose_answer_is_a_failure_fails_only_its_own_callers() -> None:
+    units = Units()
+    with loading():
+        loader = loader_of("t", units.unit)
+        answered = await asyncio.gather(
+            *(loader.load(unreadable_at_two, key) for key in (1, 2, 3)),
+            return_exceptions=True,
+        )
+        names = await at_once(loader, named, [1, 2])
+
+    assert answered[0::2] == [1, 3]
+    assert isinstance(answered[1], Unreadable)
+    assert str(answered[1]) == "item 2"
+    assert names == ["item 1", "item 2"]
+    assert units.statements[0] == ("unreadable at two", [1, 2, 3])
 
 
 async def test_a_set_read_that_answers_other_keys_fails_each_caller() -> None:

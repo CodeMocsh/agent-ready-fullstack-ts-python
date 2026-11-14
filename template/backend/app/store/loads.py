@@ -22,10 +22,14 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.models import PAGE_MAX
 from app.waits import SharedWork
 
-type SetRead[K: Hashable, V] = Callable[[Any, Sequence[K]], Awaitable[Mapping[K, V]]]
+type SetRead[K: Hashable, V] = Callable[[Any, Sequence[K]], Awaitable[Mapping[K, V | Exception]]]
 """One statement, on a connection inside the tenant's transaction, that answers one value for
 each key it is handed. It is handed at most `PAGE_MAX` keys. A fact of many rows for each key is
-an aggregate in SQL, such as a `GROUP BY` of the key, and never a page for each key."""
+an aggregate in SQL, such as a `GROUP BY` of the key, and never a page for each key.
+
+A failure of one key's value, such as a row that this build cannot read, is the answer for that
+key: an exception, which `Loader.load` raises in the callers of that key only. A set read raises
+only when the statement fails, and that fails every key of its turn."""
 
 type Unit = Callable[[], AbstractAsyncContextManager[Any]]
 """A unit of work: a connection inside the tenant's transaction."""
@@ -58,15 +62,19 @@ class Loader:
         """The value that `read` answers for `key`. Each key asked in the same turn goes in the
         same statement, and each key asked twice in it goes once.
 
-        A turn waits until the turn before it has ended, so one loader holds one connection at a
-        time. A failure of the turn raises in each of its callers: `NotAnswered` when a set read
-        answers other keys than it was handed, and `DatabaseUnavailable` when the database does
-        not serve the turn. The turn is shared work: when each of its callers is cancelled, the
+        Raises the exception that `read` answers for `key`, in the callers of `key` only. A turn
+        waits until the turn before it has ended, so one loader holds one connection at a time. A
+        failure of the turn raises in each of its callers: `NotAnswered` when a set read answers
+        other keys than it was handed, `DatabaseUnavailable` when the database does not serve the
+        turn, and what a set read raises. The turn is shared work: when each of its callers is cancelled, the
         turn is cancelled and its transaction rolls back."""
         turn = self._turn
         self._asked.setdefault(turn, {}).setdefault(read, {})[key] = None
         answers = await self._turns.joined(turn, lambda: self._read(turn))
-        return answers[read][key]
+        answer: V | Exception = answers[read][key]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
     async def _read(self, turn: int) -> _Answers:
         async with self._one_at_a_time:
