@@ -629,6 +629,18 @@ What to expect, because it is not all free:
   [adr/template/0031](adr/template/0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md)
   say why.
 
+- **From 0.80.0 every wait of `make migrate` has a bound.** It stops with `LockNotGrantedError`
+  after ten minutes of waiting for one lock, and names each session that holds one. A statement
+  that runs longer than ten minutes is cancelled. After the update:
+  - Apply `deploy/roles.sql` again. It gives `<schema>_app` a statement bound and a bound on an
+    idle transaction.
+  - `Timeouts`, `TIMEOUTS` and `SMALLEST_BOUND` are in `app/store/timeouts.py`, not
+    `app/store/pg.py`. Change each import of yours. If `make lint` refuses the startup count,
+    record it as the message says.
+  - Grant `pg_read_all_stats` to the login that runs `make migrate`, and give that login and
+    every other login a server-side bound. [deployment.md](deployment.md#the-release-step) says
+    how.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

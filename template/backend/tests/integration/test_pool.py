@@ -21,13 +21,12 @@ from app.store.budget import Draws, OverBudget
 from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
 from app.store.pg import (
-    TIMEOUTS,
     AcquireTimedOut,
     ConnectionLost,
     ConnectionRefused,
     PostgresDatabase,
-    Timeouts,
 )
+from app.store.timeouts import TIMEOUTS, Timeouts
 from app.wiring import build
 from tests.clock import elapse
 from tests.event_loop import Reported, hold_the_event_loop

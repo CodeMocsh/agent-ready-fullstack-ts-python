@@ -1,7 +1,7 @@
 """How a connection is named, and which schema it points at.
 
-`Conn` is the whole surface `ddl.py` and `migrate.py` need, so nothing there imports a
-driver — and `migrate()` is drivable by a fake in a test with no Postgres in it.
+`Conn` is the whole surface `ddl.py` and `migrate.py` need, so `apply()` is drivable by a
+fake in a test with no Postgres in it.
 
 The schema is the other half. This project's DDL is written **unqualified** for legibility,
 which is only safe because the schema is selected on the connection: one place to get right

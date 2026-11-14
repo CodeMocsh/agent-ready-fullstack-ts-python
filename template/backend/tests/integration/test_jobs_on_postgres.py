@@ -32,8 +32,9 @@ from app.store.jobs import (
     Leases,
     fenced,
 )
-from app.store.pg import ConnectionLost, PostgresDatabase, Timeouts
+from app.store.pg import ConnectionLost, PostgresDatabase
 from app.store.pg_jobs import JobClaims
+from app.store.timeouts import Timeouts
 from app.worker import run, work
 from tests.clock import elapse
 from tests.conftest import Logged

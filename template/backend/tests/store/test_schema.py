@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import asyncpg
 import pytest
 
 from app.store import ddl
@@ -23,6 +24,9 @@ from app.store.conn import (
 )
 from app.store.ddl import statements
 from app.store.migrate import (
+    MIGRATION_BOUNDS,
+    LockNotGrantedError,
+    MigrationBounds,
     SchemaBehindError,
     SchemaTooNewError,
     apply,
@@ -33,6 +37,7 @@ from app.store.migrate import (
     known_version,
 )
 from app.store.roles import APPEND_ONLY_TABLE, app_role, emit_roles_sql, owner_role
+from app.store.timeouts import TIMEOUTS
 from devtools.schema import SCHEMA_BASELINE
 
 SCHEMA_SQL = Path(__file__).resolve().parents[3] / "deploy" / "schema.sql"
@@ -41,6 +46,11 @@ ROLES_SQL = Path(__file__).resolve().parents[3] / "deploy" / "roles.sql"
 ADD_COLUMN = "ADD COLUMN IF NOT EXISTS"
 CREATE_TABLE = "CREATE TABLE IF NOT EXISTS"
 
+
+SHORT_BOUNDS = MigrationBounds(attempt=0.001, longest_pause=0.004, lock_wait=0.05)
+"""Bounds a test outlasts in well under a second."""
+
+A_HOLDER = "pid 4242, role someone, application 'psql', idle in transaction, transaction since then: SELECT 1"
 
 NEVER_MIGRATED: list[str] = []
 """What the ledger holds on a database nothing has applied. The `applied` default is every key
@@ -55,6 +65,9 @@ class FakeConn:
     `ledger_exists` separates a database with no ledger from one whose ledger holds no rows.
     They answer the same thing and reach `applied_keys` by different branches, so the fake has
     to be able to say which.
+
+    `refusals` says how many times each statement ends its lock wait before it runs, and
+    `migration_lock_held` that another session holds the migration lock.
     """
 
     def __init__(
@@ -63,20 +76,33 @@ class FakeConn:
         *,
         may_set_role: bool = False,
         ledger_exists: bool | None = None,
+        refusals: dict[str, int] | None = None,
+        migration_lock_held: bool = False,
     ) -> None:
         self.executed: list[str] = []
+        self.asked: list[str] = []
+        self._refusals: dict[str, int] = {} if refusals is None else dict(refusals)
+        self._migration_lock_held: bool = migration_lock_held
         self.recorded: list[str] = []
         self._applied: list[str] = known_keys("app") if applied is None else applied
         self._may_set_role: bool = may_set_role
         self._ledger_exists: bool = bool(self._applied) if ledger_exists is None else ledger_exists
 
     async def execute(self, query: str, *args: Any) -> str:
+        if self._refusals.get(query, 0) > 0:
+            self._refusals[query] -= 1
+            raise asyncpg.LockNotAvailableError("canceling statement due to lock timeout")
         self.executed.append(query)
         if query.startswith("INSERT INTO applied_once"):
             self.recorded.append(str(args[0]))
         return "OK"
 
     async def fetchval(self, query: str, *_args: Any) -> Any:
+        self.asked.append(query)
+        if "pg_try_advisory_lock" in query:
+            return not self._migration_lock_held
+        if "pg_stat_activity" in query:
+            return A_HOLDER
         if "to_regclass" in query:
             return 12345 if self._ledger_exists else None
         if "string_agg" in query:
@@ -347,7 +373,7 @@ async def test_apply_runs_every_entry_against_an_empty_database() -> None:
     assert await apply(conn, "app") == known_version()
 
     assert conn.recorded == known_keys()
-    assert any("pg_advisory_lock" in query for query in conn.executed)
+    assert any("pg_try_advisory_lock" in query for query in conn.asked)
     assert any("pg_advisory_unlock" in query for query in conn.executed)
     assert conn.executed.index('SET search_path TO "app"') < conn.executed.index(
         ddl.APPLIED_ONCE_DDL
@@ -380,7 +406,7 @@ async def test_apply_runs_every_entry_again_on_a_database_that_is_already_curren
     assert await apply(conn, "app") == known_version()
 
     assert conn.recorded == known_keys()
-    assert any("pg_advisory_lock" in query for query in conn.executed)
+    assert any("pg_try_advisory_lock" in query for query in conn.asked)
 
 
 async def test_apply_lands_an_entry_keyed_below_the_ones_already_applied() -> None:
@@ -395,6 +421,49 @@ async def test_apply_lands_an_entry_keyed_below_the_ones_already_applied() -> No
     await apply(conn, "app")
 
     assert keys[1] in conn.recorded
+
+
+async def test_apply_runs_an_entry_again_after_its_lock_wait_ends() -> None:
+    _, sql = statements("app")[3]
+    conn = FakeConn(NEVER_MIGRATED, refusals={sql: 2})
+
+    assert await apply(conn, "app", SHORT_BOUNDS) == known_version()
+
+    assert conn.recorded == known_keys()
+    assert conn.executed.count(sql) == 1
+
+
+async def test_apply_stops_and_names_the_holders_when_a_lock_stays_held() -> None:
+    key, sql = statements("app")[3]
+    conn = FakeConn(NEVER_MIGRATED, refusals={sql: 10**6})
+
+    with pytest.raises(LockNotGrantedError, match=key) as stopped:
+        await apply(conn, "app", SHORT_BOUNDS)
+
+    assert A_HOLDER in str(stopped.value)
+    assert conn.recorded == known_keys()[:3]
+    assert any("pg_advisory_unlock" in query for query in conn.executed)
+
+
+async def test_apply_stops_when_another_migration_holds_the_lock_and_runs_nothing() -> None:
+    conn = FakeConn(NEVER_MIGRATED, migration_lock_held=True)
+
+    with pytest.raises(LockNotGrantedError, match="the migration lock") as stopped:
+        await apply(conn, "app", SHORT_BOUNDS)
+
+    assert A_HOLDER in str(stopped.value)
+    assert conn.recorded == []
+    assert not any("pg_advisory_unlock" in query for query in conn.executed)
+
+
+def test_a_bound_under_a_millisecond_is_refused() -> None:
+    with pytest.raises(ValueError, match="under a millisecond"):
+        MigrationBounds(attempt=0.0)
+
+
+def test_an_attempt_at_a_lock_lasts_well_under_the_applications_statement_bound() -> None:
+    """Each query of the application on a table waits behind an attempt on that table."""
+    assert MIGRATION_BOUNDS.attempt * 2 <= TIMEOUTS.statement
 
 
 async def test_apply_revokes_the_ledger_on_every_run() -> None:
@@ -468,7 +537,8 @@ async def test_apply_refuses_a_database_carrying_an_entry_this_build_does_not() 
     with pytest.raises(SchemaTooNewError):
         await apply(conn, "app")
 
-    assert conn.executed == []
+    assert conn.recorded == []
+    assert all(query.startswith("SET ") for query in conn.executed)
 
 
 def test_the_committed_schema_sql_is_what_the_generator_emits() -> None:

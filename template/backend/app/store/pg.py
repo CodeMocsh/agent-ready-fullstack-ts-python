@@ -44,8 +44,7 @@ import math
 import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any
 from uuid import UUID, uuid4
 
 from app import log
@@ -86,6 +85,7 @@ from app.store.jobs import (
     stored_failure,
 )
 from app.store.migrate import check, schema_version
+from app.store.timeouts import TIMEOUTS, Timeouts, milliseconds
 
 _SET_TENANT = "SELECT set_config($1, $2, true)"
 _LIST = "SELECT id, title, done FROM tasks ORDER BY seq DESC LIMIT $1"
@@ -128,38 +128,6 @@ _HOLD_CLAIM = (
 )
 
 
-SMALLEST_BOUND: Final = 0.001
-
-
-@dataclass(frozen=True)
-class Timeouts:
-    """How long each wait may last, in seconds, before it raises. Each is at least a
-    millisecond, because Postgres reads a bound of zero as no bound at all."""
-
-    statement: float = 5.0
-    """Postgres cancels a statement that runs longer, and asyncpg raises `QueryCanceledError`."""
-
-    idle_in_transaction: float = 10.0
-    """Postgres ends a session that holds a transaction open and sends nothing. Its locks go
-    with it."""
-
-    acquire: float = 5.0
-    """A request that finds every connection in use waits this long, then `AcquireTimedOut`."""
-
-    def __post_init__(self) -> None:
-        if min(self.statement, self.idle_in_transaction, self.acquire) < SMALLEST_BOUND:
-            raise ValueError(f"{self} holds a bound under a millisecond, which Postgres ignores")
-
-    @property
-    def answer(self) -> float:
-        """How long asyncpg waits for any answer before it raises `TimeoutError`. A second
-        longer than `statement`, so Postgres reports a slow statement first."""
-        return self.statement + 1.0
-
-
-TIMEOUTS: Final = Timeouts()
-
-
 class AcquireTimedOut(DatabaseUnavailable):
     """No connection came to a request within `Timeouts.acquire`: every one stayed in use, or a
     new one did not open in time."""
@@ -174,10 +142,6 @@ class ConnectionLost(DatabaseUnavailable):
     """A lent connection ended during a unit of work: the server stopped or ended the session, or
     the network dropped it. The unit may have committed. A transaction left idle past
     `Timeouts.idle_in_transaction` ends this way too."""
-
-
-def _milliseconds(seconds: float) -> str:
-    return str(round(seconds * 1000))
 
 
 def _driver() -> Any:
@@ -493,10 +457,8 @@ class PostgresDatabase:
     def _server_settings(self) -> dict[str, str]:
         return {
             "search_path": self.schema,
-            "statement_timeout": _milliseconds(self._timeouts.statement),
-            "idle_in_transaction_session_timeout": _milliseconds(
-                self._timeouts.idle_in_transaction
-            ),
+            "statement_timeout": milliseconds(self._timeouts.statement),
+            "idle_in_transaction_session_timeout": milliseconds(self._timeouts.idle_in_transaction),
         }
 
     async def _budgeted(self) -> ConnectionBudget:

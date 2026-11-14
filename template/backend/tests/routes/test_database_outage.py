@@ -11,7 +11,8 @@ from app import log
 from app.deps import database_of
 from app.refusal import NoConnectionFree
 from app.store.budget import Draws
-from app.store.pg import TIMEOUTS, PostgresDatabase
+from app.store.pg import PostgresDatabase
+from app.store.timeouts import TIMEOUTS
 from tests.conftest import Logged
 from tests.routed import routed
 from tests.store.test_pg import a_port_nothing_answers

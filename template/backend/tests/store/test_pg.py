@@ -7,7 +7,8 @@ import asyncpg
 import pytest
 
 from app.store.budget import Draws
-from app.store.pg import TIMEOUTS, ConnectionRefused, PostgresDatabase, Timeouts
+from app.store.pg import ConnectionRefused, PostgresDatabase
+from app.store.timeouts import TIMEOUTS, Timeouts
 
 
 @pytest.mark.parametrize("field", ["statement", "idle_in_transaction", "acquire"])
