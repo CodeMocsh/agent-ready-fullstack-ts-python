@@ -8,7 +8,8 @@ that may hold more than one connection at once, until it does not.
 """
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Final
 from uuid import UUID, uuid4
@@ -41,6 +42,7 @@ from tests.integration.reading import (
 EACH_ALONE: Final = "/each-task-alone"
 EACH_AT_ONCE: Final = "/each-task-at-once"
 EACH_LOADED: Final = "/each-task-loaded"
+WHILE_THE_LIFESPAN_READS: Final = "/while-the-lifespan-reads"
 
 
 @dataclass(frozen=True)
@@ -255,3 +257,65 @@ def test_a_read_for_each_item_is_found_and_a_loader_reads_each_set_read_once(
     assert past_a_page[EACH_LOADED] == at_one[EACH_LOADED]
     assert past_a_page[EACH_LOADED].most_held == 1
     assert past_a_page[EACH_ALONE].statements - at_one[EACH_ALONE].statements >= PAGE_MAX - 1
+
+
+@dataclass(frozen=True)
+class Steps:
+    """The order in which a route and a task of the lifespan each hold a connection."""
+
+    route_started: asyncio.Event
+    lifespan_holds: asyncio.Event
+    route_done: asyncio.Event
+
+
+def with_lifespan_work_that_reads(app: FastAPI, steps: Steps) -> None:
+    """Start a task in the lifespan of `app` that holds a connection from when a route starts
+    until it is done."""
+    serves = app.router.lifespan_context
+
+    async def reads(database: Any) -> None:
+        assert isinstance(database, PostgresDatabase)
+        await steps.route_started.wait()
+        async with database.connection() as conn:
+            _ = await conn.fetchval("SELECT 1")
+            steps.lifespan_holds.set()
+            await steps.route_done.wait()
+
+    @asynccontextmanager
+    async def lifespan(started: FastAPI) -> AsyncGenerator[Any]:
+        async with serves(started) as state, asyncio.TaskGroup() as group:
+            work = group.create_task(reads(started.state.database))
+            yield state
+            _ = work.cancel()
+
+    app.router.lifespan_context = lifespan
+
+
+def test_work_that_serves_no_request_is_not_counted_as_the_request_s(
+    provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, count: Count
+) -> None:
+    (one, _), _ = tenants(provisioned)
+    steps = Steps(asyncio.Event(), asyncio.Event(), asyncio.Event())
+    app = create_app()
+
+    async def while_the_lifespan_reads(request: Request, principal: PrincipalDep) -> int:
+        steps.route_started.set()
+        await steps.lifespan_holds.wait()
+        database, tenant_id = tenant_of(request, principal)
+        async with database.scoped(tenant_id) as conn:
+            held: int = await conn.fetchval("SELECT count(*) FROM tasks")
+        steps.route_done.set()
+        return held
+
+    app.add_api_route(WHILE_THE_LIFESPAN_READS, while_the_lifespan_reads, methods=["GET"])
+    with_lifespan_work_that_reads(app, steps)
+    read: list[Reads] = []
+    with served(provisioned, one, monkeypatch, app) as client:
+        for _ in range(2):
+            count.clear()
+            assert client.get(WHILE_THE_LIFESPAN_READS).status_code == 200
+            read.append(Reads(count.statements, count.connections, count.most_held))
+
+    assert steps.lifespan_holds.is_set()
+    assert read[0] == read[1]
+    assert read[0].most_held == 1

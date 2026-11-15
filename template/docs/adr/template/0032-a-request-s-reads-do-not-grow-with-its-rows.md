@@ -70,8 +70,10 @@ page could hold every connection of a process.
 - **Every GET route reads no more past a page than at one row, on Postgres.**
   `tests/integration/test_routes_read_a_fixed_count.py` fills one tenant with one row in each
   table, and one with `ROWS`, past a page. It reads each GET route in `openapi.json` in each
-  tenant. For each request it counts the statements and the connections taken on pooled
-  connections, and the most connections held at once. It fails when a route makes more statements
+  tenant. For each request it counts the statements and the connections that the request, and
+  each task it starts, take on pooled connections, and the most connections held at once. A loop
+  of the process serves no request, and the count leaves it out, so the count does not depend on
+  when a loop runs. It fails when a route makes more statements
   or takes more connections past a page than at one row. It fails when a request holds more than
   one connection at once. The count is at the connection, as in 0026, so a new store method cannot
   escape it.
@@ -87,7 +89,8 @@ page could hold every connection of a process.
   each task of a page alone, a route that starts those reads at once in a `TaskGroup`, and a route
   that reads them through the loader. It asserts that the first two grow with the rows, that only
   the second holds more than one connection, and that the loader's route reads as much past a page
-  as at one row.
+  as at one row. Another test starts a task in the lifespan that holds a connection while a route
+  runs, and asserts that the route's count does not change.
 
 ## Considered options
 
