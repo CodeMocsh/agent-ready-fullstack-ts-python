@@ -8,7 +8,7 @@ that may hold more than one connection at once, until it does not.
 """
 
 import asyncio
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Final
@@ -21,6 +21,7 @@ from app.deps import PrincipalDep, database_of
 from app.main import create_app
 from app.models import PAGE_MAX, TaskPage
 from app.store.pg import PostgresDatabase
+from app.waits import SharedWork, beside
 from tests.integration.conftest import Provisioned
 from tests.integration.filled import (
     GROWS_WITH_ROWS,
@@ -42,7 +43,7 @@ from tests.integration.reading import (
 EACH_ALONE: Final = "/each-task-alone"
 EACH_AT_ONCE: Final = "/each-task-at-once"
 EACH_LOADED: Final = "/each-task-loaded"
-WHILE_THE_LIFESPAN_READS: Final = "/while-the-lifespan-reads"
+WHILE_OTHERS_HOLD: Final = "/while-others-hold"
 
 
 @dataclass(frozen=True)
@@ -260,26 +261,33 @@ def test_a_read_for_each_item_is_found_and_a_loader_reads_each_set_read_once(
 
 
 @dataclass(frozen=True)
-class Steps:
-    """The order in which a route and a task of the lifespan each hold a connection."""
+class Overlap:
+    """When a route reads, and when shared work that the lifespan started holds a connection."""
 
     route_started: asyncio.Event
     lifespan_holds: asyncio.Event
     route_done: asyncio.Event
 
 
-def with_lifespan_work_that_reads(app: FastAPI, steps: Steps) -> None:
-    """Start a task in the lifespan of `app` that holds a connection from when a route starts
-    until it is done."""
+async def holds(database: PostgresDatabase, holding: asyncio.Event, until: asyncio.Event) -> None:
+    async with database.connection() as conn:
+        _ = await conn.fetchval("SELECT 1")
+        holding.set()
+        await until.wait()
+
+
+def with_lifespan_work_that_reads(app: FastAPI, overlap: Overlap) -> None:
+    """Start a task in the lifespan of `app`. When a route starts, the task holds a connection in
+    shared work until the route is done."""
     serves = app.router.lifespan_context
+    shared = SharedWork[str, None]("held by the lifespan")
 
     async def reads(database: Any) -> None:
         assert isinstance(database, PostgresDatabase)
-        await steps.route_started.wait()
-        async with database.connection() as conn:
-            _ = await conn.fetchval("SELECT 1")
-            steps.lifespan_holds.set()
-            await steps.route_done.wait()
+        await overlap.route_started.wait()
+        await shared.joined(
+            "held", lambda: holds(database, overlap.lifespan_holds, overlap.route_done)
+        )
 
     @asynccontextmanager
     async def lifespan(started: FastAPI) -> AsyncGenerator[Any]:
@@ -291,32 +299,47 @@ def with_lifespan_work_that_reads(app: FastAPI, steps: Steps) -> None:
     app.router.lifespan_context = lifespan
 
 
+def while_others_hold(overlap: Overlap) -> Callable[..., Awaitable[int]]:
+    """A route that reads while the lifespan's shared work holds a connection, and while shared
+    work that its own work beside the request starts holds another."""
+    shared = SharedWork[str, None]("held beside the request")
+
+    async def route(request: Request, principal: PrincipalDep) -> int:
+        database, tenant_id = tenant_of(request, principal)
+        overlap.route_started.set()
+        beside_holds, route_done = asyncio.Event(), asyncio.Event()
+        held = beside(
+            shared.joined("held", lambda: holds(database, beside_holds, route_done)),
+            name="holds beside the request",
+            within=5,
+        )
+        async with asyncio.timeout(5):
+            _ = await asyncio.gather(overlap.lifespan_holds.wait(), beside_holds.wait())
+        async with database.scoped(tenant_id) as conn:
+            tasks: int = await conn.fetchval("SELECT count(*) FROM tasks")
+        route_done.set()
+        overlap.route_done.set()
+        await held
+        return tasks
+
+    return route
+
+
 def test_work_that_serves_no_request_is_not_counted_as_the_request_s(
     provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, count: Count
 ) -> None:
     (one, _), _ = tenants(provisioned)
-    steps = Steps(asyncio.Event(), asyncio.Event(), asyncio.Event())
+    overlap = Overlap(asyncio.Event(), asyncio.Event(), asyncio.Event())
     app = create_app()
-
-    async def while_the_lifespan_reads(request: Request, principal: PrincipalDep) -> int:
-        steps.route_started.set()
-        async with asyncio.timeout(5):
-            await steps.lifespan_holds.wait()
-        database, tenant_id = tenant_of(request, principal)
-        async with database.scoped(tenant_id) as conn:
-            tasks: int = await conn.fetchval("SELECT count(*) FROM tasks")
-        steps.route_done.set()
-        return tasks
-
-    app.add_api_route(WHILE_THE_LIFESPAN_READS, while_the_lifespan_reads, methods=["GET"])
-    with_lifespan_work_that_reads(app, steps)
+    app.add_api_route(WHILE_OTHERS_HOLD, while_others_hold(overlap), methods=["GET"])
+    with_lifespan_work_that_reads(app, overlap)
     read: list[Reads] = []
     with served(provisioned, one, monkeypatch, app) as client:
         for _ in range(2):
             count.clear()
-            assert client.get(WHILE_THE_LIFESPAN_READS).status_code == 200
+            assert client.get(WHILE_OTHERS_HOLD).status_code == 200
             read.append(Reads(count.statements, count.connections, count.most_held))
 
-    assert steps.lifespan_holds.is_set()
+    assert overlap.lifespan_holds.is_set()
     assert read[0] == read[1]
     assert read[0].most_held == 1

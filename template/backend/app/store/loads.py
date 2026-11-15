@@ -20,6 +20,7 @@ from typing import Any, Final
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app import waits
 from app.models import PAGE_MAX
 from app.waits import SharedWork
 
@@ -129,16 +130,18 @@ def loading() -> Generator[None]:
 def loader_of(whose: Hashable, unit: Unit) -> Loader:
     """The loader of `whose` in this scope of `loading`, made on first use, which runs each turn
     in `unit()`. `whose` names everything that a loader must not cross: the database and the
-    tenant. Raises `NotLoading` outside `loading`."""
+    tenant. A task that work beside the requests started gets loaders of its own, apart from
+    those of the request that started the work. Raises `NotLoading` outside `loading`."""
     loaders = _LOADERS.get()
     if loaders is None:
         raise NotLoading(
             f"a loader for {whose!r} was asked for outside a request and outside an attempt of a "
             f"job. Run the work inside app.store.loads.loading."
         )
-    if whose not in loaders:
-        loaders[whose] = Loader(unit)
-    return loaders[whose]
+    key = (whose, waits.started_beside())
+    if key not in loaders:
+        loaders[key] = Loader(unit)
+    return loaders[key]
 
 
 class LoadsPerRequest:

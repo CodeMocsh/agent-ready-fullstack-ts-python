@@ -29,7 +29,7 @@ from tests.jobs_contract import contract_kinds
 READ_ALONE: Final = frozenset({"/reads"})
 """GET routes the tests do not read."""
 
-_SERVING: ContextVar[bool] = ContextVar("serving a request", default=False)
+_SERVING: ContextVar[bool] = ContextVar("serving_a_request", default=False)
 """Whether the running task serves a request of `served`, or was started by one."""
 
 
@@ -101,7 +101,7 @@ def counting(monkeypatch: pytest.MonkeyPatch) -> Count:
     @asynccontextmanager
     async def connection(self: PostgresDatabase) -> AsyncGenerator[Any]:
         lent: AbstractAsyncContextManager[Any] = unmeasured(self)
-        if not (_SERVING.get() and waits.in_a_request()):
+        if not _SERVING.get() or waits.started_beside():
             async with lent as conn:
                 yield conn
             return

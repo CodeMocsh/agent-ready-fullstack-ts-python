@@ -89,8 +89,9 @@ page could hold every connection of a process.
   each task of a page alone, a route that starts those reads at once in a `TaskGroup`, and a route
   that reads them through the loader. It asserts that the first two grow with the rows, that only
   the second holds more than one connection, and that the loader's route reads as much past a page
-  as at one row. Another test starts a task in the lifespan that holds a connection while a route
-  runs, and asserts that the route's count does not change.
+  as at one row. Another test holds a connection while a route reads, in shared work that the
+  lifespan starts, and in shared work that work beside the request starts. It asserts that the
+  route holds one connection at a time, and counts the same on each read.
 
 ## Considered options
 
@@ -130,7 +131,9 @@ page could hold every connection of a process.
   The test sees it as more than one connection at once.
 - A project's set reads are SQL on Postgres. The memory substrate answers each item from its own
   rows, and needs no loader. A route test on the memory substrate does not see a read that grows.
-- Work beside the requests that a request starts uses the loaders of that request.
+- Work beside the requests, and each task and run of shared work that it starts, gets loaders of
+  its own, apart from those of the request that started the work. Shared work that a request
+  started, and that work beside the requests joins, still reads with the request's loader.
 - A project changes `filled` to take `rows` when it updates. The update does not write
   `tests/integration/filled.py`.
 - The count does not see a read on a connection outside the pool, such as `dedicated()`. A
