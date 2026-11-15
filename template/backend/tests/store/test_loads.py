@@ -1,5 +1,5 @@
-"""A loader reads the keys that one turn asks for in one statement for each kind, and the kinds
-of a turn in one unit of work. `docs/adr/template/0032`."""
+"""A loader reads the keys that one turn asks for in one statement for each set read, and every
+set read of a turn in one unit of work. `docs/adr/template/0032`."""
 
 import asyncio
 from collections.abc import AsyncGenerator, Mapping, Sequence
@@ -82,7 +82,7 @@ async def test_the_keys_that_one_turn_asks_for_are_one_statement() -> None:
     assert units.opened == 1
 
 
-async def test_each_kind_of_a_turn_is_a_statement_of_one_unit() -> None:
+async def test_each_set_read_of_a_turn_is_a_statement_of_one_unit() -> None:
     units = Units()
     with loading():
         loader = loader_of("t", units.unit)
@@ -95,7 +95,7 @@ async def test_each_kind_of_a_turn_is_a_statement_of_one_unit() -> None:
     assert units.opened == 1
 
 
-async def test_more_keys_than_a_page_are_handed_a_page_at_a_time() -> None:
+async def test_more_keys_than_page_max_are_handed_page_max_at_a_time() -> None:
     units = Units()
     keys = list(range(PAGE_MAX + 1))
     with loading():
@@ -166,8 +166,20 @@ async def test_a_turn_whose_callers_are_each_cancelled_leaves_its_unit() -> None
             await yield_now()
 
     assert caller.cancelled()
-
     assert units.opened == 1
+
+
+async def test_a_set_read_that_asks_a_loader_is_refused() -> None:
+    units = Units()
+    with loading():
+        loader = loader_of("t", units.unit)
+
+        async def asks_again(_conn: Units, keys: Sequence[int]) -> Mapping[int, int]:
+            return {key: await loader.load(doubled, key) for key in keys}
+
+        with pytest.raises(RuntimeError, match="reads on the connection it is handed"):
+            async with asyncio.timeout(1):
+                _ = await loader.load(asks_again, 1)
 
 
 def test_a_loader_outside_a_scope_is_refused() -> None:
@@ -175,7 +187,7 @@ def test_a_loader_outside_a_scope_is_refused() -> None:
         _ = loader_of("t", Units().unit)
 
 
-def test_a_scope_has_one_loader_for_each_key_and_another_scope_has_its_own() -> None:
+def test_a_scope_has_one_loader_for_each_tenant_and_another_scope_has_its_own() -> None:
     units = Units()
     with loading():
         first = loader_of("t", units.unit)

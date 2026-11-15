@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.deps import admitted, resolved_principal
 from app.identity.shared import Principal
 from app.jobs import kinds
+from app.models import PAGE_MAX
 from app.store import Database
 from app.store.ddl import TENANT_TABLES
 from app.store.jobs import Kinds
@@ -126,6 +127,12 @@ async def fill(
         return paths, held
     finally:
         await database.close()
+
+
+def short_of(held: Mapping[str, int]) -> dict[str, int]:
+    """Each table of `held` that holds no more than `PAGE_MAX + 1` rows, with its count: one page
+    or less."""
+    return {table: rows for table, rows in held.items() if rows <= PAGE_MAX + 1}
 
 
 def read_by_get(app: FastAPI) -> frozenset[str]:

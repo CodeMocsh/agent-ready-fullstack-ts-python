@@ -1,6 +1,6 @@
 """A GET route's reads do not grow with its rows, and a request holds one connection at a time.
-Each GET route reads a tenant of one row with as many statements and connections as a tenant past
-a page. `docs/adr/template/0032`.
+No GET route makes more statements or takes more connections in a tenant past a page than in a
+tenant of one row. `docs/adr/template/0032`.
 
 The template owns this module. `tests/integration/filled.py` is the project's list: how it fills a
 tenant, the path of each GET route, each route whose reads may grow with its rows, and each route
@@ -24,6 +24,7 @@ from tests.integration.conftest import Provisioned
 from tests.integration.filled import (
     GROWS_WITH_ROWS,
     MORE_THAN_ONE_CONNECTION,
+    NOT_FILLED_YET,
     NOT_READ_YET,
     ROWS,
 )
@@ -34,6 +35,7 @@ from tests.integration.reading import (
     fill,
     read_by_get,
     served,
+    short_of,
 )
 
 EACH_ALONE: Final = "/each-task-alone"
@@ -83,7 +85,7 @@ def grown(one: Mapping[str, Reads], page: Mapping[str, Reads]) -> dict[str, tupl
     return {
         route: (one[route], read)
         for route, read in page.items()
-        if (read.statements, read.connections) != (one[route].statements, one[route].connections)
+        if read.statements > one[route].statements or read.connections > one[route].connections
     }
 
 
@@ -103,7 +105,14 @@ def tenants(
     """A tenant of one row and a tenant past a page, each with the path of each GET route."""
     one, page = f"one-{uuid4().hex}", f"page-{uuid4().hex}"
     one_paths, one_held = asyncio.run(fill(where, one, 1))
-    page_paths, _ = asyncio.run(fill(where, page, ROWS))
+    page_paths, page_held = asyncio.run(fill(where, page, ROWS))
+    short = {
+        table: rows for table, rows in short_of(page_held).items() if table not in NOT_FILLED_YET
+    }
+    assert short == {}, (
+        f"filled with {ROWS} rows left {short} rows in these tables, one page or less. Write as "
+        f"many rows as filled is asked for, or name the table in NOT_FILLED_YET."
+    )
     full = {table: rows for table, rows in one_held.items() if rows >= PAGE_MAX}
     assert full == {}, (
         f"filled with one row left {full} rows in these tables, a page or more. Write as many "
@@ -162,7 +171,7 @@ async def each_task_loaded(request: Request, principal: PrincipalDep) -> list[st
     return [task.result() for task in read]
 
 
-def test_each_get_route_reads_as_much_at_one_row_as_past_a_page(
+def test_no_get_route_reads_more_past_a_page_than_at_one_row(
     provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, count: Count
 ) -> None:
     (one, one_paths), (page, page_paths) = tenants(provisioned)
@@ -194,8 +203,8 @@ def test_each_get_route_reads_as_much_at_one_row_as_past_a_page(
 
     assert grew == {}, (
         f"Each of these GET routes made more statements or took more connections at {ROWS} rows "
-        f"than at one, as (at one, at {ROWS}): {grew}. Read each kind of fact for every item of "
-        f"a page in one set read, through PostgresDatabase.loader, or name the route in "
+        f"than at one, as (at one, at {ROWS}): {grew}. Read each fact of the items of a page in "
+        f"one set read, through PostgresDatabase.loader in the store, or name the route in "
         f"GROWS_WITH_ROWS in tests/integration/filled.py, with its reason."
     )
     assert held == {}, (
@@ -204,8 +213,8 @@ def test_each_get_route_reads_as_much_at_one_row_as_past_a_page(
         f"tests/integration/filled.py, with its reason."
     )
     assert grew_in_vain == [], (
-        f"GROWS_WITH_ROWS in tests/integration/filled.py names {grew_in_vain}. Each read as much "
-        f"at one row as at {ROWS}. Remove each from the list."
+        f"GROWS_WITH_ROWS in tests/integration/filled.py names {grew_in_vain}. Each read no more "
+        f"at {ROWS} rows than at one. Remove each from the list."
     )
     assert held_in_vain == [], (
         f"MORE_THAN_ONE_CONNECTION in tests/integration/filled.py names {held_in_vain}. Each held "
@@ -228,7 +237,7 @@ def test_each_entry_of_a_list_names_its_reason(named: str, listed: Mapping[str, 
     )
 
 
-def test_a_read_for_each_item_is_found_and_a_loader_reads_each_kind_once(
+def test_a_read_for_each_item_is_found_and_a_loader_reads_each_set_read_once(
     provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, count: Count
 ) -> None:
     (one, _), (page, _) = tenants(provisioned)

@@ -35,8 +35,9 @@ Remove a route when it reads a page."""
 
 GROWS_WITH_ROWS: dict[str, str] = {}
 """Each GET route template whose statements or connections at `ROWS` rows are more than at one
-row, and the reason. The test fails on a route that the list names and that reads as much at both,
-and on a reason that is empty. Remove a route when its reads do not grow with its rows."""
+row, and the reason. The test fails on a route that the list names and that reads no more past a
+page than at one row, and on a reason that is empty. Remove a route when its reads do not grow
+with its rows."""
 
 MORE_THAN_ONE_CONNECTION: dict[str, str] = {}
 """Each GET route template that holds more than one connection at once, and the reason. The test

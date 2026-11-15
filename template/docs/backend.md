@@ -230,16 +230,18 @@ backend/
   it reads a page. A table the fill does not reach yet goes in `NOT_FILLED_YET`, and a route it
   answers no path for in `NOT_READ_YET`, each with its reason. A test that needs the whole list reads it with `tests/pages.py`.
   [adr/template/0026](adr/template/0026-every-store-read-is-a-page.md) says why.
-- **A request's reads do not grow with its rows.** Code for one item of a page asks
-  `PostgresDatabase.loader(tenant_id).load(read, key)` for each fact, and the items start in one
+- **A request's reads do not grow with its rows.** A Postgres store method for one item asks
+  `self._database.loader(self._tenant_id).load(read, key)` for its fact, and its memory twin
+  answers from its own rows. A route calls the method for each item of a page, in one
   `asyncio.TaskGroup`. `read` is a set read: one statement that answers one value for each key it
   is handed. A fact of many rows for each key is a `GROUP BY` of the key. A key whose value this
   build cannot read answers an exception, which raises in that item only. The loader runs each set
   read of a turn of the event loop once, in one transaction.
   `tests/integration/test_routes_read_a_fixed_count.py` reads each GET route at one row and past a
-  page, and fails on a route that makes more statements past a page, or holds more than one
-  connection at once. A route that does so today goes in `GROWS_WITH_ROWS` or
-  `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py`, with its reason.
+  page. It fails on a route that makes more statements or takes more connections past a page,
+  and on one that holds more than one connection at once. A route that does so today goes in
+  `GROWS_WITH_ROWS` or `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py`, with its
+  reason.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
   the row makes Postgres evaluate it for every row, and the index cannot help.

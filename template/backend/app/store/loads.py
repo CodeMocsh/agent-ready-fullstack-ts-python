@@ -1,11 +1,12 @@
-"""The reads of a request's items: one set read for each kind, in one transaction.
+"""The reads of a request's items: one statement for each set read, in one transaction.
 
 A set read is one statement that answers one value for each of many keys, as `= ANY($1)` does.
 Code for one item asks a loader for one key. The loader holds each key that the request asks in
 one turn of the event loop. Then it runs every set read of that turn, one after another, in one
-unit of work. So a page of items costs one statement for each kind of read, whatever the page
-holds, and the request holds one connection for them. `docs/adr/template/0032`.
+unit of work. So a page of items costs one statement for each set read, whatever the page holds,
+and the request holds one connection for them. `docs/adr/template/0032`.
 
+A Postgres store method for one item asks the loader. Its memory twin answers from its own rows.
 Items share a turn only when each asks before the turn ends. Start them in one
 `asyncio.TaskGroup`. An item that awaits something else first asks in a later turn.
 """
@@ -29,7 +30,8 @@ an aggregate in SQL, such as a `GROUP BY` of the key, and never a page for each 
 
 A failure of one key's value, such as a row that this build cannot read, is the answer for that
 key: an exception, which `Loader.load` raises in the callers of that key only. A set read raises
-only when the statement fails, and that fails every key of its turn."""
+only when the statement fails, and that fails every key of its turn. A set read reads only on
+the connection it is handed, and asks no loader: `Loader.load` raises `RuntimeError` in it."""
 
 type Unit = Callable[[], AbstractAsyncContextManager[Any]]
 """A unit of work: a connection inside the tenant's transaction."""
@@ -37,6 +39,8 @@ type Unit = Callable[[], AbstractAsyncContextManager[Any]]
 type _Answers = dict[SetRead[Any, Any], Mapping[Any, Any]]
 
 _LOADERS: ContextVar[dict[Hashable, "Loader"] | None] = ContextVar("loaders", default=None)
+
+_IN_A_TURN: ContextVar[bool] = ContextVar("in_a_turn", default=False)
 
 
 class NotAnswered(LookupError):
@@ -48,8 +52,8 @@ class NotLoading(RuntimeError):
 
 
 class Loader:
-    """The set reads of one scope of `loading` for one key, such as a tenant of a database.
-    `loader_of` makes each one."""
+    """The set reads of one scope of `loading` for one tenant of one database. `loader_of` makes
+    each one."""
 
     def __init__(self, unit: Unit) -> None:
         self._unit: Final = unit
@@ -66,8 +70,14 @@ class Loader:
         waits until the turn before it has ended, so one loader holds one connection at a time. A
         failure of the turn raises in each of its callers: `NotAnswered` when a set read answers
         other keys than it was handed, `DatabaseUnavailable` when the database does not serve the
-        turn, and what a set read raises. The turn is shared work: when each of its callers is cancelled, the
-        turn is cancelled and its transaction rolls back."""
+        turn, and what a set read raises. The turn is shared work: when each of its callers is
+        cancelled, the turn is cancelled, and it leaves its unit of work. Raises `RuntimeError` in a
+        set read."""
+        if _IN_A_TURN.get():
+            raise RuntimeError(
+                f"a set read asked a loader for {read.__qualname__}. A set read reads on the "
+                f"connection it is handed."
+            )
         turn = self._turn
         self._asked.setdefault(turn, {}).setdefault(read, {})[key] = None
         answers = await self._turns.joined(turn, lambda: self._read(turn))
@@ -77,6 +87,7 @@ class Loader:
         return answer
 
     async def _read(self, turn: int) -> _Answers:
+        _ = _IN_A_TURN.set(True)
         async with self._one_at_a_time:
             asked = self._asked.pop(turn)
             self._turn = turn + 1
@@ -105,7 +116,7 @@ async def _answered(conn: Any, read: SetRead[Any, Any], keys: list[Any]) -> Mapp
 
 @contextmanager
 def loading() -> Generator[None]:
-    """A scope of loaders. Inside it, `loader_of` answers one loader for each key. Each HTTP
+    """A scope of loaders. Inside it, `loader_of` answers one loader for each `whose`. Each HTTP
     request is one scope, and each attempt of a job is one. A task started inside the scope,
     such as an item of an `asyncio.TaskGroup`, shares it."""
     scope = _LOADERS.set({})
@@ -115,19 +126,19 @@ def loading() -> Generator[None]:
         _LOADERS.reset(scope)
 
 
-def loader_of(key: Hashable, unit: Unit) -> Loader:
-    """The loader of `key` in this scope of `loading`, made on first use, which runs each turn
-    in `unit()`. A key names everything that a loader must not cross, such as the database and
-    the tenant. Raises `NotLoading` outside `loading`."""
+def loader_of(whose: Hashable, unit: Unit) -> Loader:
+    """The loader of `whose` in this scope of `loading`, made on first use, which runs each turn
+    in `unit()`. `whose` names everything that a loader must not cross: the database and the
+    tenant. Raises `NotLoading` outside `loading`."""
     loaders = _LOADERS.get()
     if loaders is None:
         raise NotLoading(
-            f"a loader for {key!r} was asked for outside a request and outside an attempt of a "
+            f"a loader for {whose!r} was asked for outside a request and outside an attempt of a "
             f"job. Run the work inside app.store.loads.loading."
         )
-    if key not in loaders:
-        loaders[key] = Loader(unit)
-    return loaders[key]
+    if whose not in loaders:
+        loaders[whose] = Loader(unit)
+    return loaders[whose]
 
 
 class LoadsPerRequest:

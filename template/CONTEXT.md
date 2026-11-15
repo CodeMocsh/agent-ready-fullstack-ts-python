@@ -218,13 +218,13 @@ At most `PAGE_MAX` rows of a list, and `next`: the cursor where the page after i
 _Avoid_: batch, chunk, slice. A screen is never a page.
 
 **Set read**:
-One statement that reads one kind of fact for many keys, and answers one value for each key, as
+One statement that reads one fact for many keys, and answers one value for each key, as
 `= ANY($1)` does. A `SetRead` in `app/store/loads.py`. `docs/adr/template/0032`.
 _Avoid_: batch, bulk read, multi-get.
 
 **Loader**:
-What reads the keys that the items of one request ask for in one turn of the event loop: one set
-read for each kind, one after another, in one transaction. It keeps nothing past the turn.
+What reads the keys that the items of one request ask for in one turn of the event loop: each set
+read of the turn once, one after another, in one transaction. It keeps nothing past the turn.
 `PostgresDatabase.loader` answers the loader of a tenant in a request, or in an attempt of a job.
 _Avoid_: DataLoader, batcher, identity map, cache.
 

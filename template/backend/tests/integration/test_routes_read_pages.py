@@ -28,6 +28,7 @@ from tests.integration.reading import (
     fill,
     read_by_get,
     served,
+    short_of,
 )
 
 PLANTED: Final = "/every-task"
@@ -36,11 +37,6 @@ PLANTED: Final = "/every-task"
 @pytest.fixture
 def count(monkeypatch: pytest.MonkeyPatch) -> Count:
     return counting(monkeypatch)
-
-
-def short_of(held: Mapping[str, int]) -> dict[str, int]:
-    """Each table of `held` that holds no more than `PAGE_MAX + 1` rows, with its count."""
-    return {table: rows for table, rows in held.items() if rows <= PAGE_MAX + 1}
 
 
 def gaps(
