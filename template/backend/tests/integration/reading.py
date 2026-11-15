@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app import waits
 from app.deps import admitted, resolved_principal
 from app.identity.shared import Principal
 from app.jobs import kinds
@@ -91,15 +92,16 @@ class Counted:
 
 
 def counting(monkeypatch: pytest.MonkeyPatch) -> Count:
-    """What each pooled connection that a request of `served` takes does from now on. Work that
-    serves no request, such as a loop of the process, is not counted."""
+    """What each pooled connection that a request of `served` takes does from now on: its route,
+    and the tasks and shared work it starts. A loop of the process, an attempt of a job and work
+    beside the requests are not counted, even when they run during the request."""
     counted = Count()
     unmeasured = PostgresDatabase.connection
 
     @asynccontextmanager
     async def connection(self: PostgresDatabase) -> AsyncGenerator[Any]:
         lent: AbstractAsyncContextManager[Any] = unmeasured(self)
-        if not _SERVING.get():
+        if not (_SERVING.get() and waits.in_a_request()):
             async with lent as conn:
                 yield conn
             return

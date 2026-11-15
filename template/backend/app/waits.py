@@ -60,6 +60,12 @@ class BesideOutlivedItsCancel(RuntimeError):
     its cancel."""
 
 
+def in_a_request() -> bool:
+    """Whether the running task serves a request, or runs shared work, which is in a request
+    whoever starts it. Work beside the requests is not."""
+    return _IN_A_REQUEST.get()
+
+
 def instrument(app: FastAPI) -> None:
     """Mark every HTTP request `app` serves as a request, for `waiting`. A WebSocket and the
     lifespan are not marked."""

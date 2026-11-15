@@ -300,12 +300,13 @@ def test_work_that_serves_no_request_is_not_counted_as_the_request_s(
 
     async def while_the_lifespan_reads(request: Request, principal: PrincipalDep) -> int:
         steps.route_started.set()
-        await steps.lifespan_holds.wait()
+        async with asyncio.timeout(5):
+            await steps.lifespan_holds.wait()
         database, tenant_id = tenant_of(request, principal)
         async with database.scoped(tenant_id) as conn:
-            held: int = await conn.fetchval("SELECT count(*) FROM tasks")
+            tasks: int = await conn.fetchval("SELECT count(*) FROM tasks")
         steps.route_done.set()
-        return held
+        return tasks
 
     app.add_api_route(WHILE_THE_LIFESPAN_READS, while_the_lifespan_reads, methods=["GET"])
     with_lifespan_work_that_reads(app, steps)
