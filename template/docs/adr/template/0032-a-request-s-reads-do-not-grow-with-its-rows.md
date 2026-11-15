@@ -38,8 +38,8 @@ page could hold every connection of a process.
   A key asked twice in a turn is read once. More than `PAGE_MAX` keys go `PAGE_MAX` at a time.
   The items of a page start in one `asyncio.TaskGroup`, so each asks in the same turn.
 - **A turn is one unit of work, and a loader runs one turn at a time.** Each set read of the
-  turn runs, one after another, in one `scoped` transaction. A turn waits until the turn before it ends.
-  So one loader holds one connection at a time.
+  turn runs, one after another, in one `scoped` transaction. A turn waits until the turn before
+  it ends. So one loader holds one connection at a time.
 - **A turn is shared work.** The loader runs each turn through `SharedWork`
   ([0021](0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md)). A failure raises
   in each caller of the turn. When each caller is cancelled, the turn is cancelled, and it leaves
@@ -70,11 +70,13 @@ page could hold every connection of a process.
 - **Every GET route reads no more past a page than at one row, on Postgres.**
   `tests/integration/test_routes_read_a_fixed_count.py` fills one tenant with one row in each
   table, and one with `ROWS`, past a page. It reads each GET route in `openapi.json` in each
-  tenant. For each request it counts the statements and the connections taken on pooled
-  connections, and the most connections held at once. It fails when a route makes more statements
-  or takes more connections past a page than at one row. It fails when a request holds more than
-  one connection at once. The count is at the connection, as in 0026, so a new store method cannot
-  escape it.
+  tenant. For each request it counts the statements and the pooled connections of the route, and
+  of the tasks and shared work it starts. It also counts the most connections held at once. A
+  loop of the process, an attempt of a job and work beside the requests are not counted, even
+  when they run during the request. So the count does not depend on when they run. The test fails
+  when a route makes more statements or takes more connections past a page than at one row. It
+  fails when a request holds more than one connection at once. The count is at the connection, as
+  in 0026, so a new store method cannot escape it.
 - **A route that does not meet this today is named, with its reason, until it does.**
   `GROWS_WITH_ROWS` and `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py` each map a GET
   route template to its reason. The template ships both empty. Each has the rules of
@@ -87,7 +89,9 @@ page could hold every connection of a process.
   each task of a page alone, a route that starts those reads at once in a `TaskGroup`, and a route
   that reads them through the loader. It asserts that the first two grow with the rows, that only
   the second holds more than one connection, and that the loader's route reads as much past a page
-  as at one row.
+  as at one row. Another test holds a connection while a route reads, in shared work that the
+  lifespan starts, and in shared work that work beside the request starts. It asserts that the
+  route holds one connection at a time, and counts the same on each read.
 
 ## Considered options
 
@@ -127,8 +131,12 @@ page could hold every connection of a process.
   The test sees it as more than one connection at once.
 - A project's set reads are SQL on Postgres. The memory substrate answers each item from its own
   rows, and needs no loader. A route test on the memory substrate does not see a read that grows.
-- Work beside the requests that a request starts uses the loaders of that request.
+- Work beside the requests, and each task and run of shared work that it starts, gets loaders of
+  its own, apart from those of the request that started the work. Shared work that a request
+  started, and that work beside the requests joins, still reads with the request's loader.
 - A project changes `filled` to take `rows` when it updates. The update does not write
   `tests/integration/filled.py`.
 - The count does not see a read on a connection outside the pool, such as `dedicated()`. A
   review finds it.
+- The count leaves out work beside the requests that a route starts. A read in that work is not
+  held to the rule. A review finds it.

@@ -4,13 +4,16 @@ request does on its pooled connections. `tests/integration/test_routes_read_page
 
 from collections.abc import AsyncGenerator, Generator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Final
 
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app import waits
 from app.deps import admitted, resolved_principal
 from app.identity.shared import Principal
 from app.jobs import kinds
@@ -25,6 +28,9 @@ from tests.jobs_contract import contract_kinds
 
 READ_ALONE: Final = frozenset({"/reads"})
 """GET routes the tests do not read."""
+
+_SERVING: ContextVar[bool] = ContextVar("serving_a_request", default=False)
+"""Whether the running task serves a request of `served`, or was started by one."""
 
 
 @dataclass
@@ -86,13 +92,19 @@ class Counted:
 
 
 def counting(monkeypatch: pytest.MonkeyPatch) -> Count:
-    """What each pooled connection does from now on."""
+    """What each pooled connection that a request of `served` takes does from now on: its route,
+    and the tasks and shared work it starts. A loop of the process, an attempt of a job and work
+    beside the requests are not counted, even when they run during the request."""
     counted = Count()
     unmeasured = PostgresDatabase.connection
 
     @asynccontextmanager
     async def connection(self: PostgresDatabase) -> AsyncGenerator[Any]:
         lent: AbstractAsyncContextManager[Any] = unmeasured(self)
+        if not _SERVING.get() or waits.started_beside():
+            async with lent as conn:
+                yield conn
+            return
         async with lent as conn:
             counted.connections += 1
             counted.held += 1
@@ -152,8 +164,25 @@ def served(
         return admitted(request, reader(tenant_id))
 
     app.dependency_overrides[resolved_principal] = the_reader
-    with TestClient(app) as client:
+    with TestClient(_Serving(app)) as client:
         yield client
+
+
+class _Serving:
+    """Marks each HTTP request, and each task it starts, as one that `counting` counts."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self._app: ASGIApp = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self._app(scope, receive, send)
+            return
+        serving = _SERVING.set(True)
+        try:
+            await self._app(scope, receive, send)
+        finally:
+            _SERVING.reset(serving)
 
 
 def against_the_list[T](

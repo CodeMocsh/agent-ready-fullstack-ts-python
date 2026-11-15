@@ -14,6 +14,7 @@ from app.models import PAGE_MAX
 from app.pacing import yield_now
 from app.store import loads
 from app.store.loads import Loader, NotAnswered, NotLoading, loader_of, loading
+from app.waits import beside
 
 
 @dataclass
@@ -195,6 +196,19 @@ def test_a_scope_has_one_loader_for_each_tenant_and_another_scope_has_its_own() 
         assert loader_of("u", units.unit) is not first
     with loading():
         assert loader_of("t", units.unit) is not first
+
+
+async def test_work_beside_the_requests_has_loaders_of_its_own() -> None:
+    units = Units()
+    with loading():
+        of_the_request = loader_of("t", units.unit)
+
+        async def its_loader() -> Loader:
+            return loader_of("t", units.unit)
+
+        of_the_work = await beside(its_loader(), name="reads beside the request", within=1)
+
+    assert of_the_work is not of_the_request
 
 
 def test_each_request_has_a_scope_of_its_own() -> None:

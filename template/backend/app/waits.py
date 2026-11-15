@@ -33,6 +33,8 @@ _IN_A_REQUEST: ContextVar[bool] = ContextVar("in_a_request", default=False)
 
 _IN_A_PART: ContextVar[bool] = ContextVar("in_a_part", default=False)
 
+_BESIDE: ContextVar[bool] = ContextVar("beside", default=False)
+
 _STARTED: Final[set[asyncio.Task[Any]]] = set()
 
 
@@ -58,6 +60,12 @@ class WaitTimedOut(TimeoutError):
 class BesideOutlivedItsCancel(RuntimeError):
     """Work beside the requests, or shared work, did not end within `CANCELLED_WITHIN_SECONDS` of
     its cancel."""
+
+
+def started_beside() -> bool:
+    """Whether work beside the requests started the running task: it is that work, or a task or a
+    run of shared work that the work started, at any depth."""
+    return _BESIDE.get()
 
 
 def instrument(app: FastAPI) -> None:
@@ -259,6 +267,8 @@ def _started[T](
     context = copy_context()
     _ = context.run(_IN_A_REQUEST.set, in_a_request)
     _ = context.run(_IN_A_PART.set, False)
+    if not in_a_request:
+        _ = context.run(_BESIDE.set, True)
     task = asyncio.get_running_loop().create_task(work, name=name, context=context)
     _STARTED.add(task)
     task.add_done_callback(lambda _: _ended(task, failed, cancelled))
