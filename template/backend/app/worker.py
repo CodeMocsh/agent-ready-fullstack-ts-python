@@ -45,6 +45,7 @@ from app.store.jobs import (
     fenced,
     handler_of,
 )
+from app.store.loads import loading
 from app.store.pg import PostgresDatabase
 from app.store.pg_jobs import JobClaims
 from app.wiring import TelemetrySettings, build, build_service_version, build_telemetry
@@ -119,7 +120,7 @@ async def run(claims: JobClaims, claim: Claim) -> None:
     try:
         with fenced(claim):
             asked = await _served(held, lambda: claims.asked(claim))
-            with acting_as(asked.actor):
+            with acting_as(asked.actor), loading():
                 await _attempt(claims, claim, held, asked)
     except LeaseLost:
         log.lease_lost(kind=claim.kind, job=claim.id, attempt=claim.attempts)

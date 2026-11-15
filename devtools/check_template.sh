@@ -925,6 +925,7 @@ need backend/tests/tier.py
 need backend/tests/models/layers.py
 need backend/tests/integration/filled.py
 need backend/tests/integration/test_routes_read_pages.py "It holds every GET route to a page for each read (docs/adr/template/0026)"
+need backend/tests/integration/test_routes_read_a_fixed_count.py "It holds the reads of every GET route to a count that does not grow with its rows (docs/adr/template/0032)"
 need frontend/tests/read-budgets.ts
 need frontend/tests/signed-in.ts
 need backend/app/lifespan.py
@@ -987,7 +988,8 @@ need_only f docs/adr/template \
     0028-every-finite-response-has-a-byte-bound.md \
     0029-the-reads-that-start-in-one-task-are-one-request.md \
     0030-server-events-merge-and-share-a-read-budget.md \
-    0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md
+    0031-a-stored-failure-reaches-a-person-as-a-declared-cause.md \
+    0032-a-request-s-reads-do-not-grow-with-its-rows.md
 
 echo "==> assert tenant isolation is wired, not just described"
 need_grep 'FORCE ROW LEVEL SECURITY' deploy/schema.sql "Under ENABLE alone, a table's owner bypasses its own policies and reads every row."

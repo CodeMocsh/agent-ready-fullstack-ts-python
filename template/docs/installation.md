@@ -641,6 +641,18 @@ What to expect, because it is not all free:
     every other login a server-side bound. [deployment.md](deployment.md#the-release-step) says
     how.
 
+- **From 0.81.0 a GET route reads no more past a page than at one row.** After the update:
+  - Give `filled` in `backend/tests/integration/filled.py` a third parameter, `rows: int`, and
+    write `rows` rows to each table where it wrote `ROWS`.
+  - Add `GROWS_WITH_ROWS: dict[str, str] = {}` and `MORE_THAN_ONE_CONNECTION: dict[str, str] = {}`
+    there. `make db-test` names each GET route whose reads grow with its rows, and each that holds
+    more than one connection at once. Name each in its list, with its reason. Remove it when its
+    store methods read through `PostgresDatabase.loader`.
+  - A loader outside a request and outside an attempt of a job raises `NotLoading`. A loop of
+    yours that reads through one runs each round inside `app.store.loads.loading`.
+  - If `make lint` refuses the startup count, record it as the message says.
+  [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

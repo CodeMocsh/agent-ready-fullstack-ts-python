@@ -121,9 +121,9 @@ the tenant, and `GET /tasks` answered every task. The example is the code an age
 - A read after a task that another person removed answers `404`. The screen draws the error,
   and the next click on "Load more" reads from the first page.
 - The count does not see a read that a route makes on a connection outside the pool, such as
-  `dedicated()`, or through a prepared statement, a cursor or `copy_from_query`. It also does not
-  see a route that makes one read for each row, because each such read returns one row. A review
-  finds these.
+  `dedicated()`, or through a prepared statement, a cursor or `copy_from_query`. A review finds
+  these. It also does not see a route that makes one read for each row, because each such read
+  returns one row. [0032](0032-a-request-s-reads-do-not-grow-with-its-rows.md) counts those.
 - A new tenant table needs rows in `tests/integration/filled.py`, and a new GET route needs a path
   there, or the test fails.
 - A new entry in `OVER_A_PAGE`, `NOT_FILLED_YET` or `NOT_READ_YET` passes the test. A review sees

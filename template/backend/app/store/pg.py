@@ -84,6 +84,7 @@ from app.store.jobs import (
     refuse_another_input,
     stored_failure,
 )
+from app.store.loads import Loader, loader_of
 from app.store.migrate import check, schema_version
 from app.store.timeouts import TIMEOUTS, Timeouts, milliseconds
 
@@ -599,6 +600,13 @@ class PostgresDatabase:
     def jobs(self, tenant_id: str) -> Jobs:
         _refuse_unset(tenant_id)
         return PostgresJobs(self, tenant_id)
+
+    def loader(self, tenant_id: str) -> Loader:
+        """The loader of `tenant_id` in this request, or in this attempt of a job. Each of its
+        turns runs in one `scoped` transaction. Raises `NotLoading` outside both.
+        `docs/adr/template/0032`."""
+        _refuse_unset(tenant_id)
+        return loader_of((self, tenant_id), lambda: self.scoped(tenant_id))
 
     @asynccontextmanager
     async def scoped(self, tenant_id: str) -> AsyncGenerator[Any]:
