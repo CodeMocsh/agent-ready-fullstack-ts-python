@@ -305,6 +305,24 @@ not name yet.
 _Avoid_: budget (a read budget is something else), baseline (a baseline is recorded again),
 allowlist, waiver.
 
+**Primitive**:
+A component of the project's own that owns how a control or a surface looks: a button, a field,
+a card. `conformance.primitives` names the folders of the primitives. A primitive may set its
+own text, radius and shadow and use a raw `<button>` or `<input>`, and is held to the theme like
+any other code.
+_Avoid_: vendored component (shadcn writes those into `src/components/ui/`, and the conformance
+and comment gates skip them), base component, atom.
+
+**Theme utility**:
+A class a theme file defines with `@utility`. A theme utility passes the conformance rules on
+text, radius, shadow and spacing, whatever its name.
+_Avoid_: custom class, helper class.
+
+**Text role**:
+A theme utility that sets how one kind of text looks: its size, colour, weight and family, such
+as `title`, `meta` or `failure`. Code outside a primitive styles its text only through one.
+_Avoid_: text style, typography class.
+
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,
 without telemetry. `backend/.startup-baseline.json` holds it, and the startup gate in

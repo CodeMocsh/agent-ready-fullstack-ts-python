@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { gate, NO_PROJECT_RULES } from "./harness";
 
@@ -17,6 +18,7 @@ const OFFENDING_MARKUP = [
   "    <div className='bg-blue-500 border-[#1a1a1a] text-[13px] p-[7px] bg-primary/80'>",
   "      <span className='bg-[rebeccapurple] stroke-2' strokeWidth={1.5} />",
   "      <p style={{ fontSize: 13, color: 'rgb(1,2,3)' }}>{items.length}</p>",
+  "      <button className='rounded-lg text-sm gap-7'>add</button>",
   "    </div>",
   "  );",
   "}",
@@ -28,6 +30,7 @@ const OFFENDING_RULES = [
   "effect-data",
   "effect-input",
   "effect-mutation",
+  "element-outside-a-primitive",
   "exported-function-expression",
   "filename-export",
   "inline-type-declaration",
@@ -38,6 +41,9 @@ const OFFENDING_RULES = [
   "raw-colour",
   "raw-stroke",
   "server-event-outside-a-stream",
+  "spacing-off-the-scale",
+  "surface-outside-a-primitive",
+  "text-outside-a-role",
   "token-alpha",
 ];
 
@@ -76,7 +82,7 @@ const CLEAN = [
   "  }, [onResize]);",
   "  return (",
   "    <div className='w-[240px] max-w-[65ch] min-h-[200px] p-4'>",
-  "      <p className='text-muted-foreground border-t-border text-sm/6 leading-tight'>{fontSize}</p>",
+  "      <p className='text-left text-ellipsis border-t-border'>{fontSize}</p>",
   "      <svg className='stroke-muted-foreground stroke-[length:var(--icon-stroke)]'>",
   "        <path className='stroke-(length:--icon-stroke)' strokeWidth={ICON_STROKE} />",
   "      </svg>",
@@ -108,8 +114,13 @@ const NOT_ARROWS = [
 
 const conformance = gate("conformance.mjs", "conformance");
 
-function scan(name: string, lines: string[], rulesModule = NO_PROJECT_RULES) {
-  const { status, stdout, stderr, lines: reported } = conformance.run(name, lines, rulesModule);
+function scan(name: string, lines: string[], rulesModule = NO_PROJECT_RULES, args: string[] = []) {
+  const {
+    status,
+    stdout,
+    stderr,
+    lines: reported,
+  } = conformance.run(name, lines, rulesModule, args);
   const rules = reported.map((line) => line.split(/\s{2,}/)[1]);
   return { status, stdout, stderr, rules: [...new Set(rules)].sort() };
 }
@@ -120,6 +131,7 @@ describe("the conformance gate", () => {
   afterEach(conformance.close);
 
   it("fires every markup rule on markup that breaks all of them", () => {
+    writeFileSync(conformance.at("src/index.css"), "@theme { --spacing: initial; }\n");
     const { status, rules } = scan("bad.tsx", OFFENDING_MARKUP);
     expect(rules).toEqual(OFFENDING_RULES);
     expect(status).toBe(1);
@@ -139,6 +151,20 @@ describe("the conformance gate", () => {
 
   it("reports nothing in markup that only looks like it breaks them", () => {
     const { status, rules } = scan("good.tsx", CLEAN);
+    expect(rules).toEqual([]);
+    expect(status).toBe(0);
+  });
+
+  it("lets a size with a line height past the alpha rule", () => {
+    const sized = [
+      "export function Sized() {",
+      "  return <p className='text-sm/6'>sized</p>;",
+      "}",
+    ];
+    const { status, rules } = scan("sized.tsx", sized, NO_PROJECT_RULES, [
+      "--primitive",
+      conformance.at("tree/sized.tsx"),
+    ]);
     expect(rules).toEqual([]);
     expect(status).toBe(0);
   });

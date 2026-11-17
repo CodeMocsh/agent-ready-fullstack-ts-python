@@ -683,6 +683,24 @@ What to expect, because it is not all free:
     conformance debt count" and "Record conformance debt", and in `docs/frontend.md` the one that starts "A
     finding the project had".
 
+- **From 0.84.0 code outside a primitive gets its look from primitives and theme utilities.**
+  Four rules are new: `text-outside-a-role`, `surface-outside-a-primitive`,
+  `element-outside-a-primitive` and `spacing-off-the-scale`. The update adds
+  `conformance.primitives` to `frontend/package.json`, the folder `src/components/primitives/`
+  with a `Checkbox`, and the text roles `title`, `meta` and `failure` to `src/index.css`. After
+  the update:
+  - Add each folder of your own primitives to `conformance.primitives`. Every path must exist.
+  - Define your text roles and other theme utilities with `@utility` in a theme file. A theme
+    utility passes the three class rules. A raw `<button>` or `<input>` belongs in a
+    primitive.
+  - Run `pnpm -C frontend conformance:record` once, even when `pnpm conformance` passes, and
+    commit `frontend/.conformance-debt.json`.
+  - `spacing-off-the-scale` stays off until a theme file sets `--spacing: initial`,
+    `--spacing-*: initial` or `--*: initial`.
+  - In `docs/frontend.md`, take the template's bullets that start "Code outside a primitive",
+    "The class rules read class strings" and "When the theme resets", and the lines for
+    `src/components/` and `src/index.css` in the layout.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

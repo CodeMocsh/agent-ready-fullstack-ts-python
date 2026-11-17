@@ -32,6 +32,19 @@ const CLEAN = [
   "export { usage, divided, afterCall, afterIndex, probe };",
 ];
 
+const INTERPOLATION = "$" + "{";
+
+const AFTER_A_KEYWORD = [
+  'import"./styles.css"; // after an import',
+  "function quoted() {",
+  '  return"a "; // after a return',
+  "}",
+  `const nested = \`${INTERPOLATION}quoted() ? \`http://x\` : ''}\`;`,
+  "export { nested };",
+];
+
+const AFTER_A_KEYWORD_LINES = [1, 3];
+
 const AFTER_A_REGEX = [
   "const slashOrStar = /[/*]/;",
   "// an unterminated block comment would swallow this one",
@@ -71,6 +84,12 @@ describe("the comment gate", () => {
   it("still sees the comments that follow a regex holding a comment marker", () => {
     const { status, reported } = scan("after.ts", AFTER_A_REGEX);
     expect(reported).toEqual(AFTER_A_REGEX_LINES);
+    expect(status).toBe(1);
+  });
+
+  it("still sees the comments after a string that follows a keyword, and none in a nested template", () => {
+    const { status, reported } = scan("keyword.ts", AFTER_A_KEYWORD);
+    expect(reported).toEqual(AFTER_A_KEYWORD_LINES);
     expect(status).toBe(1);
   });
 });

@@ -118,6 +118,18 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+@utility title {
+  @apply font-heading text-2xl font-semibold;
+}
+
+@utility meta {
+  @apply text-sm text-muted-foreground;
+}
+
+@utility failure {
+  @apply text-sm text-destructive;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -2,6 +2,7 @@ import { infiniteQueryOptions, useInfiniteQuery, useMutation } from "@tanstack/r
 import { Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { type Task, type TaskPage, tasksApi } from "@/api/tasks";
+import { Checkbox } from "@/components/primitives/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -62,8 +63,8 @@ export function TaskList() {
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 p-8">
       <header className="flex flex-col gap-1">
-        <h1 className="font-heading text-2xl font-semibold">Tasks</h1>
-        <p className="text-muted-foreground text-sm">{SERVED_BY}</p>
+        <h1 className="title">Tasks</h1>
+        <p className="meta">{SERVED_BY}</p>
       </header>
 
       <form onSubmit={submit} className="flex gap-2">
@@ -78,8 +79,8 @@ export function TaskList() {
         </Button>
       </form>
 
-      {tasks.isPending ? <p className="text-muted-foreground text-sm">Loading…</p> : null}
-      {tasks.isError ? <p className="text-destructive text-sm">{tasks.error.message}</p> : null}
+      {tasks.isPending ? <p className="meta">Loading…</p> : null}
+      {tasks.isError ? <p className="failure">{tasks.error.message}</p> : null}
 
       {tasks.data ? (
         <Table>
@@ -96,8 +97,7 @@ export function TaskList() {
               .map((task) => (
                 <TableRow key={task.id}>
                   <TableCell>
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       aria-label={`Mark "${task.title}" as done`}
                       checked={task.done}
                       onChange={(event) =>
@@ -105,7 +105,7 @@ export function TaskList() {
                       }
                     />
                   </TableCell>
-                  <TableCell className={task.done ? "text-muted-foreground line-through" : ""}>
+                  <TableCell className={task.done ? "meta line-through" : ""}>
                     {task.title}
                   </TableCell>
                   <TableCell>

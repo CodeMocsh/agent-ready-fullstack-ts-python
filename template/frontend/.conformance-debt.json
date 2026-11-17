@@ -5,6 +5,7 @@
     "effect-data",
     "effect-input",
     "effect-mutation",
+    "element-outside-a-primitive",
     "exported-function-expression",
     "filename-export",
     "inline-type-declaration",
@@ -16,6 +17,9 @@
     "raw-stroke",
     "raw-type-declaration",
     "server-event-outside-a-stream",
+    "spacing-off-the-scale",
+    "surface-outside-a-primitive",
+    "text-outside-a-role",
     "token-alpha"
   ],
   "files": {}
