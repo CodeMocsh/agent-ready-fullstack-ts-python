@@ -1093,6 +1093,8 @@ done
 need frontend/devtools/complexity.mjs
 need frontend/devtools/conformance.mjs
 need frontend/devtools/conformance.rules.mjs
+need frontend/devtools/composition.mjs
+need frontend/tests/devtools/composition.test.ts "The table holds the composition rules to what Tailwind generates"
 need frontend/devtools/file-length.mjs
 need frontend/tests/devtools/file-length.test.ts
 need_grep 'devtools/complexity.mjs' frontend/package.json
@@ -1266,7 +1268,7 @@ export function Good({ onResize, fontSize }: Props) {
   }, [onResize]);
   return (
     <div className="w-[240px] max-w-[65ch] min-h-[200px] gap-[--spacing(var(--gap))] p-4">
-      <p className="text-muted-foreground bg-card/(--wash) border-t-border text-sm/6 leading-tight">
+      <p className="text-muted-foreground bg-card/(--wash) border-t-border text-left text-ellipsis">
         converted-to-black, then back-to-white, text-on-black, at {fontSize}
       </p>
       <svg className="stroke-muted-foreground stroke-[length:var(--icon-stroke)]">
@@ -1276,6 +1278,12 @@ export function Good({ onResize, fontSize }: Props) {
   );
 }
 GOOD
+
+cat >"$CONF/bad/composed.tsx" <<'BAD'
+export function Composed() {
+  return <button className="rounded-lg text-sm">go</button>;
+}
+BAD
 
 cat >"$CONF/bad/named-wrong.tsx" <<'BAD'
 export const load = (id: string): string => id.trim();
@@ -1289,13 +1297,24 @@ conformance_output="$(conformance "$CONF/bad" 2>&1 || true)"
 for rule in raw-colour palette-utility named-colour token-alpha arbitrary-spacing \
             arbitrary-type raw-type-declaration inline-type-declaration raw-stroke \
             magic-presentation-prop effect-data exported-function-expression \
-            filename-export query-invalidation; do
+            filename-export query-invalidation text-outside-a-role \
+            element-outside-a-primitive surface-outside-a-primitive; do
     if ! printf '%s\n' "$conformance_output" | grep -q "$rule"; then
         echo "conformance check $rule did not fire. A rule that stops matching looks exactly like a clean codebase." >&2
         printf '%s\n' "$conformance_output" >&2
         exit 1
     fi
 done
+
+mkdir -p "$CONF/spaced"
+printf '@theme {\n  --spacing: initial;\n}\n' >"$CONF/reset.css"
+cat >"$CONF/spaced/spaced.tsx" <<'SPACED'
+export function Spaced() {
+  return <p className="p-7">spaced</p>;
+}
+SPACED
+node "$CONFORMANCE" --theme-file "$CONF/reset.css" "$CONF/spaced" 2>&1 | grep -q 'spaced.tsx:2  spacing-off-the-scale  p-7' \
+    || fail "conformance let p-7 through under --spacing: initial. Tailwind generates nothing for that step, and the element gets no padding."
 
 if ! printf '%s\n' "$conformance_output" | grep -q 'commented.tsx:.*effect-data'; then
     echo "conformance lost an effect body to a comment. bad.tsx trips effect-data with no comment in it, so only commented.tsx shows this." >&2

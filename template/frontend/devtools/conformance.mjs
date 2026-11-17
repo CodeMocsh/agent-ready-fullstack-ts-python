@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { compositionChecks, SPACING_UTILITY, TYPE_SCALE_STEP } from "./composition.mjs";
 import { reportLoose, reportTightened, settled } from "./debt.mjs";
 import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
 import { withProjectRules } from "./project-rules.mjs";
-import { lineOf, withoutStringsAndComments } from "./scan.mjs";
+import { balanced, lineOf, withoutStringsAndComments } from "./scan.mjs";
 
 const DEFAULTS = {
   themeFiles: ["src/index.css"],
   allow: [],
   exclude: [],
+  primitives: [],
 };
 
 const SOURCE = /\.(?:ts|tsx|css)$/;
@@ -21,6 +23,8 @@ const USAGE = `usage: node devtools/conformance.mjs <paths...> [options]
   --exclude <pattern>   skip a path; repeatable, and trailing /** is optional
   --allow <text>        permit one exact match; repeatable
   --theme-file <path>   a file allowed to define the theme; repeatable
+  --primitive <pattern> a path whose code may set its own text, radius and shadow, and use a
+                        raw <button> or <input>; repeatable
   --debt <file>         the conformance debt: the findings each file may keep, by rule
   --tighten             lower each count the tree no longer needs, and name each rule
                         that finds nothing
@@ -82,10 +86,10 @@ const NAMED_COLOUR = new RegExp(
 
 const PALETTE_UTILITY = new RegExp(colourUtility(`(?:${PALETTE})\\b(?:-\\d{2,3})?`), "g");
 
-const ARBITRARY_SPACING =
-  /(?<![\w-])-?(?:p[xytrbles]?|m[xytrbles]?|gap(?:-[xy])?|space-[xy])-\[(?![^\]]*--)[^\]]+\]/g;
-
-const TYPE_SCALE_STEP = "base|xs|sm|lg|\\d*xl";
+const ARBITRARY_SPACING = new RegExp(
+  `(?<![\\w-])${SPACING_UTILITY}-\\[(?![^\\]]*--)[^\\]]+\\]`,
+  "g",
+);
 
 const ALPHA_UTILITIES = COLOUR_UTILITIES.split("|")
   .filter((name) => name !== "text")
@@ -219,16 +223,6 @@ function measurable(name) {
 
 function skipped(path, config) {
   return excluded(path, config.exclude) || config.themeFiles.includes(path);
-}
-
-function balanced(text, open, close) {
-  const opening = text[open];
-  let depth = 0;
-  for (let index = open; index < text.length; index++) {
-    if (text[index] === opening) depth++;
-    else if (text[index] === close && --depth === 0) return text.slice(open, index);
-  }
-  return text.slice(open);
 }
 
 function effectsWhoseBody(code, work) {
@@ -392,11 +386,13 @@ function check(file, config) {
     .flatMap((rule) => ruleViolations(file, lines, rule, config.allow));
   if (!MARKUP.test(file)) return found;
   const code = withoutStringsAndComments(text);
+  const composition = excluded(file, config.primitives) ? [] : config.compositionChecks;
   return [
     ...found,
     ...config.codeChecks.flatMap((codeCheck) =>
       codeViolations(file, code, codeCheck, config.allow),
     ),
+    ...composition.flatMap((codeCheck) => codeViolations(file, text, codeCheck, config.allow)),
   ];
 }
 
@@ -407,13 +403,20 @@ function settings(flags) {
   }
   assertResolves(resolved.exclude, "conformance.exclude");
   assertResolves(resolved.themeFiles, "conformance.themeFiles");
-  return { ...resolved, ...withProjectRules(RULES, CODE_CHECKS) };
+  assertResolves(resolved.primitives, "conformance.primitives");
+  const composition = compositionChecks(resolved.themeFiles);
+  return {
+    ...resolved,
+    compositionChecks: composition,
+    ...withProjectRules(RULES, CODE_CHECKS, composition),
+  };
 }
 
 const VALUE_FLAGS = new Map([
   ["--exclude", "exclude"],
   ["--allow", "allow"],
   ["--theme-file", "themeFiles"],
+  ["--primitive", "primitives"],
 ]);
 
 const SWITCHES = new Map([
@@ -522,7 +525,9 @@ function main(argv) {
   });
   if (files.length === 0) fail(`no source files under ${paths.join(", ")}`);
   const violations = files.flatMap((file) => check(file, config));
-  const rules = [...config.rules, ...config.codeChecks].map((rule) => rule.name);
+  const rules = [...config.rules, ...config.codeChecks, ...config.compositionChecks].map(
+    (rule) => rule.name,
+  );
   const outcome = settled(violations, { ...options, scanned: new Set(files), rules });
   if (!reportedClean(outcome, options.path)) return 1;
   const kept = outcome.owed > 0 ? `, ${count(outcome.owed, "finding")} owed in the debt` : "";

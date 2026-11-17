@@ -9,8 +9,8 @@ detail behind them and behind the rules the gates enforce.
 frontend/
   src/api/            the contract: base.ts, client.ts, types.ts, schema.ts and parts.ts (generated)
   src/mocks/          the second implementation of that contract -- permanent, not a scaffold
-  src/components/     UI; ui/ is vendored shadcn
-  src/index.css       the @theme block
+  src/components/     UI; ui/ is vendored shadcn, primitives/ is yours
+  src/index.css       the @theme block, and the theme utilities
   src/router.tsx      routes
   src/app-providers.tsx the providers around the router -- yours
   src/query-client.ts the query client
@@ -162,6 +162,21 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
 
   `pnpm conformance` refuses to run any rule when one has another shape, or takes the name of a
   rule that already exists. A template rule has no switch to turn it off.
+- **Code outside a primitive gets its look from primitives and theme utilities.** Outside the
+  paths in `conformance.primitives`, `pnpm conformance` refuses a text size, a text colour the
+  theme names, a font weight or family, `leading-*`, `tracking-*` and `uppercase`. It also
+  refuses `rounded-*`, `shadow-*`, and a raw `<button>` or `<input>`. Use a primitive, or a theme
+  utility: a class a theme file defines with `@utility`, such as `title`, `meta` or `failure` in
+  `src/index.css`. A theme utility passes the class rules whatever its name. A primitive is
+  still held to the theme.
+- **The class rules read class strings, not code.** A class counts in any string in a `.ts` or `.tsx`
+  file, so a sentence in a string that says "rounded" counts too. A stylesheet outside the theme
+  files is not read for these rules.
+- **When the theme resets the spacing scale, a `p-`, `m-`, `gap-` or `space-` step is one the
+  theme names.** After `--spacing: initial` (or `--spacing-*: initial`, or `--*: initial`),
+  Tailwind generates nothing for any other step of these, and drops it without an error.
+  `pnpm conformance` refuses it. `px`, `auto` and an arbitrary value stay allowed. `w-`, `h-`,
+  `size-` and `inset-` read the same scale and are not checked.
 - **A finding the project had before a rule existed is conformance debt.**
   `.conformance-debt.json` counts it, by file and rule. A file past its count fails, and so does
   a new file with any finding. `pnpm lint` lowers a count the tree no longer needs, and deletes

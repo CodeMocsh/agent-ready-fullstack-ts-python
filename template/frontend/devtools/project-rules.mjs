@@ -41,10 +41,12 @@ function assertShape(rule, index) {
   else if (typeof rule.find !== "function") refuse(index, "needs find, a function");
 }
 
-export function withProjectRules(templateRules, templateChecks) {
+export function withProjectRules(templateRules, templateChecks, compositionChecks) {
   const rules = project.RULES;
   if (!Array.isArray(rules)) fail(`${RULES_MODULE} must export RULES as an array.`);
-  const taken = new Set([...templateRules, ...templateChecks].map((rule) => rule.name));
+  const taken = new Set(
+    [...templateRules, ...templateChecks, ...compositionChecks].map((rule) => rule.name),
+  );
   rules.forEach((rule, index) => {
     assertShape(rule, index);
     if (taken.has(rule.name)) {
