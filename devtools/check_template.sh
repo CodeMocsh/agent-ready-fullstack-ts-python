@@ -1092,6 +1092,7 @@ for rule in noUselessElse useCollapsedElseIf noNegationElse useSimplifiedLogicEx
 done
 need frontend/devtools/complexity.mjs
 need frontend/devtools/conformance.mjs
+need frontend/devtools/conformance.rules.mjs
 need frontend/devtools/file-length.mjs
 need frontend/tests/devtools/file-length.test.ts
 need_grep 'devtools/complexity.mjs' frontend/package.json

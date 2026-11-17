@@ -653,6 +653,21 @@ What to expect, because it is not all free:
   - If `make lint` refuses the startup count, record it as the message says.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
 
+- **From 0.82.0 a project's own conformance rules live in `frontend/devtools/conformance.rules.mjs`.**
+  The update writes the file with `RULES` empty, and never writes it again. If you changed
+  `frontend/devtools/conformance.mjs`:
+  - Move each rule you added into `RULES`. A pattern rule is `{ name, files, pattern, hint }`:
+    `files` a RegExp with neither the `g` nor the `y` flag, and `pattern` one with `g` and
+    without `y`. A code check is `{ name, hint, find }`, where `find(file, code, allow)` returns
+    `{ index, text }` for each finding. `conformance.mjs` passes a code check only
+    `conformance.allow`; a code check reads any other setting itself.
+  - Replace `frontend/devtools/conformance.mjs` with the template's copy, from
+    `template/frontend/devtools/conformance.mjs` at the tag you update to. Resolving the merge
+    keeps the lines the update did not touch, your rules among them.
+  - A template rule you removed comes back, and nothing turns it off. Fix what it finds.
+  - In `docs/frontend.md`, take the template's bullet that starts "A rule of the project's own
+    goes in".
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

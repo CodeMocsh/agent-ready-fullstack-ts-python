@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import * as project from "./conformance.rules.mjs";
 import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
 import { lineOf, withoutStringsAndComments } from "./scan.mjs";
 
@@ -231,73 +232,50 @@ function effectsWhoseBody(code, work) {
   );
 }
 
-function effectViolations(file, code) {
+function called(match) {
+  return match[0].replace(/\s*\($/, "");
+}
+
+function effectData(_file, code) {
   return effectsWhoseBody(code, DATA_WORK).map((match) => ({
-    file,
-    line: lineOf(code, match.index),
-    rule: "effect-data",
+    index: match.index,
     text: "useEffect",
-    hint: EFFECT_HINT,
   }));
 }
 
-function effectMutationViolations(file, code) {
+function effectMutations(_file, code) {
   return effectsWhoseBody(code, MUTATION_START)
     .filter((match) => !LISTENS.test(balanced(code, match.index + match[0].length - 1, ")")))
-    .map((match) => ({
-      file,
-      line: lineOf(code, match.index),
-      rule: "effect-mutation",
-      text: match[0].replace(/\s*\($/, ""),
-      hint: EFFECT_MUTATION_HINT,
-    }));
+    .map((match) => ({ index: match.index, text: called(match) }));
 }
 
-function effectInputViolations(file, code) {
+function effectInputs(_file, code) {
   return effectsWhoseBody(code, SYNTHETIC_INPUT).map((match) => ({
-    file,
-    line: lineOf(code, match.index),
-    rule: "effect-input",
-    text: match[0].replace(/\s*\($/, ""),
-    hint: EFFECT_INPUT_HINT,
+    index: match.index,
+    text: called(match),
   }));
 }
 
-function invalidationViolations(file, code) {
+function invalidations(file, code) {
   if (INVALIDATOR.test(file)) return [];
   return [...code.matchAll(INVALIDATION)].map((match) => ({
-    file,
-    line: lineOf(code, match.index),
-    rule: "query-invalidation",
-    text: match[0].slice(1).replace(/\s*\($/, ""),
-    hint: INVALIDATION_HINT,
+    index: match.index,
+    text: called(match).slice(1),
   }));
 }
 
-function serverEventViolations(file, code) {
+function serverEvents(file, code) {
   if (STREAM.test(file)) return [];
-  return [...code.matchAll(SERVER_EVENT)].map((match) => ({
-    file,
-    line: lineOf(code, match.index),
-    rule: "server-event-outside-a-stream",
-    text: match[0],
-    hint: SERVER_EVENT_HINT,
-  }));
+  return [...code.matchAll(SERVER_EVENT)].map((match) => ({ index: match.index, text: match[0] }));
 }
 
-function inlineTypeViolations(file, code, allow) {
+function inlineTypes(_file, code, allow) {
   const found = [];
   for (const match of code.matchAll(STYLE_ATTRIBUTE)) {
     const open = match.index + match[0].length - 1;
     for (const hit of balanced(code, open, "}").matchAll(INLINE_TYPE)) {
-      if (allow.includes(hit[0].trim())) continue;
-      found.push({
-        file,
-        line: lineOf(code, open + hit.index),
-        rule: "inline-type-declaration",
-        text: hit[0].trim(),
-        hint: INLINE_TYPE_HINT,
-      });
+      const text = hit[0].trim();
+      if (!allow.includes(text)) found.push({ index: open + hit.index, text });
     }
   }
   return found;
@@ -326,44 +304,92 @@ function exportedNames(code) {
   return found;
 }
 
-function filenameExportViolations(file, code) {
+function filenameExports(file, code) {
   if (!/\.tsx$/.test(file)) return [];
   const exported = exportedNames(code);
   const wanted = expectedExport(file);
   if (exported.length === 0 || exported.some((entry) => entry.name === wanted)) return [];
-  return [
-    {
-      file,
-      line: lineOf(code, exported[0].index),
-      rule: "filename-export",
-      text: exported[0].name,
-      hint: FILENAME_HINT,
-    },
-  ];
+  return [{ index: exported[0].index, text: exported[0].name }];
 }
 
-function exportedArrowViolations(file, code) {
+function exportedArrows(_file, code) {
   return [...code.matchAll(EXPORTED_ARROW)].map((match) => ({
-    file,
-    line: lineOf(code, match.index),
-    rule: "exported-function-expression",
+    index: match.index,
     text: match[0].split("=")[0].trim(),
-    hint: EXPORTED_ARROW_HINT,
   }));
 }
 
 const CODE_CHECKS = [
-  effectViolations,
-  effectMutationViolations,
-  effectInputViolations,
-  invalidationViolations,
-  serverEventViolations,
-  inlineTypeViolations,
-  filenameExportViolations,
-  exportedArrowViolations,
+  { name: "effect-data", hint: EFFECT_HINT, find: effectData },
+  { name: "effect-mutation", hint: EFFECT_MUTATION_HINT, find: effectMutations },
+  { name: "effect-input", hint: EFFECT_INPUT_HINT, find: effectInputs },
+  { name: "query-invalidation", hint: INVALIDATION_HINT, find: invalidations },
+  { name: "server-event-outside-a-stream", hint: SERVER_EVENT_HINT, find: serverEvents },
+  { name: "inline-type-declaration", hint: INLINE_TYPE_HINT, find: inlineTypes },
+  { name: "filename-export", hint: FILENAME_HINT, find: filenameExports },
+  { name: "exported-function-expression", hint: EXPORTED_ARROW_HINT, find: exportedArrows },
 ];
 
-const CHECKS = RULES.length + CODE_CHECKS.length;
+const RULES_MODULE = "devtools/conformance.rules.mjs";
+const RULE_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const PATTERN_RULE_KEYS = "files,hint,name,pattern";
+const CODE_CHECK_KEYS = "find,hint,name";
+
+function regExpWith(value, global) {
+  return value instanceof RegExp && value.global === global && !value.sticky;
+}
+
+function refuse(index, problem) {
+  fail(
+    `rule ${index + 1} in ${RULES_MODULE} ${problem}.\n` +
+      "A pattern rule is { name, files, pattern, hint }, and a code check is\n" +
+      "{ name, hint, find }. conformance runs no rule until every rule passes.",
+  );
+}
+
+function assertPatternRule(rule, index) {
+  if (!regExpWith(rule.files, false)) {
+    refuse(index, "needs files, a RegExp with neither the g nor the y flag");
+  }
+  if (!regExpWith(rule.pattern, true)) {
+    refuse(index, "needs pattern, a RegExp with the g flag and without the y flag");
+  }
+}
+
+function assertShape(rule, index) {
+  if (typeof rule !== "object" || rule === null) refuse(index, "is not an object");
+  const keys = Object.keys(rule).sort().join(",");
+  if (keys !== PATTERN_RULE_KEYS && keys !== CODE_CHECK_KEYS) {
+    refuse(index, `has the keys ${keys || "(none)"}`);
+  }
+  if (typeof rule.name !== "string" || !RULE_NAME.test(rule.name)) {
+    refuse(index, "needs a name in kebab-case");
+  }
+  if (typeof rule.hint !== "string" || rule.hint.trim() === "") refuse(index, "needs a hint");
+  if (keys === PATTERN_RULE_KEYS) assertPatternRule(rule, index);
+  else if (typeof rule.find !== "function") refuse(index, "needs find, a function");
+}
+
+function projectRules(rules) {
+  if (!Array.isArray(rules)) fail(`${RULES_MODULE} must export RULES as an array.`);
+  const taken = new Set([...RULES, ...CODE_CHECKS].map((rule) => rule.name));
+  rules.forEach((rule, index) => {
+    assertShape(rule, index);
+    if (taken.has(rule.name)) {
+      fail(
+        `rule ${index + 1} in ${RULES_MODULE} is named ${rule.name}, and a rule of that name\n` +
+          "already exists. The report gives one hint for each name, so one of the two would\n" +
+          "point at the other's advice. conformance runs no rule until the project's rule has a\n" +
+          "name of its own.",
+      );
+    }
+    taken.add(rule.name);
+  });
+  return {
+    rules: [...RULES, ...rules.filter((rule) => Object.hasOwn(rule, "pattern"))],
+    codeChecks: [...CODE_CHECKS, ...rules.filter((rule) => Object.hasOwn(rule, "find"))],
+  };
+}
 
 function matchedText(match) {
   return match.trim().replace(/["']/g, "");
@@ -373,6 +399,13 @@ function ruleViolations(file, lines, rule, allow) {
   const found = [];
   lines.forEach((line, index) => {
     for (const match of line.matchAll(rule.pattern)) {
+      if (match[0] === "") {
+        fail(
+          `rule ${rule.name} matched empty text at ${file}:${index + 1}. A finding with no text\n` +
+            "says nothing, and a pattern that matches empty text matches at every position.\n" +
+            "Make the pattern match at least one character.",
+        );
+      }
       const text = matchedText(match[0]);
       if (allow.includes(text)) continue;
       found.push({ file, line: index + 1, rule: rule.name, text, hint: rule.hint });
@@ -381,15 +414,46 @@ function ruleViolations(file, lines, rule, allow) {
   return found;
 }
 
+function isFinding(found, code) {
+  return (
+    Number.isInteger(found?.index) &&
+    found.index >= 0 &&
+    found.index <= code.length &&
+    typeof found.text === "string"
+  );
+}
+
+function codeViolations(file, code, codeCheck, allow) {
+  const findings = codeCheck.find(file, code, allow);
+  if (!(Array.isArray(findings) && findings.every((found) => isFinding(found, code)))) {
+    fail(
+      `code check ${codeCheck.name} returned something other than [{ index, text }] for ${file}.\n` +
+        "index is a position in the code the check was given, and text is what it found there.",
+    );
+  }
+  return findings.map(({ index, text }) => ({
+    file,
+    line: lineOf(code, index),
+    rule: codeCheck.name,
+    text,
+    hint: codeCheck.hint,
+  }));
+}
+
 function check(file, config) {
   const text = readFileSync(file, "utf8");
   const lines = text.split("\n");
-  const found = RULES.filter((rule) => rule.files.test(file)).flatMap((rule) =>
-    ruleViolations(file, lines, rule, config.allow),
-  );
+  const found = config.rules
+    .filter((rule) => rule.files.test(file))
+    .flatMap((rule) => ruleViolations(file, lines, rule, config.allow));
   if (!MARKUP.test(file)) return found;
   const code = withoutStringsAndComments(text);
-  return [...found, ...CODE_CHECKS.flatMap((run) => run(file, code, config.allow))];
+  return [
+    ...found,
+    ...config.codeChecks.flatMap((codeCheck) =>
+      codeViolations(file, code, codeCheck, config.allow),
+    ),
+  ];
 }
 
 function settings(flags) {
@@ -399,7 +463,7 @@ function settings(flags) {
   }
   assertResolves(resolved.exclude, "conformance.exclude");
   assertResolves(resolved.themeFiles, "conformance.themeFiles");
-  return resolved;
+  return { ...resolved, ...projectRules(project.RULES) };
 }
 
 const VALUE_FLAGS = new Map([
@@ -462,7 +526,9 @@ function main(argv) {
     report(violations);
     return 1;
   }
-  process.stdout.write(`conformance ok: ${count(files.length, "file")}, ${CHECKS} checks\n`);
+  process.stdout.write(
+    `conformance ok: ${count(files.length, "file")}, ${config.rules.length + config.codeChecks.length} checks\n`,
+  );
   return 0;
 }
 

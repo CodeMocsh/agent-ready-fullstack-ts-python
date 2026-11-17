@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { gate } from "./harness";
+import { gate, NO_PROJECT_RULES } from "./harness";
 
 const OFFENDING_MARKUP = [
   "import { useEffect, useState } from 'react';",
@@ -108,10 +108,10 @@ const NOT_ARROWS = [
 
 const conformance = gate("conformance.mjs", "conformance");
 
-function scan(name: string, lines: string[]) {
-  const { status, stdout, lines: reported } = conformance.run(name, lines);
+function scan(name: string, lines: string[], rulesModule = NO_PROJECT_RULES) {
+  const { status, stdout, stderr, lines: reported } = conformance.run(name, lines, rulesModule);
   const rules = reported.map((line) => line.split(/\s{2,}/)[1]);
-  return { status, stdout, rules: [...new Set(rules)].sort() };
+  return { status, stdout, stderr, rules: [...new Set(rules)].sort() };
 }
 
 describe("the conformance gate", () => {
@@ -216,5 +216,121 @@ describe("the conformance gate on what starts a read or a write", () => {
     ]);
     expect(rules).toEqual([]);
     expect(status).toBe(0);
+  });
+});
+
+const FAINT_TEXT = [
+  "export function Faint() {",
+  "  return <p className='text-faint border-[#fff]'>hairline</p>;",
+  "}",
+];
+
+const HAIRLINE = {
+  name: "'hairline-as-text'",
+  files: "/\\.tsx$/",
+  pattern: "/(?<![\\w-])text-faint(?![\\w-])/g",
+  hint: "'faint is a hairline colour, not a text colour'",
+};
+
+const LAZY_CHECK = {
+  name: "'lazy-import'",
+  hint: "'import the screen statically'",
+  find: "(_file, code) => [...code.matchAll(/\\blazy\\(/g)].map((match) => ({ index: match.index, text: 'lazy' }))",
+};
+
+type RuleSource = Record<string, string | undefined>;
+
+function ruleSource(rule: RuleSource) {
+  const fields = Object.entries(rule)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}: ${value}`);
+  return `{ ${fields.join(", ")} }`;
+}
+
+function rulesOf(...rules: RuleSource[]) {
+  return `export const RULES = [${rules.map(ruleSource).join(", ")}];`;
+}
+
+describe("the conformance gate on the project's own rules", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it("runs a project rule beside the template's own", () => {
+    const { status, stderr, rules } = scan("faint.tsx", FAINT_TEXT, rulesOf(HAIRLINE));
+    expect(rules).toEqual(["hairline-as-text", "raw-colour"]);
+    expect(stderr).toContain("hairline-as-text: faint is a hairline colour, not a text colour");
+    expect(status).toBe(1);
+  });
+
+  it("runs a project code check over the code without its strings", () => {
+    const { status, stderr, rules } = scan(
+      "lazy.tsx",
+      ["const NOTE = 'lazy(';", "export const Screen = lazy(() => import('./screen'));"],
+      rulesOf(LAZY_CHECK),
+    );
+    expect(rules).toEqual(["lazy-import"]);
+    expect(stderr).toContain("lazy.tsx:2  lazy-import  lazy");
+    expect(stderr).not.toContain("lazy.tsx:1");
+    expect(status).toBe(1);
+  });
+
+  it("counts each project rule among its checks", () => {
+    const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES]);
+    const { stdout } = scan("good.tsx", CLEAN, rulesOf(HAIRLINE, LAZY_CHECK));
+    expect(stdout).toContain(`${demonstrated.size + 2} checks`);
+  });
+});
+
+describe("the conformance gate on a project rule it cannot run", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it.each([
+    ["RULES is not exported", "export const RUELS = [];", "must export RULES as an array"],
+    ["RULES is not an array", "export const RULES = {};", "must export RULES as an array"],
+    ["a rule is not an object", "export const RULES = ['hairline-as-text'];", "is not an object"],
+    ["a rule has a key of its own", rulesOf({ ...HAIRLINE, allow: "['x']" }), "has the keys"],
+    ["a rule mixes both shapes", rulesOf({ ...HAIRLINE, find: LAZY_CHECK.find }), "has the keys"],
+    ["a name is missing", rulesOf({ ...HAIRLINE, name: undefined }), "has the keys"],
+    ["a name has a space", rulesOf({ ...HAIRLINE, name: "'hairline as text'" }), "kebab-case"],
+    ["a hint is blank", rulesOf({ ...HAIRLINE, hint: "'  '" }), "needs a hint"],
+    ["files has the g flag", rulesOf({ ...HAIRLINE, files: "/\\.tsx$/g" }), "needs files"],
+    ["files has the y flag", rulesOf({ ...HAIRLINE, files: "/\\.tsx$/y" }), "needs files"],
+    ["pattern is a string", rulesOf({ ...HAIRLINE, pattern: "'text-faint'" }), "needs pattern"],
+    ["pattern has no g flag", rulesOf({ ...HAIRLINE, pattern: "/text-faint/" }), "needs pattern"],
+    [
+      "pattern has the y flag",
+      rulesOf({ ...HAIRLINE, pattern: "/text-faint/gy" }),
+      "needs pattern",
+    ],
+    ["pattern matches empty text", rulesOf({ ...HAIRLINE, pattern: "/q*/g" }), "empty text"],
+    ["pattern matches between words", rulesOf({ ...HAIRLINE, pattern: "/\\b/g" }), "empty text"],
+    [
+      "find returns no index",
+      rulesOf({ ...LAZY_CHECK, find: "() => [{ text: 'x' }]" }),
+      "returned",
+    ],
+    ["find returns no array", rulesOf({ ...LAZY_CHECK, find: "() => null" }), "returned"],
+    ["find is not a function", rulesOf({ ...LAZY_CHECK, find: "'lazy('" }), "needs find"],
+  ])("refuses to run any rule when %s", (_case, rulesModule, problem) => {
+    const { status, stderr, rules } = scan("faint.tsx", FAINT_TEXT, rulesModule);
+    expect(stderr).toContain(problem);
+    expect(rules).toEqual([]);
+    expect(status).toBe(2);
+  });
+
+  it.each([
+    ["a pattern rule", "raw-colour", []],
+    ["a code check", "effect-data", []],
+    ["another project rule", "hairline-as-text", [HAIRLINE]],
+  ])("refuses a name that %s already has", (_owner, name, before) => {
+    const named = { ...HAIRLINE, name: `'${name}'` };
+    const { status, stderr } = scan("faint.tsx", FAINT_TEXT, rulesOf(...before, named));
+    expect(stderr).toContain(
+      `rule ${before.length + 1} in devtools/conformance.rules.mjs is named ${name}, and a rule`,
+    );
+    expect(status).toBe(2);
   });
 });
