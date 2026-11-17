@@ -162,6 +162,7 @@ _skip_if_exists:
   - backend/app/jobs.py
   - devtools/contract-test.env
   - frontend/src/app-providers.tsx
+  - frontend/devtools/conformance.rules.mjs
   # The docs AGENTS.md sends an agent to for a project's own detail. A project rewrites each with
   # its own, so a template change to one would conflict on every update. A new project gets the
   # template's first version; AGENTS.md links all three, so a deleted one comes back on update.

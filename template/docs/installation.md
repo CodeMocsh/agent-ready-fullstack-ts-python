@@ -653,6 +653,11 @@ What to expect, because it is not all free:
   - If `make lint` refuses the startup count, record it as the message says.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
 
+- **From 0.82.0 a project's own conformance rules live in `frontend/devtools/conformance.rules.mjs`.**
+  The update writes the file with `RULES` empty, and never writes it again. If you added rules to
+  `frontend/devtools/conformance.mjs`, move each into `RULES` there, and take the template's
+  `conformance.mjs` whole. [frontend.md](frontend.md) says what shape a rule has.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name

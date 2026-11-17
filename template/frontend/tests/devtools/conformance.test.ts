@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { gate } from "./harness";
 
@@ -216,5 +220,92 @@ describe("the conformance gate on what starts a read or a write", () => {
     ]);
     expect(rules).toEqual([]);
     expect(status).toBe(0);
+  });
+});
+
+const FAINT_TEXT = [
+  "export function Faint() {",
+  "  return <p className='text-faint'>hairline</p>;",
+  "}",
+];
+
+const HAIRLINE = {
+  name: "'hairline-as-text'",
+  files: "/\\.tsx$/",
+  pattern: "/(?<![\\w-])text-faint(?![\\w-])/g",
+  hint: "'faint is a hairline colour, not a text colour'",
+};
+
+type RuleSource = Partial<Record<keyof typeof HAIRLINE, string | undefined>>;
+
+function ruleSource(rule: RuleSource) {
+  const fields = Object.entries(rule)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}: ${value}`);
+  return `{ ${fields.join(", ")} }`;
+}
+
+function only(rule: RuleSource) {
+  return `[${ruleSource(rule)}]`;
+}
+
+function withProjectRules(exported: string) {
+  const root = mkdtempSync(join(tmpdir(), "conformance-rules-"));
+  try {
+    cpSync("devtools", join(root, "devtools"), { recursive: true });
+    writeFileSync(
+      join(root, "devtools", "conformance.rules.mjs"),
+      `export const RULES = ${exported};\n`,
+    );
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "index.css"), "");
+    writeFileSync(join(root, "src", "faint.tsx"), `${FAINT_TEXT.join("\n")}\n`);
+    return spawnSync("node", ["devtools/conformance.mjs", "src"], { cwd: root, encoding: "utf8" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+describe("the conformance gate on the project's own rules", () => {
+  it("runs a rule from devtools/conformance.rules.mjs beside its own", () => {
+    const { status, stderr } = withProjectRules(only(HAIRLINE));
+    expect(stderr).toContain("src/faint.tsx:2  hairline-as-text  text-faint");
+    expect(stderr).toContain("hairline-as-text: faint is a hairline colour, not a text colour");
+    expect(status).toBe(1);
+  });
+
+  it.each([
+    ["RULES is not an array", "{}", "must export RULES as an array"],
+    [
+      "a rule is not an object",
+      "['hairline-as-text']",
+      "rule 1 in devtools/conformance.rules.mjs is not an object",
+    ],
+    ["a name is missing", only({ ...HAIRLINE, name: undefined }), "needs a name in kebab-case"],
+    [
+      "a name has a space",
+      only({ ...HAIRLINE, name: "'hairline as text'" }),
+      "needs a name in kebab-case",
+    ],
+    ["a hint is missing", only({ ...HAIRLINE, hint: undefined }), "needs a hint"],
+    ["files keeps state between files", only({ ...HAIRLINE, files: "/\\.tsx$/g" }), "needs files"],
+    ["pattern is a string", only({ ...HAIRLINE, pattern: "'text-faint'" }), "needs pattern"],
+    ["pattern has no g flag", only({ ...HAIRLINE, pattern: "/text-faint/" }), "needs pattern"],
+  ])("refuses to run when %s", (_case, exported, problem) => {
+    const { status, stderr } = withProjectRules(exported);
+    expect(stderr).toContain(problem);
+    expect(stderr).not.toContain("hairline-as-text  text-faint");
+    expect(status).toBe(2);
+  });
+
+  it.each([
+    ["a pattern rule", "raw-colour", []],
+    ["a code check", "effect-data", []],
+    ["another project rule", "hairline-as-text", [ruleSource(HAIRLINE)]],
+  ])("refuses a name that %s already has", (_owner, name, before) => {
+    const named = ruleSource({ ...HAIRLINE, name: `'${name}'` });
+    const { status, stderr } = withProjectRules(`[${[...before, named].join(", ")}]`);
+    expect(stderr).toContain(`names a rule ${name}, and a rule of that name already exists`);
+    expect(status).toBe(2);
   });
 });

@@ -146,6 +146,12 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   A font size, family, line height or letter spacing is a token too: `pnpm conformance` refuses
   one in a `style={{}}` attribute or a raw declaration in a stylesheet.
 - **Icon stroke comes from `--icon-stroke`**, not from the call site.
+- **A rule of the project's own goes in `devtools/conformance.rules.mjs`**, never in
+  `devtools/conformance.mjs`. The template owns `conformance.mjs`, and an update changes it.
+  `RULES` is an array of `{ name, files, pattern, hint }`: `name` in kebab-case, `files` a
+  RegExp without the `g` flag, `pattern` a RegExp with it, and `hint` what to do instead.
+  `pnpm conformance` refuses to run when a rule has another shape, or takes the name of a rule
+  that already exists.
 - **A `useEffect` does not fetch.** Server state comes from TanStack Query hooks against
   `src/api/client.ts`. Effects are for synchronising with something outside React.
   `pnpm conformance` refuses a `fetch`, an `await` or a `.then` written in an effect.
