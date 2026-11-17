@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { RULES as PROJECT_RULES } from "./conformance.rules.mjs";
+import * as project from "./conformance.rules.mjs";
 import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
 import { lineOf, withoutStringsAndComments } from "./scan.mjs";
 
@@ -332,43 +332,63 @@ const CODE_CHECKS = [
 
 const RULES_MODULE = "devtools/conformance.rules.mjs";
 const RULE_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const PATTERN_RULE_KEYS = "files,hint,name,pattern";
+const CODE_CHECK_KEYS = "find,hint,name";
 
-function regExp(value, global) {
+function regExpWith(value, global) {
   return value instanceof RegExp && value.global === global && !value.sticky;
 }
 
-function shapeProblem(rule) {
-  if (typeof rule !== "object" || rule === null) return "is not an object";
-  if (typeof rule.name !== "string" || !RULE_NAME.test(rule.name)) {
-    return "needs a name in kebab-case";
+function refuse(index, problem) {
+  fail(
+    `rule ${index + 1} in ${RULES_MODULE} ${problem}.\n` +
+      "A pattern rule is { name, files, pattern, hint }, and a code check is\n" +
+      "{ name, hint, find }. conformance runs no rule until every rule passes.",
+  );
+}
+
+function assertPatternRule(rule, index) {
+  if (!regExpWith(rule.files, false)) {
+    refuse(index, "needs files, a RegExp with neither the g nor the y flag");
   }
-  if (typeof rule.hint !== "string" || rule.hint.trim() === "") return "needs a hint";
-  if (!regExp(rule.files, false)) return "needs files, a RegExp without the g or the y flag";
-  if (!regExp(rule.pattern, true)) return "needs pattern, a RegExp with the g flag and no y flag";
-  return null;
+  if (!regExpWith(rule.pattern, true)) {
+    refuse(index, "needs pattern, a RegExp with the g flag and without the y flag");
+  }
+}
+
+function assertShape(rule, index) {
+  if (typeof rule !== "object" || rule === null) refuse(index, "is not an object");
+  const keys = Object.keys(rule).sort().join(",");
+  if (keys !== PATTERN_RULE_KEYS && keys !== CODE_CHECK_KEYS) {
+    refuse(index, `has the keys ${keys || "(none)"}`);
+  }
+  if (typeof rule.name !== "string" || !RULE_NAME.test(rule.name)) {
+    refuse(index, "needs a name in kebab-case");
+  }
+  if (typeof rule.hint !== "string" || rule.hint.trim() === "") refuse(index, "needs a hint");
+  if (keys === PATTERN_RULE_KEYS) assertPatternRule(rule, index);
+  else if (typeof rule.find !== "function") refuse(index, "needs find, a function");
 }
 
 function projectRules(rules) {
   if (!Array.isArray(rules)) fail(`${RULES_MODULE} must export RULES as an array.`);
   const taken = new Set([...RULES, ...CODE_CHECKS].map((rule) => rule.name));
   rules.forEach((rule, index) => {
-    const problem = shapeProblem(rule);
-    if (problem !== null) {
-      fail(
-        `rule ${index + 1} in ${RULES_MODULE} ${problem}. Each rule is ` +
-          "{ name, files, pattern, hint }; the gate runs none of them until every one has that shape.",
-      );
-    }
+    assertShape(rule, index);
     if (taken.has(rule.name)) {
       fail(
-        `${RULES_MODULE} names a rule ${rule.name}, and a rule of that name already exists.\n` +
-          "The report gives one hint for each name, so one of the two would point at the\n" +
-          "other's advice. Give the project's rule a name of its own.",
+        `rule ${index + 1} in ${RULES_MODULE} is named ${rule.name}, and a rule of that name\n` +
+          "already exists. The report gives one hint for each name, so one of the two would\n" +
+          "point at the other's advice. conformance runs no rule until the project's rule has a\n" +
+          "name of its own.",
       );
     }
     taken.add(rule.name);
   });
-  return rules;
+  return {
+    rules: [...RULES, ...rules.filter((rule) => Object.hasOwn(rule, "pattern"))],
+    codeChecks: [...CODE_CHECKS, ...rules.filter((rule) => Object.hasOwn(rule, "find"))],
+  };
 }
 
 function matchedText(match) {
@@ -379,6 +399,13 @@ function ruleViolations(file, lines, rule, allow) {
   const found = [];
   lines.forEach((line, index) => {
     for (const match of line.matchAll(rule.pattern)) {
+      if (match[0] === "") {
+        fail(
+          `rule ${rule.name} matched empty text at ${file}:${index + 1}. A finding with no text\n` +
+            "says nothing, and a pattern that matches empty text matches at every position.\n" +
+            "Make the pattern match at least one character.",
+        );
+      }
       const text = matchedText(match[0]);
       if (allow.includes(text)) continue;
       found.push({ file, line: index + 1, rule: rule.name, text, hint: rule.hint });
@@ -387,8 +414,24 @@ function ruleViolations(file, lines, rule, allow) {
   return found;
 }
 
+function isFinding(found, code) {
+  return (
+    Number.isInteger(found?.index) &&
+    found.index >= 0 &&
+    found.index <= code.length &&
+    typeof found.text === "string"
+  );
+}
+
 function codeViolations(file, code, codeCheck, allow) {
-  return codeCheck.find(file, code, allow).map(({ index, text }) => ({
+  const findings = codeCheck.find(file, code, allow);
+  if (!(Array.isArray(findings) && findings.every((found) => isFinding(found, code)))) {
+    fail(
+      `code check ${codeCheck.name} returned something other than [{ index, text }] for ${file}.\n` +
+        "index is a position in the code the check was given, and text is what it found there.",
+    );
+  }
+  return findings.map(({ index, text }) => ({
     file,
     line: lineOf(code, index),
     rule: codeCheck.name,
@@ -407,7 +450,9 @@ function check(file, config) {
   const code = withoutStringsAndComments(text);
   return [
     ...found,
-    ...CODE_CHECKS.flatMap((codeCheck) => codeViolations(file, code, codeCheck, config.allow)),
+    ...config.codeChecks.flatMap((codeCheck) =>
+      codeViolations(file, code, codeCheck, config.allow),
+    ),
   ];
 }
 
@@ -418,7 +463,7 @@ function settings(flags) {
   }
   assertResolves(resolved.exclude, "conformance.exclude");
   assertResolves(resolved.themeFiles, "conformance.themeFiles");
-  return { ...resolved, rules: [...RULES, ...projectRules(PROJECT_RULES)] };
+  return { ...resolved, ...projectRules(project.RULES) };
 }
 
 const VALUE_FLAGS = new Map([
@@ -482,7 +527,7 @@ function main(argv) {
     return 1;
   }
   process.stdout.write(
-    `conformance ok: ${count(files.length, "file")}, ${config.rules.length + CODE_CHECKS.length} checks\n`,
+    `conformance ok: ${count(files.length, "file")}, ${config.rules.length + config.codeChecks.length} checks\n`,
   );
   return 0;
 }
