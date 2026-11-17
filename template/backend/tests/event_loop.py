@@ -8,25 +8,19 @@ step, and calls `Reported.check` after each test.
 import asyncio
 import gc
 import logging
-import statistics
 import threading
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import override
+
+from devtools.reference_core import REFERENCE_WORKLOAD_SECONDS, workload_seconds_here
 
 HELD_SECONDS = 1.0
 """The CPU time one step may use on an event loop before its test fails, in seconds on the
 reference core. The time a step waits, for a CPU or for anything else, does not count. The CPU
 time of a garbage collection that runs during the step does not count."""
-
-REFERENCE_WORKLOAD_SECONDS = 0.246
-"""The CPU time `workload` uses on the reference core: one core of a Cloud Build `E2_HIGHCPU_32`
-machine, in `python:3.12-slim` on x86_64, Python 3.12.16. The least of 7 runs."""
-
-WORKLOAD_RUNS = 5
-"""How many times `step_limit_on_this_machine` runs `workload`."""
 
 _WAITED = "Executing %s took %.3f seconds"
 _HELD = "Executing %s used %.3f seconds of CPU, which is %.3f seconds on the reference core"
@@ -58,19 +52,6 @@ def _cpu_seconds_without_collections() -> float:
     return time.thread_time() - _COLLECTIONS.seconds
 
 
-def workload() -> int:
-    """Fixed CPU work in pure Python. `REFERENCE_WORKLOAD_SECONDS` is true for this code only."""
-    total = 0
-    held: dict[str, list[int]] = {}
-    for i in range(400_000):
-        key = f"k{i % 5000}"
-        held.setdefault(key, []).append(i)
-        total += len(key) * (i % 7)
-    for values in held.values():
-        total += sum(sorted(values, reverse=True)[:3])
-    return total
-
-
 @dataclass(frozen=True)
 class StepLimit:
     """The CPU time one step may use on a machine that runs `workload` in `workload_seconds` of
@@ -88,17 +69,9 @@ class StepLimit:
         return seconds * REFERENCE_WORKLOAD_SECONDS / self.workload_seconds
 
 
-def cpu_seconds(work: Callable[[], object]) -> float:
-    """The CPU time this thread uses to run `work` once."""
-    started = time.thread_time()
-    work()
-    return time.thread_time() - started
-
-
 def step_limit_on_this_machine() -> StepLimit:
-    """Runs `workload` `WORKLOAD_RUNS` times on this thread, now, and takes the median CPU time.
-    Blocks for about `WORKLOAD_RUNS` times `REFERENCE_WORKLOAD_SECONDS` on the reference core."""
-    return StepLimit(statistics.median(cpu_seconds(workload) for _ in range(WORKLOAD_RUNS)))
+    """The limit on this machine, from `workload_seconds_here` timed now."""
+    return StepLimit(workload_seconds_here())
 
 
 def measure_every_step(limit: StepLimit) -> None:

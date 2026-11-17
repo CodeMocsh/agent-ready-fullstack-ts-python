@@ -5,7 +5,7 @@
 
 **A step that uses more than `HELD_SECONDS` of CPU on the reference core, on an event loop, is an
 error at teardown of its test.** A garbage collection during the step does not count.
-`tests/event_loop.py` names the reference core. At import, this module times a fixed workload on
+`devtools/reference_core.py` names the reference core. At import, this module times a fixed workload on
 this machine, once per process, and scales the limit to it. So a step that passes here passes on
 the reference core. asyncio runs in debug mode on every event
 loop here: the one `TestClient` serves the app on, and the one pytest-asyncio runs a test on.

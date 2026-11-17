@@ -40,7 +40,7 @@ and the bullet on `identity_stub` below says why.
 | `app/jobs.py`: its kinds of job, and the handler of each | `app/store/jobs.py`, `app/store/pg_jobs.py`, `app/worker.py` |
 | `frontend/e2e/signed-in.ts`: how its live specs sign in | the live specs that use its `test` |
 | `frontend/tests/read-budgets.ts`: its screens' read budgets, and its streams | `frontend/tests/first-draw.tsx`: `ReadBudget`, `readsOf`, `screens` |
-| `frontend/tests/signed-in.ts`: how the read-budget test signs in | `frontend/tests/first-draw.test.tsx` |
+| `frontend/tests/signed-in.ts`: how the read-budget test signs in | `frontend/tests/slow/first-draw.test.tsx` |
 | `frontend/src/app-providers.tsx`: the providers around the router | `frontend/src/main.tsx`, `frontend/tests/first-draw.tsx`, `frontend/tests/render.tsx` |
 | `frontend/devtools/conformance.rules.mjs`: its own conformance rules | `frontend/devtools/conformance.mjs`: the template's rules, and the check of each project rule's shape and name |
 | `app/identity/__init__.py`: its resolver, `principal_for` | `app/identity/shared.py`: `Principal`, `Actor`, `Unauthenticated`, the sentinel, the probe |

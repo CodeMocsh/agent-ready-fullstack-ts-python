@@ -100,6 +100,7 @@ _exclude:
   - "{% if not example_resource and _copier_operation == 'update' %}backend/tests/started/test_tasks.py{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/components/task-list.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/task-list.test.tsx{% endif %}"
+  - "{% if not example_resource and _copier_operation == 'update' %}frontend/tests/components/slow/task-list.test.tsx{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/e2e/tasks.live.spec.ts{% endif %}"
   - "{% if not example_resource and _copier_operation == 'update' %}frontend/src/api/tasks.ts{% endif %}"

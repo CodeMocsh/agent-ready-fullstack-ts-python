@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-BUDGET=60
+BUDGET=55
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -39,24 +39,15 @@ fi
 
 started=$(date +%s)
 
-report_the_cost() {
+report_the_time() {
     elapsed=$(( $(date +%s) - started ))
-    spent="$(git rev-parse --git-path gate-spent)"
-    times >"$spent"
-    cpu=$(awk 'function seconds(t, p) { split(t, p, /[ms]/); return p[1] * 60 + p[2] }
-        NR == 2 { printf "%d", seconds($1) + seconds($2) }' "$spent")
-    case "$cpu" in
-        '' | *[!0-9]*)
-            echo "pre-commit: cannot read the gate's CPU time from $spent" >&2
-            return 1
-            ;;
-    esac
     echo "" >&2
-    echo "pre-commit: ${cpu} CPU-seconds of a ${BUDGET} budget, ${elapsed}s on the clock" >&2
-    if [ "$cpu" -gt "$BUDGET" ]; then
-        echo "  Over budget. Something uses more CPU. Find it before it becomes normal." >&2
+    echo "pre-commit: ${elapsed}s on the clock of a ${BUDGET}s budget" >&2
+    if [ "$elapsed" -gt "$BUDGET" ]; then
+        echo "  Over budget. Something takes longer. Find it before it becomes normal." >&2
         echo "  To find it, run \`time make <target>\` for each target on the Makefile's \`gate-commit:\` line." >&2
-        echo "  BUDGET lives in devtools/gate.sh. Raise it only in a commit that says what uses more CPU and why." >&2
+        echo "  BUDGET lives in devtools/gate.sh, sized for the smallest machine that commits." >&2
+        echo "  Raise it only in a commit that says what takes longer and why." >&2
         return 1
     fi
     return 0
@@ -67,7 +58,7 @@ if [ "$has_frontend" = 1 ] && [ "$has_backend" = 1 ]; then
     if [ "$(sh devtools/worktree-tree.sh)" = "$before" ]; then
         echo "$before" >"$passed"
     fi
-    report_the_cost || exit 1
+    report_the_time || exit 1
     exit 0
 fi
 
@@ -93,6 +84,6 @@ echo "  openapi-check   SKIPPED (needs both halves)" >&2
 echo "  full suite      NOT RUN (CI or the release caller runs make suite)" >&2
 echo "Run 'make install', then 'make pre-commit', to check it properly." >&2
 
-report_the_cost || failed=1
+report_the_time || failed=1
 
 exit "$failed"

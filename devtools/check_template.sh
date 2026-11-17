@@ -662,7 +662,7 @@ for path, marker in found:
 sys.exit(1 if found else 0)
 PY
 TEST_FOLDERS="admission audit_events deployment devtools environment errors failures identity integration lifespan loop_watch loops
-              log main models observe pacing reads responses routes serve started store telemetry waits wiring worker"
+              log main models observe pacing reads responses routes serve slow started store telemetry waits wiring worker"
 need_only d backend/tests $TEST_FOLDERS
 for folder in $TEST_FOLDERS; do
     need "backend/tests/$folder/__init__.py"
@@ -1675,19 +1675,19 @@ file, line, second = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 file.write_text(file.read_text(encoding="utf-8").replace(line, f"{line}\n{second}"), encoding="utf-8")
 PY
     drawn=0
-    pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || drawn=$?
+    pnpm -C frontend exec vitest run tests/slow/first-draw.test.tsx >"$WORK/step.log" 2>&1 || drawn=$?
     cp "$WORK/task-list.tsx" "$TASK_LIST"
     cp "$WORK/client.ts" "$CLIENT"
 }
 counted_two() {
-    [ "$drawn" -ne 0 ] || fail "tests/first-draw.test.tsx passed a first draw that $1, against a budget of one"
+    [ "$drawn" -ne 0 ] || fail "tests/slow/first-draw.test.tsx passed a first draw that $1, against a budget of one"
     grep -q 'the first draw read:' "$WORK/step.log" && grep -qF 'tasks?after=3' "$WORK/step.log" \
-        || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a first draw that $1, but not on its count of the read of /tasks?after=3"; }
+        || { cat "$WORK/step.log" >&2; fail "tests/slow/first-draw.test.tsx failed on a first draw that $1, but not on its count of the read of /tasks?after=3"; }
 }
 BESIDE='  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "after"], initialPageParam: "3" });'
 AFTER='  useInfiniteQuery({ ...TASK_PAGES, queryKey: ["tasks", "after"], initialPageParam: "3", enabled: tasks.data !== undefined });'
 draws_with "$BESIDE"
-[ "$drawn" -eq 0 ] || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed a first draw whose two reads start in one task. request() in $CLIENT sends them as one GET /reads, which a budget of one holds"; }
+[ "$drawn" -eq 0 ] || { cat "$WORK/step.log" >&2; fail "tests/slow/first-draw.test.tsx failed a first draw whose two reads start in one task. request() in $CLIENT sends them as one GET /reads, which a budget of one holds"; }
 python3 - "$CLIENT" "$GROUPED" <<'PY'
 import pathlib
 import sys
@@ -1739,7 +1739,7 @@ export function TaskList() {""")
 file.write_text(text.replace(main, main + "      <Deferred ready={tasks.data !== undefined} />\n", 1), encoding="utf-8")
 PY
 drawn=0
-pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || drawn=$?
+pnpm -C frontend exec vitest run tests/slow/first-draw.test.tsx >"$WORK/step.log" 2>&1 || drawn=$?
 cp "$WORK/task-list.tsx" "$TASK_LIST"
 counted_two "reads in a part that a slow render mounts after its first answer"
 refuses_the_cycle() {
@@ -1759,10 +1759,10 @@ text = text.replace(react, react.replace("useState", "useEffect, useState"))
 file.write_text(text.replace(line, f"{line}\n{cycle}"), encoding="utf-8")
 PY
     cycle_refused=0
-    pnpm -C frontend exec vitest run tests/first-draw.test.tsx >"$WORK/step.log" 2>&1 || cycle_refused=$?
+    pnpm -C frontend exec vitest run tests/slow/first-draw.test.tsx >"$WORK/step.log" 2>&1 || cycle_refused=$?
     cp "$WORK/task-list.tsx" "$TASK_LIST"
-    [ "$cycle_refused" -ne 0 ] || fail "tests/first-draw.test.tsx passed a screen that $shape"
-    grep -q 'CycleStopped: The read of \["tasks"\] stopped' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/first-draw.test.tsx failed on a screen that $shape, but src/query-client.ts did not stop the read and name its key"; }
+    [ "$cycle_refused" -ne 0 ] || fail "tests/slow/first-draw.test.tsx passed a screen that $shape"
+    grep -q 'CycleStopped: The read of \["tasks"\] stopped' "$WORK/step.log" || { cat "$WORK/step.log" >&2; fail "tests/slow/first-draw.test.tsx failed on a screen that $shape, but src/query-client.ts did not stop the read and name its key"; }
 }
 refuses_the_cycle "reads again each time its own answer arrives" \
     "  useEffect(() => void tasks.refetch(), [tasks.dataUpdatedAt, tasks.refetch]);"

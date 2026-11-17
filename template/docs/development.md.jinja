@@ -54,15 +54,22 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
 - **`make suite` runs all default tests and builds the frontend.** It includes the started
   app, slow tests, every frontend test and the live contract suite. It does not select the opt-in tiers below.
   {% if github_ci %}The GitHub workflow runs it on pull requests and pushes.{% else %}Configure
-  your CI or release build to run it before promotion.{% endif %}
+  your CI to run it before promotion. A run after merge only stops promotion. It cannot keep a
+  broken change out of `main`.{% endif %}
+- **Every committer runs the commit gate.** The hook runs only where a committer installed it. A
+  commit through an API, a web editor or `--no-verify` runs no hook. A coding agent that commits
+  through an API runs `make pre-commit` on the exact tree before it commits.
+- **Something other than the committer checks a change before it merges.** That check need not
+  run the commit gate again. It runs what the commit gate leaves out. {% if github_ci %}The GitHub
+  workflow runs `make suite` on each pull request.{% else %}Configure your CI to do it.{% endif %}
 - **`make pre-commit` records one pass per tree.** A matching pass returns before the project lock.
   After locking, a waiter reads the tree and pass again. It reuses a matching pass.
   The record certifies only the commit gate. It does not certify the full suite.
   [adr/template/0014](adr/template/0014-the-gate-runs-once-per-tree-and-one-at-a-time.md) defines
   the execution stages and the lock.
 - **Test requirements decide selection.** `frontend/vitest.config.ts` keeps Node tests separate
-  from DOM setup. Its smoke project keeps API, component and first-draw checks in the commit
-  gate. All other frontend test files enter the DOM project. New backend tests enter the
+  from DOM setup. Its smoke project keeps fast API, component and first-draw checks in the
+  commit gate. All other frontend test files enter the DOM project. New backend tests enter the
   default run unless an explicit tier excludes them. A test that starts the app belongs under
   `tests/started/`. Timing reports identify costly tests; timing never silently deselects one.
 - **Keep expensive tests beside their subject, under `slow/`.** For example, a costly route
@@ -72,9 +79,20 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   under `slow/` keeps its Node environment. Moving a DOM test keeps its DOM environment.
   Preserve fixture scope and imports when moving a test. Add `__init__.py` to a new Python
   test package. Do not add `slow` to `norecursedirs` or a full-run exclusion.
+- **A commit-gate test takes less than 0.5 seconds on the clock, on the reference core.** Its
+  setup counts. A test that takes longer moves under `slow/`. This rule keeps the commit gate
+  fast enough for every committer, a coding agent in a small sandbox included. To find the limit
+  on this machine, divide 0.5 by the number that `uv run python devtools/reference_core.py`
+  prints in `backend/`. `pytest --durations=0` and `vitest run --reporter=json` give the time of
+  each test. No test holds this rule.
 - **Measure before moving a test.** Optimize unnecessary setup first. Use repeated runs with
-  the same dependencies to compare CPU and elapsed time. Keep the aggregate commit budget;
-  many cheap tests can still be costly. A measured duration never changes test selection.
+  the same dependencies to compare CPU and elapsed time. A measured duration never moves a test
+  by itself. A person moves it.
+- **`BUDGET` in `devtools/gate.sh` limits the whole commit gate, in seconds on the clock.** Many
+  fast tests can still take too long together. The clock starts after the lock. `BUDGET` is sized
+  for the smallest machine that commits, such as a cloud sandbox with two vCPUs. Set it from
+  three runs there, each on a new tree, with a third more as margin. A laptop usually finishes
+  inside it.
 - **A release caller must bind the result to its source revision.** Install from lockfiles,
   provide a Git checkout for repository checks, and stop promotion on a failed or missing result.
   Select additional tiers for the deployment's requirements. Assign an owner for failures.

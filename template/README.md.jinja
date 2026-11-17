@@ -69,8 +69,9 @@ check and builds the frontend. Neither needs a browser or a database daemon.
 The GitHub workflow runs `make suite` on pull requests and pushes. It runs `make db-test`
 in a separate job. The other opt-in tiers need a caller of their own.
 {%- else -%}
-Configure your CI or release build to run `make suite`. It must stop promotion when that
-check fails or has no result. The opt-in tiers need callers of their own.
+Configure your CI to check each change before it merges. That check need not run the commit
+gate again. Run `make suite` before promotion, and stop promotion when it fails or has no result.
+The opt-in tiers need callers of their own.
 {%- endif %}
 
 [AGENTS.md](AGENTS.md) is the map: the principles, the rules nothing checks, and an index into
