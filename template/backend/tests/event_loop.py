@@ -34,11 +34,11 @@ _UNMEASURED = asyncio.Handle._run
 
 
 class _Collections(threading.local):
-    """The CPU time of the garbage collections that ran on one thread."""
+    """The CPU time of the garbage collections that ran on one thread. The values start on the
+    class, so a collection that runs while a thread first reads them finds both."""
 
-    def __init__(self) -> None:
-        self.started: float = 0.0
-        self.seconds: float = 0.0
+    started: float = 0.0
+    seconds: float = 0.0
 
 
 _COLLECTIONS = _Collections()
