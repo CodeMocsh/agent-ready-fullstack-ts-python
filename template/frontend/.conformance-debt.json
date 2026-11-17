@@ -1,0 +1,22 @@
+{
+  "rules": [
+    "arbitrary-spacing",
+    "arbitrary-type",
+    "effect-data",
+    "effect-input",
+    "effect-mutation",
+    "exported-function-expression",
+    "filename-export",
+    "inline-type-declaration",
+    "magic-presentation-prop",
+    "named-colour",
+    "palette-utility",
+    "query-invalidation",
+    "raw-colour",
+    "raw-stroke",
+    "raw-type-declaration",
+    "server-event-outside-a-stream",
+    "token-alpha"
+  ],
+  "files": {}
+}

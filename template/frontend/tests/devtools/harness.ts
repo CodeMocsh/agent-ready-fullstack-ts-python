@@ -26,15 +26,18 @@ export function gate(script: string, prefix: string) {
       writeFileSync(join(root, "src", "index.css"), "");
       mkdirSync(directory);
     },
+    at(relative: string) {
+      return join(root, relative);
+    },
     close() {
       rmSync(root, { recursive: true, force: true });
     },
-    run(name: string, source: string[], rulesModule = NO_PROJECT_RULES): Run {
+    run(name: string, source: string[], rulesModule = NO_PROJECT_RULES, args: string[] = []): Run {
       writeFileSync(join(root, "devtools", "conformance.rules.mjs"), `${rulesModule}\n`);
       const path = join(directory, name);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, `${source.join("\n")}\n`);
-      const finished = spawnSync("node", [`devtools/${script}`, directory], {
+      const finished = spawnSync("node", [`devtools/${script}`, directory, ...args], {
         cwd: root,
         encoding: "utf8",
       });

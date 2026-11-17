@@ -2259,7 +2259,19 @@ node -e '
 const pkg = JSON.parse(require("node:fs").readFileSync("frontend/package.json", "utf8"));
 if (!pkg.scripts.lint.includes("--tighten-baseline")) throw new Error("pnpm lint cannot tighten");
 if (pkg.scripts["lint:check"].includes("--tighten-baseline")) throw new Error("lint:check tightens");
+if (!pkg.scripts.lint.includes("conformance --tighten")) throw new Error("pnpm lint cannot lower the conformance debt");
+if (pkg.scripts["lint:check"].includes("--tighten")) throw new Error("lint:check lowers the conformance debt");
+for (const [name, script] of Object.entries(pkg.scripts)) {
+  if (name !== "conformance:record" && script.includes("--record")) throw new Error(`${name} records conformance debt; only a person or an agent runs conformance:record, by name`);
+}
 '
+
+echo "==> assert the shipped conformance debt names every rule and owes nothing"
+cp frontend/.conformance-debt.json "$WORK/shipped-debt.json"
+pnpm -C frontend run conformance --tighten >/dev/null \
+    || fail "the rendered frontend fails pnpm conformance against its own conformance debt"
+cmp -s "$WORK/shipped-debt.json" frontend/.conformance-debt.json \
+    || fail "pnpm conformance --tighten changed frontend/.conformance-debt.json. A rule it does not name records its first finding in a new project instead of failing on it. Name every rule in template/frontend/.conformance-debt.json."
 
 node -e '
 let body = "";
