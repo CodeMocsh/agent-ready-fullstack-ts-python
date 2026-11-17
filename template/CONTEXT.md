@@ -297,6 +297,14 @@ last caller to leave cancels the run. A run is in a request, whoever starts it. 
 cancels a run at shutdown.
 _Avoid_: single-flight, dedupe.
 
+**Conformance debt**:
+The findings of each rule that each frontend file had when the project recorded the rule.
+`frontend/.conformance-debt.json` holds it, and a file may keep no more. Nothing raises a count:
+`make lint` lowers one, and `pnpm conformance:record` adds counts only for a rule the debt does
+not name yet.
+_Avoid_: budget (a read budget is something else), baseline (a baseline is recorded again),
+allowlist, waiver.
+
 **Startup count**:
 The files of `app` and of the installed packages that the backend loads before it serves,
 without telemetry. `backend/.startup-baseline.json` holds it, and the startup gate in

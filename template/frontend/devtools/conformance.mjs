@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import * as project from "./conformance.rules.mjs";
+import { reportLoose, reportTightened, settled } from "./debt.mjs";
 import { assertResolves, count, excluded, fail, ordering, section, sourceFiles } from "./gate.mjs";
+import { withProjectRules } from "./project-rules.mjs";
 import { lineOf, withoutStringsAndComments } from "./scan.mjs";
 
 const DEFAULTS = {
@@ -20,6 +21,10 @@ const USAGE = `usage: node devtools/conformance.mjs <paths...> [options]
   --exclude <pattern>   skip a path; repeatable, and trailing /** is optional
   --allow <text>        permit one exact match; repeatable
   --theme-file <path>   a file allowed to define the theme; repeatable
+  --debt <file>         the conformance debt: the findings each file may keep, by rule
+  --tighten             lower each count the tree no longer needs, and name each rule
+                        that finds nothing
+  --record              count the findings of each rule the debt does not name yet
 
 Each finding names its rule and says what to do instead.`;
 
@@ -330,67 +335,6 @@ const CODE_CHECKS = [
   { name: "exported-function-expression", hint: EXPORTED_ARROW_HINT, find: exportedArrows },
 ];
 
-const RULES_MODULE = "devtools/conformance.rules.mjs";
-const RULE_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
-const PATTERN_RULE_KEYS = "files,hint,name,pattern";
-const CODE_CHECK_KEYS = "find,hint,name";
-
-function regExpWith(value, global) {
-  return value instanceof RegExp && value.global === global && !value.sticky;
-}
-
-function refuse(index, problem) {
-  fail(
-    `rule ${index + 1} in ${RULES_MODULE} ${problem}.\n` +
-      "A pattern rule is { name, files, pattern, hint }, and a code check is\n" +
-      "{ name, hint, find }. conformance runs no rule until every rule passes.",
-  );
-}
-
-function assertPatternRule(rule, index) {
-  if (!regExpWith(rule.files, false)) {
-    refuse(index, "needs files, a RegExp with neither the g nor the y flag");
-  }
-  if (!regExpWith(rule.pattern, true)) {
-    refuse(index, "needs pattern, a RegExp with the g flag and without the y flag");
-  }
-}
-
-function assertShape(rule, index) {
-  if (typeof rule !== "object" || rule === null) refuse(index, "is not an object");
-  const keys = Object.keys(rule).sort().join(",");
-  if (keys !== PATTERN_RULE_KEYS && keys !== CODE_CHECK_KEYS) {
-    refuse(index, `has the keys ${keys || "(none)"}`);
-  }
-  if (typeof rule.name !== "string" || !RULE_NAME.test(rule.name)) {
-    refuse(index, "needs a name in kebab-case");
-  }
-  if (typeof rule.hint !== "string" || rule.hint.trim() === "") refuse(index, "needs a hint");
-  if (keys === PATTERN_RULE_KEYS) assertPatternRule(rule, index);
-  else if (typeof rule.find !== "function") refuse(index, "needs find, a function");
-}
-
-function projectRules(rules) {
-  if (!Array.isArray(rules)) fail(`${RULES_MODULE} must export RULES as an array.`);
-  const taken = new Set([...RULES, ...CODE_CHECKS].map((rule) => rule.name));
-  rules.forEach((rule, index) => {
-    assertShape(rule, index);
-    if (taken.has(rule.name)) {
-      fail(
-        `rule ${index + 1} in ${RULES_MODULE} is named ${rule.name}, and a rule of that name\n` +
-          "already exists. The report gives one hint for each name, so one of the two would\n" +
-          "point at the other's advice. conformance runs no rule until the project's rule has a\n" +
-          "name of its own.",
-      );
-    }
-    taken.add(rule.name);
-  });
-  return {
-    rules: [...RULES, ...rules.filter((rule) => Object.hasOwn(rule, "pattern"))],
-    codeChecks: [...CODE_CHECKS, ...rules.filter((rule) => Object.hasOwn(rule, "find"))],
-  };
-}
-
 function matchedText(match) {
   return match.trim().replace(/["']/g, "");
 }
@@ -463,7 +407,7 @@ function settings(flags) {
   }
   assertResolves(resolved.exclude, "conformance.exclude");
   assertResolves(resolved.themeFiles, "conformance.themeFiles");
-  return { ...resolved, ...projectRules(project.RULES) };
+  return { ...resolved, ...withProjectRules(RULES, CODE_CHECKS) };
 }
 
 const VALUE_FLAGS = new Map([
@@ -472,8 +416,27 @@ const VALUE_FLAGS = new Map([
   ["--theme-file", "themeFiles"],
 ]);
 
+const SWITCHES = new Map([
+  ["--record", "record"],
+  ["--tighten", "tighten"],
+]);
+
+function flagValue(argv, index, flag) {
+  if (index >= argv.length || argv[index].startsWith("-"))
+    fail(`${flag} needs a value\n\n${USAGE}`);
+  return argv[index];
+}
+
+function assertedArgs(out) {
+  if (out.paths.length === 0) fail(`no paths given\n\n${USAGE}`);
+  if ((out.record || out.tighten) && out.debt === null) {
+    fail(`--record and --tighten need --debt\n\n${USAGE}`);
+  }
+  return out;
+}
+
 function parseArgs(argv) {
-  const out = { paths: [], flags: {} };
+  const out = { paths: [], flags: {}, debt: null, record: false, tighten: false };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--help" || arg === "-h") {
@@ -481,15 +444,16 @@ function parseArgs(argv) {
       process.exit(0);
     } else if (VALUE_FLAGS.has(arg)) {
       const key = VALUE_FLAGS.get(arg);
-      out.flags[key] = [...(out.flags[key] ?? []), argv[++index]];
-    } else if (arg.startsWith("-")) fail(`unknown option ${arg}\n\n${USAGE}`);
+      out.flags[key] = [...(out.flags[key] ?? []), flagValue(argv, ++index, arg)];
+    } else if (arg === "--debt") out.debt = flagValue(argv, ++index, arg);
+    else if (SWITCHES.has(arg)) out[SWITCHES.get(arg)] = true;
+    else if (arg.startsWith("-")) fail(`unknown option ${arg}\n\n${USAGE}`);
     else out.paths.push(arg);
   }
-  if (out.paths.length === 0) fail(`no paths given\n\n${USAGE}`);
-  return out;
+  return assertedArgs(out);
 }
 
-function report(violations) {
+function report(violations, closing) {
   const ordered = [...violations].sort(ordering);
   for (const violation of ordered) {
     process.stderr.write(
@@ -501,20 +465,56 @@ function report(violations) {
     const { hint } = ordered.find((violation) => violation.rule === rule);
     process.stderr.write(`${rule}: ${hint}\n`);
   }
-  process.stderr.write(
-    `\nFAIL: ${count(ordered.length, "place")} above step outside the theme, read\n` +
-      "outside a query, or start a read or a write with no outside cause. Each looks\n" +
-      "correct in the code you are reading: a literal colour renders fine until the\n" +
-      "theme switches, an effect that fetches works until something else needs the\n" +
-      "same data, and an invalidation works until it answers its own read. Fix the\n" +
-      "code rather than the check.\n" +
-      "A value that genuinely belongs outside the theme goes in conformance.allow in\n" +
-      "package.json, where the exception lands in the diff and gets reviewed.\n",
+  process.stderr.write(closing(ordered.length));
+}
+
+function outsideTheRules(places, debt) {
+  return (
+    `\nFAIL: ${count(places, "place")} above step outside the theme, read\n` +
+    "outside a query, or start a read or a write with no outside cause. Each looks\n" +
+    "correct in the code you are reading: a literal colour renders fine until the\n" +
+    "theme switches, an effect that fetches works until something else needs the\n" +
+    "same data, and an invalidation works until it answers its own read. Fix the\n" +
+    "code rather than the check.\n" +
+    "A value that genuinely belongs outside the theme goes in conformance.allow in\n" +
+    "package.json, where the exception lands in the diff and gets reviewed.\n" +
+    (debt === null
+      ? ""
+      : `A file may keep no more findings of a rule than ${debt} counts for it.\n` +
+        "Fix the code. Do not raise a count.\n")
   );
 }
 
+function notRecorded(debt) {
+  return (findings) =>
+    `\nFAIL: ${count(findings, "finding")} above break a rule that ${debt} does not name yet.\n` +
+    "Fix each finding your change made. Then, if an update or a new project rule brought\n" +
+    "the rule, run `pnpm conformance:record` once. It counts the findings of those rules\n" +
+    "only, and a reviewer sees the counts in the diff.\n";
+}
+
+function reportedClean(outcome, path) {
+  if (outcome.recorded.length > 0) {
+    process.stdout.write(
+      `conformance debt recorded for ${count(outcome.recorded.length, "rule")} -> ${path}\n`,
+    );
+  }
+  if (outcome.tightenedFrom.length > 0) reportTightened(outcome.tightenedFrom, path);
+  if (outcome.named.length > 0) {
+    process.stdout.write(
+      `conformance debt names ${count(outcome.named.length, "new rule")} -> ${path}. Commit it.\n`,
+    );
+  }
+  const debt = outcome.known ? path : null;
+  if (outcome.over.length > 0) report(outcome.over, (places) => outsideTheRules(places, debt));
+  if (outcome.unrecorded.length > 0) report(outcome.unrecorded, notRecorded(path));
+  if (outcome.loose.length > 0) reportLoose(outcome.loose, path);
+  return outcome.over.length + outcome.unrecorded.length + outcome.loose.length === 0;
+}
+
 function main(argv) {
-  const { paths, flags } = parseArgs(argv);
+  const { paths, flags, debt, record, tighten } = parseArgs(argv);
+  const options = { path: debt, record, tighten };
   const config = settings(flags);
   const files = sourceFiles(paths, {
     matches: measurable,
@@ -522,12 +522,12 @@ function main(argv) {
   });
   if (files.length === 0) fail(`no source files under ${paths.join(", ")}`);
   const violations = files.flatMap((file) => check(file, config));
-  if (violations.length > 0) {
-    report(violations);
-    return 1;
-  }
+  const rules = [...config.rules, ...config.codeChecks].map((rule) => rule.name);
+  const outcome = settled(violations, { ...options, scanned: new Set(files), rules });
+  if (!reportedClean(outcome, options.path)) return 1;
+  const kept = outcome.owed > 0 ? `, ${count(outcome.owed, "finding")} owed in the debt` : "";
   process.stdout.write(
-    `conformance ok: ${count(files.length, "file")}, ${config.rules.length + config.codeChecks.length} checks\n`,
+    `conformance ok: ${count(files.length, "file")}, ${rules.length} checks${kept}\n`,
   );
   return 0;
 }

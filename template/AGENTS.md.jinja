@@ -139,6 +139,8 @@ fans out to both. Each half works without the other's toolchain.
 - When `pnpm dlx shadcn add` puts a file in scanned source and `make lint` fails on it, change
   the values to tokens, or add that one path to `conformance.exclude`. Never use
   `conformance.allow`: it matches text, so it permits that text in every file.
+- Run `pnpm conformance:record` only when `pnpm conformance` says the conformance debt does not
+  name a rule yet. Never record a finding your own change made, and never raise a count.
 
 **Backend**
 

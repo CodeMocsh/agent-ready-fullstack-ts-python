@@ -99,6 +99,13 @@ deploy/               schema.sql and roles.sql -- generated from app/store/
   upward, is not the way to green. `make lint` lowers a stale baseline for you, and records again
   one that the codebase moved by changing size rather than shape; either change belongs in your
   commit.
+- **Nothing raises a conformance debt count.** `frontend/.conformance-debt.json` counts, for
+  each file and rule, the findings the project had when it recorded the rule. A file may keep
+  that many and no more. A new file starts with none. `make lint` lowers a count the tree no
+  longer needs. Fix the code. Do not raise a count.
+- **Record conformance debt only for a rule that is new to it.** An update or a new project rule
+  can bring a rule the debt does not name yet. Then run `pnpm conformance:record` once, by name,
+  and commit what it writes. Never record a finding your own change made: fix the code.
 - **So is a startup baseline.** `make lint` fails when the startup count rises past what
   `backend/.startup-baseline.json` allows, and names the packages that grew.
   [deployment.md](deployment.md#a-cold-start) says why the count costs, and how to record a

@@ -134,14 +134,15 @@ _exclude:
   - "{% if _copier_operation == 'update' %}frontend/tests/read-budgets.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/tests/signed-in.ts{% endif %}"
   # Generated from the project's own code, so an update never touches them and the project
-  # regenerates them afterwards: `make openapi` writes the first three, `make lint` the fourth, and
-  # `devtools/startup.py --baseline .startup-baseline.json --update-baseline` the fifth. A merged
-  # copy of any of them describes neither tree.
+  # regenerates them afterwards: `make openapi` writes the first three, `make lint` the fourth,
+  # `devtools/startup.py --baseline .startup-baseline.json --update-baseline` the fifth, and
+  # `pnpm conformance:record` the sixth. A merged copy of any of them describes neither tree.
   - "{% if _copier_operation == 'update' %}openapi.json{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/src/api/schema.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}frontend/src/api/parts.ts{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/.complexity-baseline.json{% endif %}"
   - "{% if _copier_operation == 'update' %}backend/.startup-baseline.json{% endif %}"
+  - "{% if _copier_operation == 'update' %}frontend/.conformance-debt.json{% endif %}"
 
 # Written once and then the project's: an update adds one that is missing and never touches one that
 # exists. Each holds only a project's own list, and the mechanism around it is a module the template

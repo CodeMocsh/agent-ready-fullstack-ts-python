@@ -162,6 +162,11 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
 
   `pnpm conformance` refuses to run any rule when one has another shape, or takes the name of a
   rule that already exists. A template rule has no switch to turn it off.
+- **A finding the project had before a rule existed is conformance debt.**
+  `.conformance-debt.json` counts it, by file and rule. A file past its count fails, and so does
+  a new file with any finding. `pnpm lint` lowers a count the tree no longer needs, and deletes
+  the entry of a file that is gone. A renamed file loses its entry: put its counts under the new
+  path. `pnpm conformance:record` counts only the rules the debt does not name yet.
 - **A `useEffect` does not fetch.** Server state comes from TanStack Query hooks against
   `src/api/client.ts`. Effects are for synchronising with something outside React.
   `pnpm conformance` refuses a `fetch`, an `await` or a `.then` written in an effect.

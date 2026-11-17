@@ -664,9 +664,24 @@ What to expect, because it is not all free:
   - Replace `frontend/devtools/conformance.mjs` with the template's copy, from
     `template/frontend/devtools/conformance.mjs` at the tag you update to. Resolving the merge
     keeps the lines the update did not touch, your rules among them.
-  - A template rule you removed comes back, and nothing turns it off. Fix what it finds.
+  - A template rule you removed comes back, and nothing turns it off. Fix what it finds, or
+    from 0.83.0 record it as conformance debt.
   - In `docs/frontend.md`, take the template's bullet that starts "A rule of the project's own
     goes in".
+
+- **From 0.83.0 a file may keep the conformance findings it had, and no more.** The update
+  does not write `frontend/.conformance-debt.json`. After the update:
+  - In `frontend/package.json`, take the template's `conformance` and `conformance:record`
+    scripts, and make `lint` run `pnpm run conformance --tighten`. If you keep your own `lint`
+    line in the merge, it never lowers the debt.
+  - Run `pnpm -C frontend conformance:record` once, and commit
+    `frontend/.conformance-debt.json`. Do this even when `pnpm conformance` passes: the file then
+    names every rule, and a rule a later update brings fails as one the debt does not name yet.
+  - A file past its count fails, and so does a new file with any finding. `pnpm lint` lowers
+    each count as you fix code. Nothing raises one.
+  - In `docs/development.md`, take the template's bullets that start "Nothing raises a
+    conformance debt count" and "Record conformance debt", and in `docs/frontend.md` the one that starts "A
+    finding the project had".
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
