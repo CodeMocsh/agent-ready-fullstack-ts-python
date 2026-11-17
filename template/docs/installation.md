@@ -701,6 +701,11 @@ What to expect, because it is not all free:
     "The class rules read class strings" and "When the theme resets", and the lines for
     `src/components/` and `src/index.css` in the layout.
 
+- **From 0.84.1 `@tailwindcss/vite` is a dev dependency.** It runs only in the build, as
+  `@vitejs/plugin-react` does. The production audit then no longer reaches picomatch, whose
+  GHSA-fc5q-39xc-vjpf has no fixed release. After the update, run `make install`. If the project
+  added another build plugin to `dependencies`, move it too.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
