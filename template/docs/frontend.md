@@ -61,7 +61,7 @@ The rules are in [AGENTS.md](../AGENTS.md). This is how the project meets them t
   `make openapi` writes the parts to `src/api/parts.ts`. A read that needs another read's answer
   is a second request, and its budget names that reason in `because`. A read that needs only the
   route's parameters starts in the route's `loader`, in the same task as the others. A section the
-  person opens later mounts its own query when it opens. `tests/first-draw.test.tsx` draws each
+  person opens later mounts its own query when it opens. `tests/slow/first-draw.test.tsx` draws each
   screen and expects its requests to equal `tests/read-budgets.ts`, then counts again on a focus.
   [adr/template/0029](adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md)
   and

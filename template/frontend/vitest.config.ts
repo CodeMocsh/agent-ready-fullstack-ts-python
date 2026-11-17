@@ -3,7 +3,11 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 const node = ["tests/devtools/**/*.test.ts"];
-const smoke = ["tests/api/**/*.test.ts", "tests/components/**/*.test.tsx", "tests/first-draw.test.tsx"];
+const smoke = [
+  "tests/api/**/*.test.ts",
+  "tests/components/**/*.test.tsx",
+  "tests/first-draw.test.tsx",
+];
 
 export default defineConfig({
   plugins: [react()],

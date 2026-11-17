@@ -87,6 +87,10 @@ fans out to both. Each half works without the other's toolchain.
 - Never hand-edit or hand-merge a generated file. Take a side and regenerate: `make openapi` for
   the contract, `make schema` and `make roles` for `deploy/`.
 - Run `make pre-commit`, then commit. The commit gate runs once per tree.
+- An agent that commits through an API runs no hook. It runs `make pre-commit` on the exact tree
+  before it commits.
+- A commit-gate test takes less than 0.5 seconds on the reference core. Move a test that takes
+  longer under `slow/` beside its subject.
 - When a complexity gate fails, split the function. Do not raise a threshold to get green.
 - When the startup gate fails, import the package where it is used. Do not record a rise to get
   green.
@@ -111,7 +115,7 @@ fans out to both. Each half works without the other's toolchain.
   `request` in `src/api/client.ts` sends the reads that start in one task as one group, when each
   route declares `PART`. A read that waits for another read's answer is a second request: start
   it in the route's `loader` when it needs only the route's parameters.
-  `tests/first-draw.test.tsx` counts the GET requests of each screen against
+  `tests/slow/first-draw.test.tsx` counts the GET requests of each screen against
   `tests/read-budgets.ts`. A budget above one names its reason, and a reviewer sees it there.
   [adr/template/0029](docs/adr/template/0029-the-reads-that-start-in-one-task-are-one-request.md)
   says why.

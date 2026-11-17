@@ -81,7 +81,7 @@ nearly every screen read in one group, its largest screen 19 reads in one.
   `getResponse`, so a part is not a request that `readsOf` counts. A part whose handler answers a
   network error leaves its group, so that alone it fails with `Unreached`, as against a server.
 - **A budget is exact, and a budget above 1 has a reason.** The type `ReadBudget` asks for
-  `because` with a number above 1. `tests/first-draw.test.tsx` fails when the first draw sends more
+  `because` with a number above 1. `tests/slow/first-draw.test.tsx` fails when the first draw sends more
   requests or fewer than its budget. It fails a draw that reads one URL, its query included, in
   two requests. `readsOf` lists the parts of each `/reads`. It settles at a fixed point: each check
   first flushes React in `act`, and the quiet time starts only after a flush that starts no read.

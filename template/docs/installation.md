@@ -706,6 +706,37 @@ What to expect, because it is not all free:
   GHSA-fc5q-39xc-vjpf has no fixed release. After the update, run `make install`. If the project
   added another build plugin to `dependencies`, move it too.
 
+- **From 0.85.0 every committer runs the commit gate, and each commit-gate test takes less than
+  0.5 seconds on the reference core.** `BUDGET` is now in seconds on the clock. After the
+  update:
+  - Give each agent that commits through an API a step that runs `make pre-commit` on the exact
+    tree before it commits.
+  - Find your commit-gate tests that take longer than the limit. Divide 0.5 by the number that
+    `uv run python devtools/reference_core.py` prints in `backend/` to get the limit on this
+    machine. `pytest --durations=0` and `vitest run --reporter=json` give each test's time. Move
+    each test over the limit under `slow/` beside its subject.
+  - The template moved its own slow tests under `slow/`. Where you changed a moved test, keep
+    your change in the file where the test now lives. The read-budget test is now
+    `frontend/tests/slow/first-draw.test.tsx`. `AGENTS.md` and `docs/frontend.md` name that path.
+    `frontend/tests/devtools/debt-gate.ts` is new.
+  - Set `BUDGET` in seconds on the clock, for the smallest machine that commits, such as an
+    agent's sandbox. Run `make pre-commit` there on three different trees, because a tree that
+    passed does not run again. Set `BUDGET` about a third above the largest. The `BUDGET` you had was in
+    CPU-seconds, and does not carry over.
+  - Have something other than the committer check each change before it merges. That check need
+    not run the commit gate again. A check after merge only stops promotion.
+  - `workload`, `cpu_seconds`, `WORKLOAD_RUNS` and `REFERENCE_WORKLOAD_SECONDS` moved from
+    `backend/tests/event_loop.py` to `backend/devtools/reference_core.py`. Import them from
+    there. `step_limit_on_this_machine` now calls `workload_seconds_here` from that module.
+  - In `docs/development.md`, take the template's bullets that start "`make suite` runs all
+    default tests", "Every committer runs the commit gate", "Something other than the
+    committer", "Test requirements decide
+    selection", "A commit-gate test takes less than", "Measure before moving a test" and
+    "`BUDGET` in `devtools/gate.sh`". In `AGENTS.md`, take the bullets that start "An agent that
+    commits through an API" and "A commit-gate test". In `CONTEXT.md`, take the "Reference core"
+    entry and the last sentence of "Commit gate". Without the GitHub workflow, take the
+    `README.md` paragraph that starts "Configure your CI".
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
