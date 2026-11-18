@@ -175,8 +175,8 @@ What to expect, because it is not all free:
   Store methods no longer take an actor, and record no audit event: delete the recording you
   added for 0.41.0, or each write records two events. `audit_event`, `absent`, `written`,
   `AuditEvent` and `app.store.TASKS` are gone. If you merged `app/store/pg.py`,
-  `app/store/migrate.py` or `app/store/ddl.py` by hand, keep `setup=_name_who_acts` on
-  `create_pool`, `MIGRATION_ACTING_SQL` in `apply`, and the audit entries. A tenant table with no
+  `app/store/migrate.py` or `app/store/ddl.py` by hand, keep the actor that `scoped` and
+  `connection()` set, `MIGRATION_ACTING_SQL` in `apply`, and the audit entries. A tenant table with no
   primary key cannot be written: give it one. After the first
   `make migrate` on 0.42.0, an instance of an earlier release cannot write, so replace them all
   in the same release.
@@ -736,6 +736,22 @@ What to expect, because it is not all free:
     commits through an API" and "A commit-gate test". In `CONTEXT.md`, take the "Reference core"
     entry and the last sentence of "Commit gate". Without the GitHub workflow, take the
     `README.md` paragraph that starts "Configure your CI".
+
+- **From 0.86.0 a store call names who acts in the statement that sets the tenant.** The pool
+  no longer has a `setup`. `scoped` takes its connection from `PostgresDatabase.lent()`, which
+  names nobody, and sets the tenant and the actor in one statement, `SET_TENANT_AND_ACTING`. A
+  store call sends 5 statements, not 6. `connection()` still names who acts for its session, so
+  your own openers keep working. After the update:
+  - An opener of your own that sets the tenant on a connection from `connection()` can take
+    `lent()` and send `SET_TENANT_AND_ACTING` in place of its tenant statement. It then saves a
+    round trip.
+  - A statement that writes no audited table, such as a health check, can take `lent()`.
+  - `tests/integration/reading.py` now counts `lent()`. `connection()` goes through it, so it
+    still counts each connection of your own.
+  - The first statement on a pooled session that Postgres ended raises `ConnectionLost`, where
+    the pool's `setup` raised `ConnectionRefused` before. Both are `DatabaseUnavailable`.
+  - In `backend/app/store/pg.py`, if you merged it by hand, take the template's `lent`,
+    `connection` and `scoped`, and remove `setup=` from `create_pool`.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

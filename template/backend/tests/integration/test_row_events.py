@@ -308,6 +308,35 @@ async def test_a_connection_lent_again_names_nobody(one_connection: Any) -> None
         await written_through(one_connection, "nobody")
 
 
+async def written_outside_a_unit(lent: Any, title: str) -> None:
+    async with lent as conn, conn.transaction():
+        await conn.execute("SELECT set_config($1, $2, true)", TENANT_GUC, ACME)
+        await conn.execute(
+            "INSERT INTO tasks (id, tenant_id, title) VALUES (gen_random_uuid(), $1, $2)",
+            ACME,
+            title,
+        )
+
+
+async def test_a_connection_lent_outside_a_unit_of_work_names_who_acts(
+    one_connection: Any, admin: Any
+) -> None:
+    with acting_as(PERSON):
+        await written_outside_a_unit(one_connection.connection(), "outside a unit")
+
+    [row] = await admin.fetch(_EVENTS)
+    assert row["actor_subject"] == PERSON.subject
+
+
+async def test_a_connection_lent_to_a_unit_of_work_names_nobody_until_the_unit_does(
+    one_connection: Any, admin: Any
+) -> None:
+    with acting_as(PERSON), pytest.raises(asyncpg.RaiseError, match="names no actor"):
+        await written_outside_a_unit(one_connection.lent(), "nobody")
+
+    assert await admin.fetch(_EVENTS) == []
+
+
 async def test_a_database_from_before_request_events_is_repaired(
     provisioned: Provisioned, admin: Any, one_connection: Any
 ) -> None:

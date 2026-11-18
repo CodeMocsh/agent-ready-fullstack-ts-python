@@ -73,7 +73,7 @@ class JobClaims:
         attempt."""
         token = uuid4()
         asked_at = time.monotonic()
-        async with self.database.connection() as conn, conn.transaction():
+        async with self.database.lent() as conn, conn.transaction():
             row = await conn.fetchrow(_CLAIM, token, self.leases.lease, list(kinds))
         if row is None:
             return None
@@ -91,7 +91,7 @@ class JobClaims:
         this process's `time.monotonic` clock at or before that end. Raises `LeaseLost` when the
         lease already ended, or another worker claimed the job."""
         asked_at = time.monotonic()
-        async with self.database.connection() as conn:
+        async with self.database.lent() as conn:
             renewed = await conn.fetchval(_RENEW, UUID(claim.id), claim.token, self.leases.lease)
         if renewed is None:
             raise LeaseLost(f"attempt {claim.attempts} of job {claim.id} lost its lease")
@@ -142,7 +142,7 @@ class JobClaims:
         """The seconds until a job of one of `kinds` is ready, or a lease of one ends: the next
         claim that time alone makes possible. Zero or less when a job is ready now. `None` when
         none is coming."""
-        async with self.database.connection() as conn:
+        async with self.database.lent() as conn:
             seconds = await conn.fetchval(_NEXT, list(kinds))
         return None if seconds is None else float(seconds)
 

@@ -2,12 +2,13 @@
 
 import math
 import socket
+from typing import final
 
 import asyncpg
 import pytest
 
 from app.store.budget import Draws
-from app.store.pg import ConnectionRefused, PostgresDatabase
+from app.store.pg import ConnectionLost, ConnectionRefused, PostgresDatabase
 from app.store.timeouts import TIMEOUTS, Timeouts
 
 
@@ -37,31 +38,71 @@ async def test_an_address_nothing_answers_is_refused_with_a_time_to_try_again() 
     assert refused.value.cause == "ConnectionRefusedError"
 
 
-class _EndedBeforeItIsLent:
-    """A pool whose pooled session Postgres ended before the driver read its end."""
+@final
+class _Session:
+    """A pooled session whose driver answers `InternalClientError`, as on a session that Postgres
+    ended before the driver read its end."""
 
-    async def acquire(self, timeout: float) -> None:
+    def __init__(self, ended: bool) -> None:
+        self._con = self
+        self._ended = ended
+
+    def is_closed(self) -> bool:
+        return self._ended
+
+    def terminate(self) -> None:
+        pass
+
+    async def execute(self, *_: object) -> None:
         raise asyncpg.InternalClientError(
-            f"cannot switch to state 12; another operation (2) is in progress, within {timeout}"
+            "cannot switch to state 12; another operation (2) is in progress"
         )
 
 
-async def test_a_pooled_session_that_ended_before_it_is_lent_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@final
+class _Lends:
+    def __init__(self, session: _Session) -> None:
+        self._session = session
+
+    async def acquire(self, timeout: float) -> _Session:
+        _ = timeout
+        return self._session
+
+    async def release(self, session: _Session) -> None:
+        _ = session
+
+
+def lending(monkeypatch: pytest.MonkeyPatch, session: _Session) -> PostgresDatabase:
     database = PostgresDatabase(
         dsn="postgresql://app@127.0.0.1:1/app",
         draws=Draws(instances=1, in_process={}, outside={}),
         kinds=lambda _: {},
     )
 
-    async def ended_pool() -> _EndedBeforeItIsLent:
-        return _EndedBeforeItIsLent()
+    async def pool() -> _Lends:
+        return _Lends(session)
 
-    monkeypatch.setattr(database, "pool", ended_pool)
+    monkeypatch.setattr(database, "pool", pool)
+    return database
 
-    with pytest.raises(ConnectionRefused, match="InternalClientError") as refused:
+
+async def test_the_first_statement_on_a_session_that_ended_before_it_was_lent_is_lost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = lending(monkeypatch, _Session(ended=True))
+
+    with pytest.raises(ConnectionLost, match="InternalClientError") as lost:
         async with database.connection():
             pass
 
-    assert refused.value.cause == "InternalClientError"
+    assert lost.value.cause == "InternalClientError"
+
+
+async def test_an_internal_client_error_on_a_live_session_raises_as_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = lending(monkeypatch, _Session(ended=False))
+
+    with pytest.raises(asyncpg.InternalClientError, match="another operation"):
+        async with database.connection():
+            pass

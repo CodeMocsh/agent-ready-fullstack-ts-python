@@ -96,10 +96,10 @@ def counting(monkeypatch: pytest.MonkeyPatch) -> Count:
     and the tasks and shared work it starts. A loop of the process, an attempt of a job and work
     beside the requests are not counted, even when they run during the request."""
     counted = Count()
-    unmeasured = PostgresDatabase.connection
+    unmeasured = PostgresDatabase.lent
 
     @asynccontextmanager
-    async def connection(self: PostgresDatabase) -> AsyncGenerator[Any]:
+    async def lent(self: PostgresDatabase) -> AsyncGenerator[Any]:
         lent: AbstractAsyncContextManager[Any] = unmeasured(self)
         if not _SERVING.get() or waits.started_beside():
             async with lent as conn:
@@ -114,7 +114,7 @@ def counting(monkeypatch: pytest.MonkeyPatch) -> Count:
             finally:
                 counted.held -= 1
 
-    monkeypatch.setattr(PostgresDatabase, "connection", connection)
+    monkeypatch.setattr(PostgresDatabase, "lent", lent)
     return counted
 
 
