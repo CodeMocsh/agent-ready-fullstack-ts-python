@@ -42,7 +42,7 @@ describe("the conformance debt on a file's count", () => {
     run(CLEAN, ["--record"]);
     const { status, stderr, lines } = run(TWO_COLOURS);
     expect(rulesOf(lines)).toEqual(["raw-colour", "raw-colour"]);
-    expect(stderr).not.toMatch(/owed\n|count owed/);
+    expect(stderr.split("\n")[0]).toBe(lines[0]);
     expect(status).toBe(1);
   });
 

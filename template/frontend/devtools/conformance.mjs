@@ -462,17 +462,14 @@ function findingLine(violation) {
 
 function report(violations, closing, exceeded = []) {
   const ordered = [...violations].sort(ordering);
-  const within = (entry) => (violation) =>
-    violation.file === entry.file && violation.rule === entry.rule;
-  for (const entry of exceeded) {
-    process.stderr.write(
-      `${entry.file}  ${entry.rule}  ${entry.found} found, ${entry.owed} owed\n`,
-    );
-    for (const violation of ordered.filter(within(entry))) {
+  const grouped = new Set(exceeded.flatMap((entry) => entry.findings));
+  for (const { file, rule, findings, owed } of exceeded) {
+    process.stderr.write(`${file}  ${rule}  ${findings.length} found, ${owed} owed\n`);
+    for (const violation of [...findings].sort(ordering)) {
       process.stderr.write(findingLine(violation));
     }
   }
-  for (const violation of ordered.filter((one) => !exceeded.some((entry) => within(entry)(one)))) {
+  for (const violation of ordered.filter((one) => !grouped.has(one))) {
     process.stderr.write(findingLine(violation));
   }
   process.stderr.write("\n");
@@ -484,18 +481,19 @@ function report(violations, closing, exceeded = []) {
 }
 
 function outsideTheRules(findings, debt, exceeded) {
-  return (
+  const broken =
     `\nFAIL: ${count(findings, "finding")} above. Each breaks a rule that this project holds its code to.\n` +
     "A finding looks correct in the file you are reading. That is why a check holds it.\n" +
-    "The line for each rule above says what the rule protects. Fix the code, not the check.\n" +
-    (debt === null
-      ? ""
-      : `A file may keep no more findings of a rule than ${debt} counts for it.\n`) +
-    (exceeded.length === 0
+    "The line for each rule above says what the rule protects. Fix the code, not the check.\n";
+  if (debt === null) return broken;
+  const counted =
+    exceeded.length === 0
       ? ""
       : "Where a file has too many findings of a rule, the gate cannot tell which one is new.\n" +
-        "It lists all of them, under a line with the count found and the count owed.\n") +
-    (debt === null ? "" : "Fix the code. Do not raise a count.\n")
+        "It lists all of them, under a line with the count found and the count owed.\n";
+  return (
+    `${broken}A file may keep no more findings of a rule than ${debt} counts for it.\n` +
+    `${counted}Fix the code. Do not raise a count.\n`
   );
 }
 

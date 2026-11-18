@@ -136,13 +136,18 @@ function tightened(debt, counts, scanned, rules) {
   return { rules: named, files };
 }
 
-function exceeded(over, counts, debt) {
-  return [...new Set(over.map(({ file, rule }) => keyOf(file, rule)))]
+function exceeded(over, debt) {
+  const groups = new Map();
+  for (const violation of over) {
+    const key = keyOf(violation.file, violation.rule);
+    if (!groups.has(key))
+      groups.set(key, { file: violation.file, rule: violation.rule, findings: [] });
+    groups.get(key).findings.push(violation);
+  }
+  return [...groups.keys()]
     .sort()
-    .map((key) => {
-      const [file, rule] = key.split("\n");
-      return { file, rule, found: foundIn(counts, file, rule), owed: owedBy(debt, file, rule) };
-    })
+    .map((key) => groups.get(key))
+    .map((group) => ({ ...group, owed: owedBy(debt, group.file, group.rule) }))
     .filter(({ owed }) => owed > 0);
 }
 
@@ -167,7 +172,7 @@ export function settled(violations, { path, scanned, rules, record, tighten }) {
   return {
     known: known || record,
     over,
-    exceeded: exceeded(over, counts, debt),
+    exceeded: exceeded(over, debt),
     unrecorded,
     loose: tighten ? [] : loose,
     tightenedFrom: tighten ? loose : [],
