@@ -1151,7 +1151,8 @@ CONFORMANCE="$OUT/frontend/devtools/conformance.mjs"
 mkdir -p "$CONF/bad" "$CONF/good"
 
 : >"$CONF/theme.css"
-conformance() { node "$CONFORMANCE" --theme-file "$CONF/theme.css" "$@"; }
+printf '{}\n' >"$CONF/package.json"
+conformance() { (cd "$CONF" && node "$CONFORMANCE" --theme-file "$CONF/theme.css" "$@"); }
 
 cat >"$CONF/bad/bad.tsx" <<'BAD'
 import { useEffect, useState } from "react";
@@ -1313,7 +1314,7 @@ export function Spaced() {
   return <p className="p-7">spaced</p>;
 }
 SPACED
-node "$CONFORMANCE" --theme-file "$CONF/reset.css" "$CONF/spaced" 2>&1 | grep -q 'spaced.tsx:2  spacing-off-the-scale  p-7' \
+(cd "$CONF" && node "$CONFORMANCE" --theme-file "$CONF/reset.css" "$CONF/spaced") 2>&1 | grep -q 'spaced.tsx:2  spacing-off-the-scale  p-7' \
     || fail "conformance let p-7 through under --spacing: initial. Tailwind generates nothing for that step, and the element gets no padding."
 
 if ! printf '%s\n' "$conformance_output" | grep -q 'commented.tsx:.*effect-data'; then
@@ -2038,6 +2039,7 @@ echo "==> assert the drift gate is two-sided, on both halves"
 (
     cd "$WORK"
     mkdir -p drift/src && cd drift
+    printf '{}\n' >package.json
     export PATH="$OUT/frontend/node_modules/.bin:$PATH"
     node -e '
     let out = "";
@@ -2144,6 +2146,7 @@ DRIFT_CASES
 (
     cd "$WORK"
     mkdir -p drift-zero/src && cd drift-zero
+    printf '{}\n' >package.json
     export PATH="$OUT/frontend/node_modules/.bin:$PATH"
 
     branching='let out = "";

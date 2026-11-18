@@ -21,6 +21,7 @@ export function gate(script: string, prefix: string) {
     open() {
       root = mkdtempSync(join(tmpdir(), `${prefix}-`));
       directory = join(root, "tree");
+      writeFileSync(join(root, "package.json"), "{}\n");
       cpSync("devtools", join(root, "devtools"), { recursive: true });
       mkdirSync(join(root, "src"));
       writeFileSync(join(root, "src", "index.css"), "");

@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { gate, NO_PROJECT_RULES } from "./harness";
 
@@ -93,10 +93,16 @@ const CLEAN = [
 
 const MULTILINE_ARROW = ["export const wrapped = (", "  id: string,", "): string => id;"];
 
+const CONSTRAINED_ARROW = [
+  "export const constrained = <T extends (input: string) => string>(value: T) => value;",
+];
+
 const NOT_ARROWS = [
   "export const ICON_STROKE = 1.5;",
   "export const NAMES = ['a', 'b'];",
   "export const LABELS = NAMES.map((name) => name.toUpperCase());",
+  "export const DERIVED: readonly string[] = NAMES.map((name) => name.trim());",
+  "export const HANDLERS: Record<string, () => void> = { a() {} };",
   "export function proper(id: string): string {",
   "  return id;",
   "}",
@@ -165,6 +171,12 @@ describe("the conformance gate", () => {
     expect(status).toBe(1);
   });
 
+  it("catches an exported arrow whose type parameter holds a function type", () => {
+    const { status, rules } = scan("constrained.ts", CONSTRAINED_ARROW);
+    expect(rules).toEqual(["exported-function-expression"]);
+    expect(status).toBe(1);
+  });
+
   it("leaves an exported value that is not a function alone", () => {
     const { status, rules } = scan("values.ts", NOT_ARROWS);
     expect(rules).toEqual([]);
@@ -175,6 +187,19 @@ describe("the conformance gate", () => {
     const demonstrated = new Set([...OFFENDING_RULES, ...STYLESHEET_RULES]);
     const { stdout } = scan("good.tsx", CLEAN);
     expect(stdout).toContain(`${demonstrated.size} checks`);
+  });
+});
+
+describe("the conformance gate where no package.json configures it", () => {
+  beforeEach(conformance.open);
+
+  afterEach(conformance.close);
+
+  it("fails, and checks nothing", () => {
+    rmSync(conformance.at("package.json"));
+    const { status, stderr } = scan("good.tsx", CLEAN);
+    expect(stderr).toContain("no package.json in");
+    expect(status).toBe(2);
   });
 });
 
