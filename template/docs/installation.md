@@ -175,8 +175,8 @@ What to expect, because it is not all free:
   Store methods no longer take an actor, and record no audit event: delete the recording you
   added for 0.41.0, or each write records two events. `audit_event`, `absent`, `written`,
   `AuditEvent` and `app.store.TASKS` are gone. If you merged `app/store/pg.py`,
-  `app/store/migrate.py` or `app/store/ddl.py` by hand, keep the actor that `scoped` and
-  `connection()` set, `MIGRATION_ACTING_SQL` in `apply`, and the audit entries. A tenant table with no
+  `app/store/migrate.py` or `app/store/ddl.py` by hand, keep `setup=_name_who_acts` on
+  `create_pool`, `MIGRATION_ACTING_SQL` in `apply`, and the audit entries. A tenant table with no
   primary key cannot be written: give it one. After the first
   `make migrate` on 0.42.0, an instance of an earlier release cannot write, so replace them all
   in the same release.
@@ -739,19 +739,28 @@ What to expect, because it is not all free:
 
 - **From 0.86.0 a store call names who acts in the statement that sets the tenant.** The pool
   no longer has a `setup`. `scoped` takes its connection from `PostgresDatabase.lent()`, which
-  names nobody, and sets the tenant and the actor in one statement, `SET_TENANT_AND_ACTING`. A
-  store call sends 5 statements, not 6. `connection()` still names who acts for its session, so
-  your own openers keep working. After the update:
-  - An opener of your own that sets the tenant on a connection from `connection()` can take
-    `lent()` and send `SET_TENANT_AND_ACTING` in place of its tenant statement. It then saves a
+  names nobody. The first statement of its transaction, `SET_TENANT_AND_ACTING`, sets the tenant
+  and the actor. A store call costs 5 round trips, not 6. `connection()` still names who acts for
+  its session, so each transaction of your own keeps working. After the update:
+  - If you changed `app/store/pg.py`, split your `connection()` in two. `lent()` holds its whole
+    body, with no actor. `connection()` takes a connection from `lent()` and sends `SET_ACTING`.
+    Keep what you added to the body in `lent()`. Remove `setup=` from `create_pool`.
+  - If your `pg.py` still has `_not_lent`, move `InternalClientError` from it to
+    `failed_on_a_connection`, and use `_refused_by_the_server` in its place. A pooled session
+    that Postgres ended now raises it at its first statement, and not in `acquire`. Without the
+    move, it reaches the client as a `500`. With it, it is `ConnectionLost`, a `503`. Each
+    `except failed_on_a_connection()` of your own then catches it too. A test that expects
+    `ConnectionRefused` for it from `acquire` fails: take the template's test in
+    `tests/store/test_pg.py`.
+  - A transaction of your own that sets the tenant on a connection from `connection()` can take
+    `lent()`, and send `SET_TENANT_AND_ACTING` in place of its tenant statement, inside the
+    transaction. Its values are the tenant and then
+    `acting(current_actor(), log.current_request_id(), log.current_trace_id())`. It then saves a
     round trip.
   - A statement that writes no audited table, such as a health check, can take `lent()`.
-  - `tests/integration/reading.py` now counts `lent()`. `connection()` goes through it, so it
-    still counts each connection of your own.
-  - The first statement on a pooled session that Postgres ended raises `ConnectionLost`, where
-    the pool's `setup` raised `ConnectionRefused` before. Both are `DatabaseUnavailable`.
-  - In `backend/app/store/pg.py`, if you merged it by hand, take the template's `lent`,
-    `connection` and `scoped`, and remove `setup=` from `create_pool`.
+  - `tests/integration/reading.py` now counts `lent()`. Change every test patch of
+    `PostgresDatabase.connection` to patch `lent`, or it misses each connection that `lent()`
+    lends directly. Each `connection()` then counts one more statement, `SET_ACTING`.
 
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no

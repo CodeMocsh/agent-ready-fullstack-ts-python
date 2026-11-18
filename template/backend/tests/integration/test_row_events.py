@@ -281,7 +281,7 @@ async def written_through(database: Any, title: str) -> None:
         )
 
 
-async def test_the_pool_names_who_acts_and_in_which_request(
+async def test_a_unit_of_work_names_who_acts_and_in_which_request(
     one_connection: Any, admin: Any
 ) -> None:
     token = correlation_id.set("a-request")
@@ -299,15 +299,6 @@ async def test_the_pool_names_who_acts_and_in_which_request(
     )
 
 
-async def test_a_connection_lent_again_names_nobody(one_connection: Any) -> None:
-    """The same connection, lent again, does not carry the actor it had."""
-    with acting_as(PERSON):
-        await written_through(one_connection, "acted")
-
-    with pytest.raises(asyncpg.RaiseError, match="names no actor"):
-        await written_through(one_connection, "nobody")
-
-
 async def written_outside_a_unit(lent: Any, title: str) -> None:
     async with lent as conn, conn.transaction():
         await conn.execute("SELECT set_config($1, $2, true)", TENANT_GUC, ACME)
@@ -318,6 +309,15 @@ async def written_outside_a_unit(lent: Any, title: str) -> None:
         )
 
 
+async def test_a_connection_lent_again_names_nobody(one_connection: Any) -> None:
+    """The same connection, lent again, does not carry the actor it had."""
+    with acting_as(PERSON):
+        await written_outside_a_unit(one_connection.connection(), "acted")
+
+    with pytest.raises(asyncpg.RaiseError, match="names no actor"):
+        await written_outside_a_unit(one_connection.lent(), "nobody")
+
+
 async def test_a_connection_lent_outside_a_unit_of_work_names_who_acts(
     one_connection: Any, admin: Any
 ) -> None:
@@ -326,15 +326,6 @@ async def test_a_connection_lent_outside_a_unit_of_work_names_who_acts(
 
     [row] = await admin.fetch(_EVENTS)
     assert row["actor_subject"] == PERSON.subject
-
-
-async def test_a_connection_lent_to_a_unit_of_work_names_nobody_until_the_unit_does(
-    one_connection: Any, admin: Any
-) -> None:
-    with acting_as(PERSON), pytest.raises(asyncpg.RaiseError, match="names no actor"):
-        await written_outside_a_unit(one_connection.lent(), "nobody")
-
-    assert await admin.fetch(_EVENTS) == []
 
 
 async def test_a_database_from_before_request_events_is_repaired(

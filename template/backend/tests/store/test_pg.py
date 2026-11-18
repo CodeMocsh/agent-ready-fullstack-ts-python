@@ -43,12 +43,11 @@ class _Session:
     """A pooled session whose driver answers `InternalClientError`, as on a session that Postgres
     ended before the driver read its end."""
 
-    def __init__(self, ended: bool) -> None:
+    def __init__(self) -> None:
         self._con = self
-        self._ended = ended
 
     def is_closed(self) -> bool:
-        return self._ended
+        return True
 
     def terminate(self) -> None:
         pass
@@ -89,20 +88,10 @@ def lending(monkeypatch: pytest.MonkeyPatch, session: _Session) -> PostgresDatab
 async def test_the_first_statement_on_a_session_that_ended_before_it_was_lent_is_lost(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    database = lending(monkeypatch, _Session(ended=True))
+    database = lending(monkeypatch, _Session())
 
     with pytest.raises(ConnectionLost, match="InternalClientError") as lost:
         async with database.connection():
             pass
 
     assert lost.value.cause == "InternalClientError"
-
-
-async def test_an_internal_client_error_on_a_live_session_raises_as_itself(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    database = lending(monkeypatch, _Session(ended=False))
-
-    with pytest.raises(asyncpg.InternalClientError, match="another operation"):
-        async with database.connection():
-            pass

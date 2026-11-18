@@ -83,7 +83,8 @@ THE_SUITE = Actor(issuer="a-test", subject="the-suite", name="The suite")
 
 
 async def acting_on(conn: Any, actor: Actor = THE_SUITE) -> Any:
-    """`conn`, acting as `actor` for the rest of its session, as the pool sets every checkout."""
+    """`conn`, acting as `actor` for the rest of its session, as `connection()` sets each
+    connection it lends."""
     await conn.execute(SET_ACTING, *acting(actor, None, None))
     return conn
 

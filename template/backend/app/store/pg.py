@@ -179,15 +179,10 @@ def _refused_by_the_server() -> tuple[type[BaseException], ...]:
     )
 
 
-def _not_lent() -> tuple[type[BaseException], ...]:
-    """What `Pool.acquire` raises when it lends no connection: each of `_refused_by_the_server`."""
-    return _refused_by_the_server()
-
-
 def failed_on_a_connection() -> tuple[type[BaseException], ...]:
     """What a statement raises from the driver or the socket. Each is `ConnectionLost` when the
-    connection ended with it. `InternalClientError` is the first statement on a pooled session
-    that Postgres ended before the driver read its end."""
+    connection ended with it. The first statement on a pooled session that Postgres ended before
+    the driver read its end raises `InternalClientError`."""
     asyncpg = _driver()
     return (asyncpg.PostgresError, asyncpg.InterfaceError, asyncpg.InternalClientError, OSError)
 
@@ -509,10 +504,11 @@ class PostgresDatabase:
     @asynccontextmanager
     async def lent(self) -> AsyncGenerator[Any]:
         """A connection from the pool that names nobody, returned to it on exit: for a unit of
-        work that names who acts in its own transaction. Raises `AcquireTimedOut` when none comes
-        within `Timeouts.acquire`, `ConnectionRefused` when a new one does not open, and
-        `ConnectionLost` when the block fails because the connection ended. Each tells the client
-        to ask again after `Timeouts.acquire`.
+        work that names who acts in its own transaction, or for work that writes no audited
+        table. Raises `AcquireTimedOut` when none comes within `Timeouts.acquire`,
+        `ConnectionRefused` when a new one does not open, and `ConnectionLost` when the block
+        fails because the connection ended. Each tells the client to ask again after
+        `Timeouts.acquire`.
 
         A wait that ends in a connection or in `AcquireTimedOut` goes to the recorder that
         `time_waits` set, if any. When the pool grows, the wait includes opening a new
@@ -529,7 +525,7 @@ class PostgresDatabase:
                 f"stayed in use, or a new one did not open in time",
                 retry_after=retry_after,
             ) from waited
-        except _not_lent() as refused:
+        except _refused_by_the_server() as refused:
             raise self._refused(refused) from refused
         try:
             self._record_wait(started)

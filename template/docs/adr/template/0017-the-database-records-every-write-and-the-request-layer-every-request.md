@@ -45,19 +45,21 @@ each store method records its own event holds only for the stores that remember 
   `ACTING_GUCS`, and raises when no actor issuer or subject is set.
   `test_a_write_with_no_actor_is_refused_and_changes_nothing` holds this.
 - **A unit of work names who acts in the statement that sets the tenant.** `scoped` in
-  `app/store/pg.py` takes a connection from `lent()`, which names nobody. Its first statement,
-  `SET_TENANT_AND_ACTING`, sets the tenant and every one of `ACTING_GUCS` for its transaction. A
-  store call then sends 5 statements: `BEGIN`, that statement, its own statement, `COMMIT`, and
-  the pool's reset. `test_a_store_call_sets_the_tenant_and_who_acts_in_one_statement` holds this.
-- **Every other connection names who acts for its session.** `connection()` sets every one of
-  `ACTING_GUCS` on each connection it lends, for a project's own transaction or a statement
-  outside one. `test_a_connection_lent_outside_a_unit_of_work_names_who_acts` holds this. A
-  connection from `lent()` names nobody until its unit does, so its write is refused.
-  `test_a_connection_lent_to_a_unit_of_work_names_nobody_until_the_unit_does` holds this.
+  `app/store/pg.py` takes a connection from `lent()`, which names nobody. The first statement of
+  its transaction, `SET_TENANT_AND_ACTING`, sets the tenant and every one of `ACTING_GUCS` for the
+  transaction. A store call then costs 5 round trips: `BEGIN`, that statement, its own statement,
+  `COMMIT`, and the pool's reset.
+  `test_a_store_call_sets_the_tenant_and_who_acts_in_one_statement` holds this.
+- **A connection from `connection()` names who acts for its session.** `connection()` sets
+  every one of `ACTING_GUCS` on each connection it lends, for a project's own transaction or a
+  statement outside one. `test_a_connection_lent_outside_a_unit_of_work_names_who_acts` holds
+  this. A connection from `lent()` names nobody until its unit does, so a write on it is
+  refused.
 - **Each setting comes from the task that acts.** The values are `audit_events.current_actor()`
   and the request id and trace id in `app/log.py`. Each one is empty when nothing is known. The
   pool's reset clears each session setting when a connection comes back, so a connection lent
-  again does not carry the actor it had. `test_a_connection_lent_again_names_nobody` holds this.
+  again does not carry the actor it had. `test_a_connection_lent_again_names_nobody` holds this:
+  a write on `lent()` is refused after `connection()` named who acts on the same connection.
 - **The store takes no actor.** No method of `TaskStore` in `app/store/__init__.py` has one.
   Nothing a project writes passes one, so nothing can pass the wrong one or forget to.
 - **A request acts as its principal.** `audit_events.serve` names the principal on the request
@@ -131,12 +133,12 @@ each store method records its own event holds only for the stores that remember 
   project. It also costs one round trip on each lend. A project generated from this template
   measured about 5 ms for each round trip to Cloud SQL through its proxy, and 6 round trips for
   each store call. `scoped` already sets the tenant in one place, so it names who acts in the
-  same statement. `connection()` keeps the setting for every other connection.
+  same statement. `connection()` keeps the session setting for a project's own transactions.
 - **The actor set for the transaction in every opener, and no reset when a connection comes
   back.** A store call then costs 4 round trips. A project's own opener of a transaction must
   set the actor too. A session setting or a session advisory lock that a project takes on a
   pooled connection then passes to the next request, and nothing reports it.
-- **`BEGIN` and the settings in one statement.** A store call then costs 3 round trips, and
+- **`BEGIN` and the settings in one statement.** A store call then costs 4 round trips, and
   each setting is a literal in the SQL. asyncpg refuses `Connection.transaction()` inside a
   transaction that it did not start, so a savepoint inside a unit of work fails.
 - **The request event recorded by the identity dependency.** It runs before the handler, so it

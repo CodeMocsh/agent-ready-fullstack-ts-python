@@ -1,7 +1,7 @@
 """Who acts on the rows a connection writes, as the settings `audit_row_change` reads.
 
 A unit of work sets them for its transaction, in the statement that sets the tenant. A
-connection lent outside a unit of work has them set for its session, and the pool's reset
+connection from `PostgresDatabase.connection` has them set for its session, and the pool's reset
 clears them when it comes back. `docs/adr/template/0017`.
 """
 
@@ -20,7 +20,7 @@ SET_TENANT_AND_ACTING: Final = "SELECT " + ", ".join(
     for index, name in enumerate((TENANT_GUC, *ACTING_GUCS), start=1)
 )
 """Sets the tenant, then every one of `ACTING_GUCS`, for the transaction, from one parameter
-each: the one statement that opens a unit of work."""
+each: the first statement in the transaction of a unit of work."""
 
 MIGRATION_ACTOR: Final = Actor(issuer="release", subject="migrate", name="The release step")
 """Who `make migrate` and `deploy/schema.sql` act as. A row an entry writes is recorded under it."""
