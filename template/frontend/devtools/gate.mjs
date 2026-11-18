@@ -31,7 +31,13 @@ export function excluded(path, patterns) {
 
 export function section(key) {
   const file = "package.json";
-  if (!existsSync(file)) return {};
+  if (!existsSync(file)) {
+    fail(
+      `no ${file} in ${process.cwd()}. This gate reads its settings from ${file}.\n` +
+        "Without them, it checks the tree against defaults that nobody chose, and it can\n" +
+        "report the tree clean. Run the gate from the half it belongs to.",
+    );
+  }
   return JSON.parse(readFileSync(file, "utf8"))[key] ?? {};
 }
 

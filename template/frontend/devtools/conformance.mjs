@@ -173,7 +173,7 @@ const RULES = [
 ];
 
 const ANNOTATION = "(?:[^=\\n]|=>)*";
-const TYPE_PARAMETERS = "(?:<[^(\\n]*>\\s*)?";
+const TYPE_PARAMETERS = "(?:<[^\\n]*>\\s*)?";
 const PARAMETERS = "\\([^)]*\\)";
 const RETURN_TYPE = "(?::[^=;{\\n]*)?";
 const EXPORTED_ARROW = new RegExp(
@@ -456,12 +456,24 @@ function parseArgs(argv) {
   return assertedArgs(out);
 }
 
-function report(violations, closing) {
+function findingLine(violation) {
+  return `${violation.file}:${violation.line}  ${violation.rule}  ${violation.text}\n`;
+}
+
+function report(violations, closing, exceeded = []) {
   const ordered = [...violations].sort(ordering);
-  for (const violation of ordered) {
+  const within = (entry) => (violation) =>
+    violation.file === entry.file && violation.rule === entry.rule;
+  for (const entry of exceeded) {
     process.stderr.write(
-      `${violation.file}:${violation.line}  ${violation.rule}  ${violation.text}\n`,
+      `${entry.file}  ${entry.rule}  ${entry.found} found, ${entry.owed} owed\n`,
     );
+    for (const violation of ordered.filter(within(entry))) {
+      process.stderr.write(findingLine(violation));
+    }
+  }
+  for (const violation of ordered.filter((one) => !exceeded.some((entry) => within(entry)(one)))) {
+    process.stderr.write(findingLine(violation));
   }
   process.stderr.write("\n");
   for (const rule of new Set(ordered.map((violation) => violation.rule))) {
@@ -471,20 +483,19 @@ function report(violations, closing) {
   process.stderr.write(closing(ordered.length));
 }
 
-function outsideTheRules(places, debt) {
+function outsideTheRules(findings, debt, exceeded) {
   return (
-    `\nFAIL: ${count(places, "place")} above step outside the theme, read\n` +
-    "outside a query, or start a read or a write with no outside cause. Each looks\n" +
-    "correct in the code you are reading: a literal colour renders fine until the\n" +
-    "theme switches, an effect that fetches works until something else needs the\n" +
-    "same data, and an invalidation works until it answers its own read. Fix the\n" +
-    "code rather than the check.\n" +
-    "A value that genuinely belongs outside the theme goes in conformance.allow in\n" +
-    "package.json, where the exception lands in the diff and gets reviewed.\n" +
+    `\nFAIL: ${count(findings, "finding")} above. Each breaks a rule that this project holds its code to.\n` +
+    "A finding looks correct in the file you are reading. That is why a check holds it.\n" +
+    "The line for each rule above says what the rule protects. Fix the code, not the check.\n" +
     (debt === null
       ? ""
-      : `A file may keep no more findings of a rule than ${debt} counts for it.\n` +
-        "Fix the code. Do not raise a count.\n")
+      : `A file may keep no more findings of a rule than ${debt} counts for it.\n`) +
+    (exceeded.length === 0
+      ? ""
+      : "Where a file has too many findings of a rule, the gate cannot tell which one is new.\n" +
+        "It lists all of them, under a line with the count found and the count owed.\n") +
+    (debt === null ? "" : "Fix the code. Do not raise a count.\n")
   );
 }
 
@@ -509,7 +520,13 @@ function reportedClean(outcome, path) {
     );
   }
   const debt = outcome.known ? path : null;
-  if (outcome.over.length > 0) report(outcome.over, (places) => outsideTheRules(places, debt));
+  if (outcome.over.length > 0) {
+    report(
+      outcome.over,
+      (findings) => outsideTheRules(findings, debt, outcome.exceeded),
+      outcome.exceeded,
+    );
+  }
   if (outcome.unrecorded.length > 0) report(outcome.unrecorded, notRecorded(path));
   if (outcome.loose.length > 0) reportLoose(outcome.loose, path);
   return outcome.over.length + outcome.unrecorded.length + outcome.loose.length === 0;

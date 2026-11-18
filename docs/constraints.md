@@ -185,11 +185,12 @@ the JSON report on stdout. The Python that follows fails on each high or critica
 no report arrives, the step says so and passes: an unreachable registry is not a vulnerability,
 and a red run that means "no network" teaches people to ignore red.
 
-The conformance fixtures run outside the rendered frontend, where no `package.json` is in reach.
-That is deliberate. `gate.mjs` `section()` returns `{}` when there is no `package.json`, so
-`conformance.mjs` uses its own defaults and the project's `allow` list stays out of a run that
-proves each rule fires. One default names a theme file that exists only in a project, so the
-fixtures pass `--theme-file` an empty file.
+The conformance and drift fixtures run outside the rendered frontend, away from the project's
+`package.json`. That is deliberate. Each fixture writes a `package.json` of `{}`, so the gate
+uses its own defaults and the project's `allow` list stays out of a run that proves each rule
+fires. `gate.mjs` `section()` fails when the working directory holds no `package.json`, because a
+gate that falls back to defaults nobody chose can report a tree clean. One default names a theme
+file that exists only in a project, so the fixtures pass `--theme-file` an empty file.
 
 The comments inside those fixtures are data, not a breach of *Zero comments*. The scanner must
 see through a comment in both directions: `commented.tsx` puts an unbalanced `)` before a

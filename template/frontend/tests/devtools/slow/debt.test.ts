@@ -31,9 +31,18 @@ describe("the conformance debt on a file's count", () => {
 
   it("refuses a finding past the count, and says a raise is a hand edit", () => {
     run(ONE_COLOUR, ["--record"]);
-    const { status, stderr, lines } = run(TWO_COLOURS);
+    const { status, stderr, lines, path } = run(TWO_COLOURS);
+    expect(stderr).toContain(`${path}  raw-colour  2 found, 1 owed\n${lines.join("\n")}\n`);
     expect(rulesOf(lines)).toEqual(["raw-colour", "raw-colour"]);
     expect(stderr).toContain("Do not raise a count");
+    expect(status).toBe(1);
+  });
+
+  it("gives no count for a file the debt does not name", () => {
+    run(CLEAN, ["--record"]);
+    const { status, stderr, lines } = run(TWO_COLOURS);
+    expect(rulesOf(lines)).toEqual(["raw-colour", "raw-colour"]);
+    expect(stderr).not.toMatch(/owed\n|count owed/);
     expect(status).toBe(1);
   });
 
