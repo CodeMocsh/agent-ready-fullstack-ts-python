@@ -13,10 +13,11 @@ that made it, and the next request handed that pooled connection inherits it —
 reading another's rows, with nothing in any log to say so. `set_config(..., true)` is the
 local form and every statement below runs inside a transaction that has issued it.
 
-**The actor is set on every connection the pool lends.** The pool's `setup` sets every setting `audit_row_change`
-reads, from `audit_events.current_actor()` and the request's ids, before it lends the
-connection. They are session settings, and the pool sets all of them each time it lends a
-connection. A connection lent again does not carry the actor it had.
+**The actor is set in the statement that sets the tenant.** `scoped` sets every setting
+`audit_row_change` reads, from `audit_events.current_actor()` and the request's ids, for its
+transaction, in the one statement that sets the tenant. `connection()` sets them for the session
+of each connection it lends, and the pool's reset clears them when it comes back. A connection
+lent again does not carry the actor it had.
 
 **The pool is sized from the connection budget.** Before it opens, the pool reads the server's
 limits on one connection of its own, and takes what remains of the process's share. A pool that
@@ -69,10 +70,9 @@ from app.store import (
     TenantUnset,
     numbered,
 )
-from app.store.acting import SET_ACTING, acting
+from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
 from app.store.conn import resolve_schema
-from app.store.ddl import TENANT_GUC
 from app.store.jobs import (
     Kinds,
     LeaseLost,
@@ -88,7 +88,6 @@ from app.store.loads import Loader, loader_of
 from app.store.migrate import check, schema_version
 from app.store.timeouts import TIMEOUTS, Timeouts, milliseconds
 
-_SET_TENANT = "SELECT set_config($1, $2, true)"
 _LIST = "SELECT id, title, done FROM tasks ORDER BY seq DESC LIMIT $1"
 _LIST_AFTER = "SELECT id, title, done FROM tasks WHERE seq < $1 ORDER BY seq DESC LIMIT $2"
 _SEQ_OF_TASK = "SELECT seq FROM tasks WHERE id = $1"
@@ -161,11 +160,8 @@ def _driver() -> Any:
     return asyncpg
 
 
-async def _name_who_acts(conn: Any) -> None:
-    """Set the actor and the request's ids on a connection the pool is about to lend."""
-    await conn.execute(
-        SET_ACTING, *acting(current_actor(), log.current_request_id(), log.current_trace_id())
-    )
+def _who_acts() -> tuple[str, ...]:
+    return acting(current_actor(), log.current_request_id(), log.current_trace_id())
 
 
 def _refused_by_the_server() -> tuple[type[BaseException], ...]:
@@ -183,18 +179,12 @@ def _refused_by_the_server() -> tuple[type[BaseException], ...]:
     )
 
 
-def _not_lent() -> tuple[type[BaseException], ...]:
-    """What `Pool.acquire` raises when it lends no connection: each of `_refused_by_the_server`, and
-    `InternalClientError` from the pool's setup on a pooled session that Postgres ended before the
-    driver read its end. asyncpg closes that session, and the next acquire opens a new one."""
-    return (*_refused_by_the_server(), _driver().InternalClientError)
-
-
 def failed_on_a_connection() -> tuple[type[BaseException], ...]:
     """What a statement raises from the driver or the socket. Each is `ConnectionLost` when the
-    connection ended with it."""
+    connection ended with it. The first statement on a pooled session that Postgres ended before
+    the driver read its end raises `InternalClientError`."""
     asyncpg = _driver()
-    return (asyncpg.PostgresError, asyncpg.InterfaceError, OSError)
+    return (asyncpg.PostgresError, asyncpg.InterfaceError, asyncpg.InternalClientError, OSError)
 
 
 def _ended_but_still_lent(conn: Any) -> bool:
@@ -499,22 +489,30 @@ class PostgresDatabase:
                         min_size=min(self._min_size, self._budget.pool),
                         max_size=self._budget.pool,
                         command_timeout=self._timeouts.answer,
-                        setup=_name_who_acts,
                         server_settings=self._server_settings(),
                     )
         return self._pool
 
     @asynccontextmanager
     async def connection(self) -> AsyncGenerator[Any]:
-        """A connection from the pool, returned to it on exit. Raises `AcquireTimedOut` when none
-        comes within `Timeouts.acquire`, `ConnectionRefused` when a new one does not open, and
-        `ConnectionLost` when the block fails because the connection ended. Each tells the client
-        to ask again after `Timeouts.acquire`.
+        """A connection from the pool that names who acts for its session, returned to it on
+        exit. Raises as `lent` raises."""
+        async with self.lent() as conn:
+            await conn.execute(SET_ACTING, *_who_acts())
+            yield conn
+
+    @asynccontextmanager
+    async def lent(self) -> AsyncGenerator[Any]:
+        """A connection from the pool that names nobody, returned to it on exit: for a unit of
+        work that names who acts in its own transaction, or for work that writes no audited
+        table. Raises `AcquireTimedOut` when none comes within `Timeouts.acquire`,
+        `ConnectionRefused` when a new one does not open, and `ConnectionLost` when the block
+        fails because the connection ended. Each tells the client to ask again after
+        `Timeouts.acquire`.
 
         A wait that ends in a connection or in `AcquireTimedOut` goes to the recorder that
-        `time_waits` set, if any. The wait includes the setup that names who acts, one round trip
-        to Postgres. When the pool grows, it also includes opening a new connection. A refusal
-        and a cancelled wait go to no recorder."""
+        `time_waits` set, if any. When the pool grows, the wait includes opening a new
+        connection. A refusal and a cancelled wait go to no recorder."""
         pool = await self.pool()
         retry_after = self.retry_after
         started = time.monotonic()
@@ -527,7 +525,7 @@ class PostgresDatabase:
                 f"stayed in use, or a new one did not open in time",
                 retry_after=retry_after,
             ) from waited
-        except _not_lent() as refused:
+        except _refused_by_the_server() as refused:
             raise self._refused(refused) from refused
         try:
             self._record_wait(started)
@@ -611,14 +609,14 @@ class PostgresDatabase:
     @asynccontextmanager
     async def scoped(self, tenant_id: str) -> AsyncGenerator[Any]:
         """A connection inside a transaction that has set `tenant_id`, which every statement
-        on tenant data runs in.
+        on tenant data runs in. One statement sets the tenant and who acts, for the transaction.
 
         Inside `app.store.jobs.fenced`, the transaction first holds the claim with
         `FOR KEY SHARE` until it ends, so no worker can claim the job while it runs. Raises
         `LeaseLost`, and rolls back, when the claim is no longer this attempt's, or is of another
         tenant."""
-        async with self.connection() as conn, conn.transaction():
-            await conn.execute(_SET_TENANT, TENANT_GUC, tenant_id)
+        async with self.lent() as conn, conn.transaction():
+            await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
             claim = fence()
             if claim is not None and (
                 await conn.fetchval(_HOLD_CLAIM, UUID(claim.id), tenant_id, claim.token) is None
@@ -630,11 +628,11 @@ class PostgresDatabase:
             yield conn
 
     async def check(self) -> str:
-        async with self.connection() as conn:
+        async with self.lent() as conn:
             return await check(conn, self.schema)
 
     async def schema_version(self) -> str | None:
-        async with self.connection() as conn:
+        async with self.lent() as conn:
             return await schema_version(conn, self.schema)
 
     async def close(self) -> None:

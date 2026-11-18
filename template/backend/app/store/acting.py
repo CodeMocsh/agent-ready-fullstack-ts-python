@@ -1,18 +1,26 @@
 """Who acts on the rows a connection writes, as the settings `audit_row_change` reads.
 
-The settings are session settings. The pool sets all of them on every connection it lends.
-`docs/adr/template/0017`.
+A unit of work sets them for its transaction, in the statement that sets the tenant. A
+connection from `PostgresDatabase.connection` has them set for its session, and the pool's reset
+clears them when it comes back. `docs/adr/template/0017`.
 """
 
 from typing import Final
 
 from app.identity.shared import Actor
-from app.store.ddl import ACTING_GUCS
+from app.store.ddl import ACTING_GUCS, TENANT_GUC
 
 SET_ACTING: Final = "SELECT " + ", ".join(
     f"set_config('{name}', ${index}, false)" for index, name in enumerate(ACTING_GUCS, start=1)
 )
-"""Sets every one of `ACTING_GUCS`, in order, from one parameter each."""
+"""Sets every one of `ACTING_GUCS` for the session, in order, from one parameter each."""
+
+SET_TENANT_AND_ACTING: Final = "SELECT " + ", ".join(
+    f"set_config('{name}', ${index}, true)"
+    for index, name in enumerate((TENANT_GUC, *ACTING_GUCS), start=1)
+)
+"""Sets the tenant, then every one of `ACTING_GUCS`, for the transaction, from one parameter
+each: the first statement in the transaction of a unit of work."""
 
 MIGRATION_ACTOR: Final = Actor(issuer="release", subject="migrate", name="The release step")
 """Who `make migrate` and `deploy/schema.sql` act as. A row an entry writes is recorded under it."""

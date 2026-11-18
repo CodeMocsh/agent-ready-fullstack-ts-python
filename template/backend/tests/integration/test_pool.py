@@ -17,6 +17,7 @@ from app.deployment import DATABASE_URL_ENV, IDLE_IN_TRANSACTION_TIMEOUT_ENV, ST
 from app.identity.shared import SENTINEL_TENANT
 from app.jobs import kinds
 from app.store import Connections
+from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING
 from app.store.budget import Draws, OverBudget
 from app.store.conn import SCHEMA_ENV
 from app.store.migrate import known_version
@@ -141,6 +142,25 @@ async def test_a_request_that_finds_every_connection_in_use_waits_then_raises(
     assert waited >= SHORT / 2
     [timed_out] = timed
     assert SHORT / 2 <= timed_out <= waited
+
+
+async def test_a_store_call_sets_the_tenant_and_who_acts_in_one_statement(
+    one_connection: PostgresDatabase,
+) -> None:
+    sent: list[str] = []
+
+    def logged(query: Any) -> None:
+        sent.append(query.query)
+
+    async with one_connection.lent() as conn:
+        conn.add_query_logger(logged)
+    store = one_connection.store("acme")
+    with acting_as(THE_SUITE):
+        _ = await store.list(None)
+        sent.clear()
+        _ = await store.list(None)
+
+    assert (len(sent), sent.count(SET_TENANT_AND_ACTING), sent.count(SET_ACTING)) == (5, 1, 0), sent
 
 
 async def test_the_pool_times_each_wait_that_ends_in_a_connection(
@@ -317,7 +337,7 @@ async def test_a_pooled_session_that_postgres_ended_is_refused_or_replaced(
         async with one_connection.connection() as conn:
             pid = await conn.fetchval("SELECT pg_backend_pid()")
         await end_session(provisioned.admin_dsn, pid)
-        with contextlib.suppress(ConnectionRefused):
+        with contextlib.suppress(ConnectionRefused, ConnectionLost):
             async with one_connection.connection() as conn:
                 _ = await conn.fetchval("SELECT 1")
 

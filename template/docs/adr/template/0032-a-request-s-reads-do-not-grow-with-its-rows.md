@@ -111,7 +111,7 @@ page could hold every connection of a process.
 - **A set read on each store port, which the route calls with every key.** Each screen must then
   collect the keys of its items before it reads, and code for one item becomes code for a set.
   The loader keeps the code for one item, and reads its keys as a set.
-- **One unit of work for the whole request.** It removes the 6 round trips of each store call,
+- **One unit of work for the whole request.** It removes the round trips of each store call,
   and it changes `scoped`, the unit that [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md)
   records, and what `ConnectionLost` means in 0022. It is a decision of its own. One unit for
   each turn is the part of it that reads need.

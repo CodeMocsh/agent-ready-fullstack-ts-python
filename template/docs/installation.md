@@ -737,6 +737,31 @@ What to expect, because it is not all free:
     entry and the last sentence of "Commit gate". Without the GitHub workflow, take the
     `README.md` paragraph that starts "Configure your CI".
 
+- **From 0.86.0 a store call names who acts in the statement that sets the tenant.** The pool
+  no longer has a `setup`. `scoped` takes its connection from `PostgresDatabase.lent()`, which
+  names nobody. The first statement of its transaction, `SET_TENANT_AND_ACTING`, sets the tenant
+  and the actor. A store call costs 5 round trips, not 6. `connection()` still names who acts for
+  its session, so each transaction of your own keeps working. After the update:
+  - If you changed `app/store/pg.py`, split your `connection()` in two. `lent()` holds its whole
+    body, with no actor. `connection()` takes a connection from `lent()` and sends `SET_ACTING`.
+    Keep what you added to the body in `lent()`. Remove `setup=` from `create_pool`.
+  - If your `pg.py` still has `_not_lent`, move `InternalClientError` from it to
+    `failed_on_a_connection`, and use `_refused_by_the_server` in its place. A pooled session
+    that Postgres ended now raises it at its first statement, and not in `acquire`. Without the
+    move, it reaches the client as a `500`. With it, it is `ConnectionLost`, a `503`. Each
+    `except failed_on_a_connection()` of your own then catches it too. A test that expects
+    `ConnectionRefused` for it from `acquire` fails: take the template's test in
+    `tests/store/test_pg.py`.
+  - A transaction of your own that sets the tenant on a connection from `connection()` can take
+    `lent()`, and send `SET_TENANT_AND_ACTING` in place of its tenant statement, inside the
+    transaction. Its values are the tenant and then
+    `acting(current_actor(), log.current_request_id(), log.current_trace_id())`. It then saves a
+    round trip.
+  - A statement that writes no audited table, such as a health check, can take `lent()`.
+  - `tests/integration/reading.py` now counts `lent()`. Change every test patch of
+    `PostgresDatabase.connection` to patch `lent`, or it misses each connection that `lent()`
+    lends directly. Each `connection()` then counts one more statement, `SET_ACTING`.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
