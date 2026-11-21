@@ -22,6 +22,8 @@ It waits for an active read before it starts another read.
 A new observer can consume a pending event cause while respecting the same spacing policy.
 An event after the next read starts leaves a pending change for a trailing read.
 An event during the trailing read does the same.
+A full read that answers, with data or a failure, covers every change before it started,
+whatever its cause. A canceled read covers nothing.
 Overlapping keys match each query once.
 An inactive query stays stale and holds one event permit for its next read.
 A next-page read does not consume the event cause for a full refresh.
@@ -71,6 +73,7 @@ Session teardown also clears the old query client.
 Streams own event mapping. Completion and reconnect supply explicit causes through the same API.
 Streams handle the returned promise's rejection.
 `tests/event-refresh.test.ts` checks final state, concurrency, failures, and aggregate event reads.
+`tests/event-refresh-replaced.test.ts` checks an event read that a read of another cause replaces.
 `tests/api/read-cancellation.test.ts` checks shared cancellation and fallback accounting.
 
 ## Considered options

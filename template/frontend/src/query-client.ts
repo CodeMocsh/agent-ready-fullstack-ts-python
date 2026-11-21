@@ -19,7 +19,7 @@ import {
   type EventReadPolicy,
 } from "@/api/read-budget";
 import type { RecordClientEvent } from "@/client-events";
-import { EventRefresh } from "@/event-refresh";
+import { type Covering, EventRefresh } from "@/event-refresh";
 
 declare module "@tanstack/react-query" {
   interface Register {
@@ -261,10 +261,12 @@ const readsOnlyWithACause: QueryPersister<unknown, QueryKey> = async (queryFn, c
   const stop = eventRead
     ? refresh.watch(query, attempt, context.signal)
     : watchUnanswered(context.client, query, read, context.signal);
+  let covering: Covering;
   try {
     if (eventRead) {
       await refresh.prepare(query, attempt, context.signal);
     }
+    covering = refresh.covering(query, aPageNotYetRead(query));
     const data = await queryFn(context);
     read.failure = NO_FAILURE;
     return data;
@@ -273,6 +275,7 @@ const readsOnlyWithACause: QueryPersister<unknown, QueryKey> = async (queryFn, c
     throw failure;
   } finally {
     stop();
+    refresh.covered(covering, context.signal);
     if (followed.has(context.client)) answered(context.client);
   }
 };
