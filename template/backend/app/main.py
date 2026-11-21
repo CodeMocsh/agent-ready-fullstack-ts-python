@@ -17,7 +17,7 @@ from app.refusal import (
     responses,
 )
 from app.routes import public, tenant
-from app.store import DatabaseUnavailable, loads
+from app.store import DatabaseUnavailable, loads, snapshots
 from app.wiring import (
     TelemetrySettings,
     build_admission,
@@ -45,11 +45,11 @@ def create_app() -> FastAPI:
 
 def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI:
     """An app that serves `routers` and runs `lifespan`, with the refusal of an unresolved tenant
-    and of a request that the database did not serve, the admission of each actor's
-    requests, the limits of `GET /reads`, the mark `app.waits.waiting` reads, the scope of
-    loaders of each request, the request event, the request line and the telemetry around each
-    route. `create_app` and `tests.routed.routed` build with it. Configures
-    the logging of the whole process."""
+    and of a request that the database did not serve, the admission of each actor's requests,
+    the limits of `GET /reads`, the mark `app.waits.waiting` reads, the scope of loaders of each
+    request, the snapshots of each GET request, the request event, the request line and the
+    telemetry around each route. `create_app` and `tests.routed.routed` build with it.
+    Configures the logging of the whole process."""
     log.configure(build_service_version())
     app = FastAPI(
         title="Tasks API",
@@ -67,6 +67,7 @@ def assemble(*routers: APIRouter, lifespan: Lifespan[FastAPI] | None) -> FastAPI
     response_bound.instrument(app, build_response_limits())
     waits.instrument(app)
     loads.instrument(app)
+    snapshots.instrument(app)
     request_events.instrument(app)
     policy = build_admission()
     admission.instrument(app, policy)

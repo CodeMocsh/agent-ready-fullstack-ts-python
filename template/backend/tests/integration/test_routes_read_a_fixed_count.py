@@ -1,10 +1,12 @@
-"""A GET route's reads do not grow with its rows, and a request holds one connection at a time.
-No GET route makes more statements or takes more connections in a tenant past a page than in a
-tenant of one row. `docs/adr/template/0032`.
+"""A GET route's reads do not grow with its rows, a request holds one connection at a time, and
+a request sends each statement once. No GET route makes more statements or takes more
+connections in a tenant past a page than in a tenant of one row. `docs/adr/template/0032` and
+`0033`.
 
 The template owns this module. `tests/integration/filled.py` is the project's list: how it fills a
-tenant, the path of each GET route, each route whose reads may grow with its rows, and each route
-that may hold more than one connection at once, until it does not.
+tenant, the path of each GET route, each route whose reads may grow with its rows, each route
+that may hold more than one connection at once, and each route that may send one statement more
+than once, until it does not.
 """
 
 import asyncio
@@ -28,6 +30,7 @@ from tests.integration.filled import (
     MORE_THAN_ONE_CONNECTION,
     NOT_FILLED_YET,
     NOT_READ_YET,
+    REPEATS_A_STATEMENT,
     ROWS,
 )
 from tests.integration.reading import (
@@ -43,16 +46,21 @@ from tests.integration.reading import (
 EACH_ALONE: Final = "/each-task-alone"
 EACH_AT_ONCE: Final = "/each-task-at-once"
 EACH_LOADED: Final = "/each-task-loaded"
+READS_ONCE: Final = "/reads-the-first-page"
+READS_TWICE: Final = "/reads-the-first-page-twice"
+WRITES_WHILE_READING: Final = "/writes-while-reading"
 WHILE_OTHERS_HOLD: Final = "/while-others-hold"
 
 
 @dataclass(frozen=True)
 class Reads:
-    """What one request did on pooled connections."""
+    """What one request did on pooled connections, and the code that sent each statement it
+    sent more than once."""
 
     statements: int
     connections: int
     most_held: int
+    repeated: Mapping[str, Sequence[str]]
 
 
 @pytest.fixture
@@ -78,7 +86,9 @@ def reads_of(
             assert answered.status_code == 200, (
                 f"{path} answered {answered.status_code} for {route}: {answered.text}"
             )
-            found[route] = Reads(count.statements, count.connections, count.most_held)
+            found[route] = Reads(
+                count.statements, count.connections, count.most_held, count.repeated()
+            )
     return found
 
 
@@ -100,6 +110,17 @@ def held_at_once(*reads: Mapping[str, Reads]) -> dict[str, int]:
             if read.most_held > 1:
                 most[route] = max(most.get(route, 0), read.most_held)
     return most
+
+
+def repeated(*reads: Mapping[str, Reads]) -> dict[str, Mapping[str, Sequence[str]]]:
+    """Each route that sent a statement more than once in any of `reads`, with each statement
+    and the code that sent it."""
+    found: dict[str, Mapping[str, Sequence[str]]] = {}
+    for each in reads:
+        for route, read in each.items():
+            if read.repeated:
+                found[route] = {**found.get(route, {}), **read.repeated}
+    return found
 
 
 def tenants(
@@ -146,7 +167,7 @@ async def titles(conn: Any, ids: Sequence[UUID]) -> Mapping[UUID, str]:
 
 
 async def title_alone(database: PostgresDatabase, tenant_id: str, id: str) -> str:
-    async with database.scoped(tenant_id) as conn:
+    async with database.reading(tenant_id) as conn:
         title: str = await conn.fetchval("SELECT title FROM tasks WHERE id = $1", UUID(id))
     return title
 
@@ -174,6 +195,27 @@ async def each_task_loaded(request: Request, principal: PrincipalDep) -> list[st
     return [task.result() for task in read]
 
 
+async def reads_the_first_page(request: Request, principal: PrincipalDep) -> int:
+    database, tenant_id = tenant_of(request, principal)
+    return len((await first_page(database, tenant_id)).tasks)
+
+
+async def reads_the_first_page_twice(request: Request, principal: PrincipalDep) -> int:
+    database, tenant_id = tenant_of(request, principal)
+    first = await first_page(database, tenant_id)
+    again = await first_page(database, tenant_id)
+    assert again == first
+    return len(first.tasks)
+
+
+async def writes_while_reading(request: Request, principal: PrincipalDep) -> int:
+    database, tenant_id = tenant_of(request, principal)
+    page = await first_page(database, tenant_id)
+    async with database.scoped(tenant_id) as conn:
+        _ = await conn.execute("UPDATE tasks SET done = done WHERE id = $1", UUID(page.tasks[0].id))
+    return len(page.tasks)
+
+
 def test_no_get_route_reads_more_past_a_page_than_at_one_row(
     provisioned: Provisioned, monkeypatch: pytest.MonkeyPatch, count: Count
 ) -> None:
@@ -183,6 +225,7 @@ def test_no_get_route_reads_more_past_a_page_than_at_one_row(
     for named, listed in (
         ("GROWS_WITH_ROWS", GROWS_WITH_ROWS),
         ("MORE_THAN_ONE_CONNECTION", MORE_THAN_ONE_CONNECTION),
+        ("REPEATS_A_STATEMENT", REPEATS_A_STATEMENT),
     ):
         assert sorted(set(listed) - routes) == [], (
             f"{named} in tests/integration/filled.py names {sorted(set(listed) - routes)}, which "
@@ -203,6 +246,9 @@ def test_no_get_route_reads_more_past_a_page_than_at_one_row(
     held, held_in_vain = against_the_list(
         held_at_once(at_one, past_a_page), MORE_THAN_ONE_CONNECTION
     )
+    sent_again, sent_again_in_vain = against_the_list(
+        repeated(at_one, past_a_page), REPEATS_A_STATEMENT
+    )
 
     assert grew == {}, (
         f"Each of these GET routes made more statements or took more connections at {ROWS} rows "
@@ -215,6 +261,13 @@ def test_no_get_route_reads_more_past_a_page_than_at_one_row(
         f"PostgresDatabase.loader, or name the route in MORE_THAN_ONE_CONNECTION in "
         f"tests/integration/filled.py, with its reason."
     )
+    assert sent_again == {}, (
+        f"Each of these GET routes sent a statement to the database more than once in one "
+        f"request, as {{route: {{statement: [the code that sent it, each time]}}}}: {sent_again}. "
+        f"Read the same thing once, read each item's fact in one set read through "
+        f"PostgresDatabase.loader, or name the route in REPEATS_A_STATEMENT in "
+        f"tests/integration/filled.py, with its reason."
+    )
     assert grew_in_vain == [], (
         f"GROWS_WITH_ROWS in tests/integration/filled.py names {grew_in_vain}. Each read no more "
         f"at {ROWS} rows than at one. Remove each from the list."
@@ -223,6 +276,10 @@ def test_no_get_route_reads_more_past_a_page_than_at_one_row(
         f"MORE_THAN_ONE_CONNECTION in tests/integration/filled.py names {held_in_vain}. Each held "
         f"one connection at a time. Remove each from the list."
     )
+    assert sent_again_in_vain == [], (
+        f"REPEATS_A_STATEMENT in tests/integration/filled.py names {sent_again_in_vain}. Each "
+        f"sent each statement once. Remove each from the list."
+    )
 
 
 @pytest.mark.parametrize(
@@ -230,6 +287,7 @@ def test_no_get_route_reads_more_past_a_page_than_at_one_row(
     [
         ("GROWS_WITH_ROWS", GROWS_WITH_ROWS),
         ("MORE_THAN_ONE_CONNECTION", MORE_THAN_ONE_CONNECTION),
+        ("REPEATS_A_STATEMENT", REPEATS_A_STATEMENT),
     ],
 )
 def test_each_entry_of_a_list_names_its_reason(named: str, listed: Mapping[str, str]) -> None:
@@ -246,17 +304,26 @@ def test_a_read_for_each_item_is_found_and_a_loader_reads_each_set_read_once(
     (one, _), (page, _) = tenants(provisioned)
     app = create_app()
     planted = {EACH_ALONE: each_task_alone, EACH_AT_ONCE: each_task_at_once}
-    for path, route in {**planted, EACH_LOADED: each_task_loaded}.items():
+    routes = {
+        **planted,
+        EACH_LOADED: each_task_loaded,
+        READS_ONCE: reads_the_first_page,
+        READS_TWICE: reads_the_first_page_twice,
+        WRITES_WHILE_READING: writes_while_reading,
+    }
+    for path, route in routes.items():
         app.add_api_route(path, route, methods=["GET"])
-    paths = {path: path for path in (EACH_ALONE, EACH_AT_ONCE, EACH_LOADED)}
+    paths = {path: path for path in routes}
 
     at_one = reads_of(provisioned, one, monkeypatch, app, paths, count)
     past_a_page = reads_of(provisioned, page, monkeypatch, app, paths, count)
 
     assert sorted(grown(at_one, past_a_page)) == sorted(planted)
-    assert list(held_at_once(at_one, past_a_page)) == [EACH_AT_ONCE]
+    assert sorted(repeated(at_one, past_a_page)) == sorted(planted)
+    assert list(held_at_once(at_one, past_a_page)) == [WRITES_WHILE_READING]
     assert past_a_page[EACH_LOADED] == at_one[EACH_LOADED]
-    assert past_a_page[EACH_LOADED].most_held == 1
+    assert past_a_page[EACH_LOADED].connections == past_a_page[READS_ONCE].connections
+    assert past_a_page[READS_TWICE] == past_a_page[READS_ONCE]
     assert past_a_page[EACH_ALONE].statements - at_one[EACH_ALONE].statements >= PAGE_MAX - 1
 
 
@@ -315,7 +382,7 @@ def while_others_hold(overlap: Overlap) -> Callable[..., Awaitable[int]]:
         )
         async with asyncio.timeout(5):
             _ = await asyncio.gather(overlap.lifespan_holds.wait(), beside_holds.wait())
-        async with database.scoped(tenant_id) as conn:
+        async with database.reading(tenant_id) as conn:
             tasks: int = await conn.fetchval("SELECT count(*) FROM tasks")
         route_done.set()
         overlap.route_done.set()
@@ -338,7 +405,9 @@ def test_work_that_serves_no_request_is_not_counted_as_the_request_s(
         for _ in range(2):
             count.clear()
             assert client.get(WHILE_OTHERS_HOLD).status_code == 200
-            read.append(Reads(count.statements, count.connections, count.most_held))
+            read.append(
+                Reads(count.statements, count.connections, count.most_held, count.repeated())
+            )
 
     assert overlap.lifespan_holds.is_set()
     assert read[0] == read[1]

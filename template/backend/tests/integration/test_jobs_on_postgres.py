@@ -187,6 +187,22 @@ async def test_a_job_whose_transaction_is_open_is_not_claimed_when_its_lease_end
     assert after.id == held.id
 
 
+async def test_an_attempt_reads_through_the_store_while_it_holds_its_claim(
+    opened: Callable[[Handler], PostgresDatabase],
+) -> None:
+    database = opened(ends_at_once)
+    claims = JobClaims(database, SHORT)
+    asked = await database.jobs(SENTINEL_TENANT).ask(A_KIND, {})
+    held = await claims.claim([A_KIND])
+    assert held is not None
+
+    with fenced(held):
+        read = await database.jobs(SENTINEL_TENANT).read(asked.id)
+
+    assert read is not None
+    assert read.id == asked.id
+
+
 async def test_a_job_whose_worker_died_is_ended_by_another_worker(
     opened: Callable[[Handler], PostgresDatabase],
 ) -> None:

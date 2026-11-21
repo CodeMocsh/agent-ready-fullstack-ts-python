@@ -35,6 +35,8 @@ _IN_A_PART: ContextVar[bool] = ContextVar("in_a_part", default=False)
 
 _BESIDE: ContextVar[bool] = ContextVar("beside", default=False)
 
+_SHARED: ContextVar[bool] = ContextVar("shared", default=False)
+
 _STARTED: Final[set[asyncio.Task[Any]]] = set()
 
 
@@ -66,6 +68,12 @@ def started_beside() -> bool:
     """Whether work beside the requests started the running task: it is that work, or a task or a
     run of shared work that the work started, at any depth."""
     return _BESIDE.get()
+
+
+def in_shared_work() -> bool:
+    """Whether a run of `SharedWork` started the running task: it is the run, or a task that the
+    run started, at any depth."""
+    return _SHARED.get()
 
 
 def instrument(app: FastAPI) -> None:
@@ -267,6 +275,8 @@ def _started[T](
     context = copy_context()
     _ = context.run(_IN_A_REQUEST.set, in_a_request)
     _ = context.run(_IN_A_PART.set, False)
+    if in_a_request:
+        _ = context.run(_SHARED.set, True)
     if not in_a_request:
         _ = context.run(_BESIDE.set, True)
     task = asyncio.get_running_loop().create_task(work, name=name, context=context)

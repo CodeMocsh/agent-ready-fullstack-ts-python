@@ -762,6 +762,41 @@ What to expect, because it is not all free:
     `PostgresDatabase.connection` to patch `lent`, or it misses each connection that `lent()`
     lends directly. Each `connection()` then counts one more statement, `SET_ACTING`.
 
+- **From 0.87.0 a GET request reads one snapshot, and sends each statement once.** After the
+  update:
+  - Add `REPEATS_A_STATEMENT: dict[str, str] = {}` to `backend/tests/integration/filled.py`.
+    `make db-test` names each GET route that sends one statement text more than once in a
+    request, with the code that sent it. Name each route in the list, with its reason. Remove it
+    when it reads each thing once, or reads each item's fact through `PostgresDatabase.loader`.
+  - In each Postgres store method of your own that only reads, take
+    `self._database.reading(self._tenant_id)` in place of `scoped`. A read through `scoped` in a
+    GET request takes a second connection and ends the snapshot. `make db-test` names the route
+    in `MORE_THAN_ONE_CONNECTION`.
+  - A store method that writes keeps `scoped`. In a GET request it writes on a second connection.
+    Name each such route in `MORE_THAN_ONE_CONNECTION`, with its reason. `scoped` ends the
+    snapshot even when it writes nothing, so a write that depends on a read reads through
+    `reading`, and takes `scoped` only when it writes.
+  - After a write of your own that does not go through `scoped`, such as one on `connection()`
+    or `lent()`, call `PostgresDatabase.written(tenant_id)`. Otherwise the next read in a GET
+    request does not see the write.
+  - `reading` is READ ONLY in every request, so a store method that writes through it now fails,
+    on Postgres. `make db-test` runs the store contract, which finds it.
+  - A GET request now holds its connection from its first read until its response starts, a
+    wait outside the database included. Check the pool of the connection budget, which the line
+    `connections budgeted` names, against the GET requests that run at once. `now()` answers the
+    same in the whole snapshot.
+  - A value that a read answers in a snapshot is the same object each time. Find each store
+    method that changes a list or a row that it read, and copy it first.
+  - A read of your own that opens its own READ ONLY transaction on `lent()` can take `reading`
+    in its place. The request then has one snapshot.
+  - A read, or a wait for a loader turn, inside a `reading` block raises `ReadInsideARead` in a
+    GET request on Postgres. The memory substrate does not see it. Search for `reading(` and
+    `.load(` inside a `reading` block, and end the block before the second read starts.
+  - A test of your own that patches `PostgresDatabase.scoped` to count reads no longer sees
+    them. Patch `lent`, as `tests/integration/reading.py` does.
+  [adr/template/0033](adr/template/0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)
+  says why.
+
 **If you deleted an entry from `ddl.py`, read this before updating.** Deleting one used to be
 silent. It is not any more: every database that applied that entry reports a key your build no
 longer carries, so `check` refuses to serve it and `make schema` refuses to forget it. Both name
