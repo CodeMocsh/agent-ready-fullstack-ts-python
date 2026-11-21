@@ -13,7 +13,7 @@ Items share a turn only when each asks before the turn ends. Start them in one
 
 import asyncio
 from collections.abc import Awaitable, Callable, Generator, Hashable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager, contextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Final
 
@@ -22,6 +22,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app import waits
 from app.models import PAGE_MAX
+from app.store import snapshots
+from app.store.snapshots import Unit
 from app.waits import SharedWork
 
 type SetRead[K: Hashable, V] = Callable[[Any, Sequence[K]], Awaitable[Mapping[K, V | Exception]]]
@@ -33,9 +35,6 @@ A failure of one key's value, such as a row that this build cannot read, is the 
 key: an exception, which `Loader.load` raises in the callers of that key only. A set read raises
 only when the statement fails, and that fails every key of its turn. A set read reads only on
 the connection it is handed, and asks no loader: `Loader.load` raises `RuntimeError` in it."""
-
-type Unit = Callable[[], AbstractAsyncContextManager[Any]]
-"""A unit of work: a connection inside the tenant's transaction."""
 
 type _Answers = dict[SetRead[Any, Any], Mapping[Any, Any]]
 
@@ -79,6 +78,7 @@ class Loader:
                 f"a set read asked a loader for {read.__qualname__}. A set read reads on the "
                 f"connection it is handed."
             )
+        snapshots.refuse_inside_a_read(f"a wait for a turn of {read.__qualname__}")
         turn = self._turn
         self._asked.setdefault(turn, {}).setdefault(read, {})[key] = None
         answers = await self._turns.joined(turn, lambda: self._read(turn))
@@ -92,10 +92,12 @@ class Loader:
         async with self._one_at_a_time:
             asked = self._asked.pop(turn)
             self._turn = turn + 1
-            async with self._unit() as conn:
-                return {
-                    read: await _answered(conn, read, list(keys)) for read, keys in asked.items()
-                }
+            with snapshots.for_a_turn():
+                return await self._each_read(asked)
+
+    async def _each_read(self, asked: dict[SetRead[Any, Any], dict[Any, None]]) -> _Answers:
+        async with self._unit() as conn:
+            return {read: await _answered(conn, read, list(keys)) for read, keys in asked.items()}
 
 
 async def _answered(conn: Any, read: SetRead[Any, Any], keys: list[Any]) -> Mapping[Any, Any]:

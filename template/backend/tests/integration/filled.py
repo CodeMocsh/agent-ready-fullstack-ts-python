@@ -1,7 +1,8 @@
 """How this project fills a tenant, where each GET route reads it, and who reads, for
 `tests/integration/test_routes_read_pages.py` and
 `tests/integration/test_routes_read_a_fixed_count.py`. The project owns this module: a new project
-gets it once, and an update never writes it. `docs/adr/template/0015`, `0026` and `0032`.
+gets it once, and an update never writes it. `docs/adr/template/0015`, `0026`, `0032` and
+`0033`.
 
 `filled` writes `rows` rows of the tenant to each table in `TENANT_TABLES`, and answers the path
 that the tests read for each GET route in `openapi.json`: a route template as the key, and a path
@@ -9,7 +10,8 @@ that answers `200` as the value. The tests fill one tenant with `ROWS` and one w
 A table or a route that it does not cover fails the test, and the failure names it. `reader`
 answers the principal of each read. `OVER_A_PAGE` names each GET route whose read may fetch more
 than a page until it reads a page. `GROWS_WITH_ROWS` names each GET route whose reads may grow
-with its rows, and `MORE_THAN_ONE_CONNECTION` each that may hold more than one connection at once.
+with its rows, `MORE_THAN_ONE_CONNECTION` each that may hold more than one connection at once,
+and `REPEATS_A_STATEMENT` each that may send one statement more than once in a request.
 `NOT_FILLED_YET` names each tenant table that `filled` does not fill past a page yet, and
 `NOT_READ_YET` each GET route that it answers no path for yet. Each list only shrinks.
 """
@@ -43,6 +45,12 @@ MORE_THAN_ONE_CONNECTION: dict[str, str] = {}
 """Each GET route template that holds more than one connection at once, and the reason. The test
 fails on a route that the list names and that holds one at a time, and on a reason that is empty.
 Remove a route when it holds one connection at a time."""
+
+REPEATS_A_STATEMENT: dict[str, str] = {}
+"""Each GET route template that sends the same statement text to the database more than once in
+one request, and the reason. The test fails on a route that the list names and that sends each
+statement once, and on a reason that is empty. Remove a route when it sends each statement once.
+"""
 
 NOT_FILLED_YET: dict[str, str] = {}
 """Each tenant table that `filled` leaves at one page or less, and the reason. The test fails on a

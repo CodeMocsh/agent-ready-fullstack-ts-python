@@ -15,7 +15,7 @@ from app.store.pg import PostgresDatabase
 from tests.pages import every_event, every_task
 from tests.store_contract import A_REQUEST, ACTOR
 
-Scoped = Callable[[PostgresDatabase, str], AbstractAsyncContextManager[Any]]
+Lent = Callable[[PostgresDatabase], AbstractAsyncContextManager[Any]]
 
 
 class Counted:
@@ -36,16 +36,16 @@ class Counted:
 
 @pytest.fixture
 def fetched(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    """The number of rows each `fetch` on a scoped connection returned, from now on."""
+    """The number of rows each `fetch` on a pooled connection returned, from now on."""
     counts: list[int] = []
-    unmeasured: Scoped = PostgresDatabase.scoped
+    unmeasured: Lent = PostgresDatabase.lent
 
     @asynccontextmanager
-    async def counted(self: PostgresDatabase, tenant_id: str) -> AsyncGenerator[Any]:
-        async with unmeasured(self, tenant_id) as conn:
+    async def counted(self: PostgresDatabase) -> AsyncGenerator[Any]:
+        async with unmeasured(self) as conn:
             yield Counted(conn, counts)
 
-    monkeypatch.setattr(PostgresDatabase, "scoped", counted)
+    monkeypatch.setattr(PostgresDatabase, "lent", counted)
     return counts
 
 

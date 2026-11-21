@@ -87,7 +87,7 @@ def over_a_page(client: TestClient, paths: dict[str, str], count: Count) -> dict
 async def reads_every_task(request: Request, principal: PrincipalDep) -> int:
     database = database_of(request)
     assert isinstance(database, PostgresDatabase)
-    async with database.scoped(principal.tenant_id) as conn:
+    async with database.reading(principal.tenant_id) as conn:
         rows: list[Any] = await conn.fetch("SELECT id FROM tasks")
     return len(rows)
 

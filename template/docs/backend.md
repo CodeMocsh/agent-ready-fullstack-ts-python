@@ -243,6 +243,20 @@ backend/
   `GROWS_WITH_ROWS` or `MORE_THAN_ONE_CONNECTION` in `tests/integration/filled.py`, with its
   reason.
   [adr/template/0032](adr/template/0032-a-request-s-reads-do-not-grow-with-its-rows.md) says why.
+- **A GET request reads one snapshot, and sends each statement once.** A Postgres store method
+  that only reads takes `self._database.reading(self._tenant_id)`, and one that writes takes
+  `scoped`. `reading` is READ ONLY, so a write through it fails. In a GET request, every read of
+  the tenant runs on the request's snapshot, one at a time, and a repeated statement with the
+  same arguments answers from what the snapshot kept. Change no value that a read answers. A
+  write in a GET request takes a second connection, and the next read sees it. Take `scoped`
+  only to write: it ends the snapshot. A write on `connection()` calls
+  `PostgresDatabase.written` after it. Start no read, and wait for no loader, inside a `reading`
+  block: `ReadInsideARead` refuses it.
+  `tests/integration/test_routes_read_a_fixed_count.py` fails on a GET route that sends one statement text more than once in a request, and
+  names the code that sent it. A route that does so today goes in `REPEATS_A_STATEMENT` in
+  `tests/integration/filled.py`, with its reason.
+  [adr/template/0033](adr/template/0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)
+  says why.
 - A policy compares `tenant_id` to `current_setting`, as `app/store/ddl.py` writes it. A join or a function that reads
   the row makes Postgres evaluate it for every row, and the index cannot help.
 - `MemoryDatabase` stays. The gate runs on it and must not need a daemon, and one implementation

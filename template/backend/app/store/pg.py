@@ -44,7 +44,7 @@ import json
 import math
 import time
 from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -69,6 +69,7 @@ from app.store import (
     TaskStore,
     TenantUnset,
     numbered,
+    snapshots,
 )
 from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING, acting
 from app.store.budget import ConnectionBudget, Draws, budgeted, server_limits
@@ -267,7 +268,7 @@ class PostgresTaskStore:
         self._tenant_id: str = tenant_id
 
     async def list(self, after: str | None) -> TaskPage | None:
-        async with self._database.scoped(self._tenant_id) as conn:
+        async with self._database.reading(self._tenant_id) as conn:
             if after is None:
                 rows = await conn.fetch(_LIST, PAGE_MAX + 1)
             else:
@@ -330,7 +331,7 @@ class PostgresAuditEvents:
         seq = 0 if after is None else numbered(after)
         if seq is None:
             raise _no_such_event(after)
-        async with self._database.scoped(self._tenant_id) as conn:
+        async with self._database.reading(self._tenant_id) as conn:
             if after is not None and not await conn.fetchval(_AN_AUDIT_EVENT, seq):
                 raise _no_such_event(after)
             rows = await conn.fetch(_AUDIT_EVENTS, seq, PAGE_MAX + 1)
@@ -399,7 +400,7 @@ class PostgresJobs:
         parsed = _as_id(id)
         if parsed is None:
             return None
-        async with self._database.scoped(self._tenant_id) as conn:
+        async with self._database.reading(self._tenant_id) as conn:
             row = await conn.fetchrow(_A_JOB, parsed)
         return None if row is None else _job(row)
 
@@ -601,21 +602,59 @@ class PostgresDatabase:
 
     def loader(self, tenant_id: str) -> Loader:
         """The loader of `tenant_id` in this request, or in this attempt of a job. Each of its
-        turns runs in one `scoped` transaction. Raises `NotLoading` outside both.
+        turns reads on one connection of `reading`. Raises `NotLoading` outside both.
         `docs/adr/template/0032`."""
         _refuse_unset(tenant_id)
-        return loader_of((self, tenant_id), lambda: self.scoped(tenant_id))
+        return loader_of((self, tenant_id), lambda: self.reading(tenant_id))
+
+    def reading(self, tenant_id: str) -> AbstractAsyncContextManager[Any]:
+        """A connection inside a READ ONLY transaction that has set `tenant_id`, which every
+        statement that only reads tenant data runs in. In a GET request, it is the request's
+        snapshot of the tenant: one REPEATABLE READ transaction for the request, in which each
+        answer is kept. Otherwise, a transaction of its own. Inside `app.store.jobs.fenced`, the
+        transaction is not READ ONLY, and holds the claim as `scoped` does.
+
+        A write raises `ReadOnlySQLTransactionError`. Raises as `lent` raises, and raises
+        `ReadInsideARead` inside a read of a snapshot. `docs/adr/template/0033`."""
+        return snapshots.reading(
+            (self, tenant_id),
+            lambda: self._snapshot(tenant_id),
+            lambda: self._unit(tenant_id, readonly=fence() is None),
+            failed_on_a_connection(),
+        )
+
+    @asynccontextmanager
+    async def _snapshot(self, tenant_id: str) -> AsyncGenerator[Any]:
+        async with (
+            self.lent() as conn,
+            conn.transaction(isolation="repeatable_read", readonly=True),
+        ):
+            await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
+            yield conn
 
     @asynccontextmanager
     async def scoped(self, tenant_id: str) -> AsyncGenerator[Any]:
         """A connection inside a transaction that has set `tenant_id`, which every statement
-        on tenant data runs in. One statement sets the tenant and who acts, for the transaction.
+        that writes tenant data runs in. One statement sets the tenant and who acts, for the
+        transaction. In a GET request, `written` runs once the transaction commits.
 
         Inside `app.store.jobs.fenced`, the transaction first holds the claim with
         `FOR KEY SHARE` until it ends, so no worker can claim the job while it runs. Raises
         `LeaseLost`, and rolls back, when the claim is no longer this attempt's, or is of another
         tenant."""
-        async with self.lent() as conn, conn.transaction():
+        async with self._unit(tenant_id, readonly=False) as conn:
+            yield conn
+        await self.written(tenant_id)
+
+    async def written(self, tenant_id: str) -> None:
+        """End the request's snapshot of `tenant_id`, if it has one, so that its next read opens
+        a new snapshot, which sees each write committed before it. Call it after a write that
+        does not go through `scoped`, such as one on `connection()`."""
+        await snapshots.written((self, tenant_id))
+
+    @asynccontextmanager
+    async def _unit(self, tenant_id: str, *, readonly: bool) -> AsyncGenerator[Any]:
+        async with self.lent() as conn, conn.transaction(readonly=readonly):
             await conn.execute(SET_TENANT_AND_ACTING, tenant_id, *_who_acts())
             claim = fence()
             if claim is not None and (

@@ -224,9 +224,17 @@ _Avoid_: batch, bulk read, multi-get.
 
 **Loader**:
 What reads the keys that the items of one request ask for in one turn of the event loop: each set
-read of the turn once, one after another, in one transaction. It keeps nothing past the turn.
+read of the turn once, one after another, on one connection. It keeps nothing past the turn.
 `PostgresDatabase.loader` answers the loader of a tenant in a request, or in an attempt of a job.
 _Avoid_: DataLoader, batcher, identity map, cache.
+
+**Snapshot**:
+A transaction, READ ONLY and REPEATABLE READ, on one connection, that the reads of a tenant in a
+GET request run in. It keeps each answer, so a statement with the same arguments reaches the
+database once in it. It ends before the response starts, when the request writes to the tenant,
+and when a read in it fails in the database. The next read opens a new one.
+`PostgresDatabase.reading` lends it. `docs/adr/template/0033`.
+_Avoid_: cache, identity map, read transaction, session.
 
 **Connection budget**:
 The share of the server's `max_connections` that each process may hold, and the template's pool

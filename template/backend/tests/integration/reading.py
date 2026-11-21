@@ -2,6 +2,8 @@
 request does on its pooled connections. `tests/integration/test_routes_read_pages.py` and
 `tests/integration/test_routes_read_a_fixed_count.py` read each GET route with it."""
 
+import re
+import traceback
 from collections.abc import AsyncGenerator, Generator, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from contextvars import ContextVar
@@ -19,6 +21,7 @@ from app.identity.shared import Principal
 from app.jobs import kinds
 from app.models import PAGE_MAX
 from app.store import Database
+from app.store.acting import SET_ACTING, SET_TENANT_AND_ACTING
 from app.store.ddl import TENANT_TABLES
 from app.store.jobs import Kinds
 from app.store.pg import PostgresDatabase
@@ -33,20 +36,49 @@ _SERVING: ContextVar[bool] = ContextVar("serving_a_request", default=False)
 """Whether the running task serves a request of `served`, or was started by one."""
 
 
+BOOKKEEPING: Final = frozenset({SET_TENANT_AND_ACTING, SET_ACTING})
+"""The statements that each unit of work and each snapshot sends to set who reads, which
+`Count.asked` leaves out."""
+
+
 @dataclass
 class Count:
     """What the requests did on pooled connections since the last `clear`: the rows that each
-    read returned, each statement, each connection taken, and the most held at once."""
+    read returned, each statement, each connection taken, the most held at once, and the code
+    that sent each statement that is not `BOOKKEEPING`, by its text."""
 
     fetched: list[int] = field(default_factory=list)
     statements: int = 0
     connections: int = 0
     held: int = 0
     most_held: int = 0
+    asked: dict[str, list[str]] = field(default_factory=dict)
 
     def clear(self) -> None:
         self.fetched.clear()
+        self.asked.clear()
         self.statements = self.connections = self.most_held = 0
+
+    def sent(self, query: str) -> None:
+        self.statements += 1
+        if query not in BOOKKEEPING:
+            self.asked.setdefault(query, []).append(_sender())
+
+    def repeated(self) -> dict[str, list[str]]:
+        """Each statement text sent more than once, with the code that sent each."""
+        return {query: senders for query, senders in self.asked.items() if len(senders) > 1}
+
+
+_SENDS: Final = re.compile(r"/backend/(app|tests)/(?!store/|integration/reading\.py)")
+"""The files of code that sends a statement: the app and its tests, but not the store, which
+each statement passes through, and not this counter."""
+
+
+def _sender() -> str:
+    for frame in reversed(traceback.extract_stack()):
+        if _SENDS.search(frame.filename) is not None:
+            return f"{frame.filename.rsplit('/backend/', 1)[-1]}:{frame.lineno} {frame.name}"
+    return "a turn of a loader"
 
 
 class Counted:
@@ -56,36 +88,36 @@ class Counted:
         self._conn: Any = conn
         self._count: Count = count
 
-    async def fetch(self, *args: Any, **kwargs: Any) -> list[Any]:
-        rows: list[Any] = await self._conn.fetch(*args, **kwargs)
-        self._read(len(rows))
+    async def fetch(self, query: str, *args: Any, **kwargs: Any) -> list[Any]:
+        self._count.sent(query)
+        rows: list[Any] = await self._conn.fetch(query, *args, **kwargs)
+        self._count.fetched.append(len(rows))
         return rows
 
-    async def fetchmany(self, *args: Any, **kwargs: Any) -> list[Any]:
-        rows: list[Any] = await self._conn.fetchmany(*args, **kwargs)
-        self._read(len(rows))
+    async def fetchmany(self, query: str, *args: Any, **kwargs: Any) -> list[Any]:
+        self._count.sent(query)
+        rows: list[Any] = await self._conn.fetchmany(query, *args, **kwargs)
+        self._count.fetched.append(len(rows))
         return rows
 
-    async def fetchrow(self, *args: Any, **kwargs: Any) -> Any:
-        row = await self._conn.fetchrow(*args, **kwargs)
-        self._read(0 if row is None else 1)
+    async def fetchrow(self, query: str, *args: Any, **kwargs: Any) -> Any:
+        self._count.sent(query)
+        row = await self._conn.fetchrow(query, *args, **kwargs)
+        self._count.fetched.append(0 if row is None else 1)
         return row
 
-    async def fetchval(self, *args: Any, **kwargs: Any) -> Any:
-        self._read(1)
-        return await self._conn.fetchval(*args, **kwargs)
+    async def fetchval(self, query: str, *args: Any, **kwargs: Any) -> Any:
+        self._count.sent(query)
+        self._count.fetched.append(1)
+        return await self._conn.fetchval(query, *args, **kwargs)
 
-    async def execute(self, *args: Any, **kwargs: Any) -> Any:
-        self._count.statements += 1
-        return await self._conn.execute(*args, **kwargs)
+    async def execute(self, query: str, *args: Any, **kwargs: Any) -> Any:
+        self._count.sent(query)
+        return await self._conn.execute(query, *args, **kwargs)
 
-    async def executemany(self, *args: Any, **kwargs: Any) -> Any:
-        self._count.statements += 1
-        return await self._conn.executemany(*args, **kwargs)
-
-    def _read(self, rows: int) -> None:
-        self._count.fetched.append(rows)
-        self._count.statements += 1
+    async def executemany(self, query: str, *args: Any, **kwargs: Any) -> Any:
+        self._count.sent(query)
+        return await self._conn.executemany(query, *args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._conn, name)
@@ -134,7 +166,7 @@ async def fill(
         paths = await filled(database, tenant_id, rows)
         held: dict[str, int] = {}
         for table in TENANT_TABLES:
-            async with database.scoped(tenant_id) as conn:
+            async with database.reading(tenant_id) as conn:
                 held[table] = await conn.fetchval(f'SELECT count(*) FROM "{table}"')
         return paths, held
     finally:

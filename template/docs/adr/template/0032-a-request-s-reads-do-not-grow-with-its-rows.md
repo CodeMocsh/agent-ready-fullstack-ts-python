@@ -4,7 +4,9 @@ Date: 2026-11-14
 
 ## Status
 
-Accepted.
+Accepted. [0033](0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md) replaces
+two of its considered options, a cache for the request and one unit of work for the request, for
+the reads of a GET request.
 
 ## Context
 
@@ -38,12 +40,14 @@ page could hold every connection of a process.
   A key asked twice in a turn is read once. More than `PAGE_MAX` keys go `PAGE_MAX` at a time.
   The items of a page start in one `asyncio.TaskGroup`, so each asks in the same turn.
 - **A turn is one unit of work, and a loader runs one turn at a time.** Each set read of the
-  turn runs, one after another, in one `scoped` transaction. A turn waits until the turn before
+  turn runs, one after another, on one connection of `reading`: in a GET request, the request's
+  snapshot ([0033](0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md)), and
+  elsewhere one transaction. A turn waits until the turn before
   it ends. So one loader holds one connection at a time.
 - **A turn is shared work.** The loader runs each turn through `SharedWork`
   ([0021](0021-each-wait-in-a-request-has-a-bound-under-the-request-budget.md)). A failure raises
   in each caller of the turn. When each caller is cancelled, the turn is cancelled, and it leaves
-  its `scoped` transaction, which rolls back. `cancel_beside` cancels a turn at shutdown.
+  its unit of work, which rolls back. `cancel_beside` cancels a turn at shutdown.
 - **A set read reads only on the connection it is handed.** A set read that asked its own loader
   would wait for its own turn, and one that asked another loader would take a second connection.
   `Loader.load` raises `RuntimeError` in a set read.
@@ -65,8 +69,10 @@ page could hold every connection of a process.
   `PostgresTaskStore`, for example, calls `self._database.loader(self._tenant_id).load(read, key)`,
   and `read` is SQL in `app/store/pg.py`. Its memory twin answers from its own rows. A route calls
   the store method for each item, and knows no loader.
-- **A loader keeps nothing past its turn.** A read in a later turn reads the database again. So
-  a write in the request needs nothing to clear.
+- **A loader keeps nothing past its turn.** A read in a later turn asks the database again. So
+  a write in the request needs nothing to clear. In a GET request, the snapshot of
+  [0033](0033-a-get-request-reads-one-snapshot-and-sends-each-statement-once.md) answers a
+  statement that it already answered.
 - **Every GET route reads no more past a page than at one row, on Postgres.**
   `tests/integration/test_routes_read_a_fixed_count.py` fills one tenant with one row in each
   table, and one with `ROWS`, past a page. It reads each GET route in `openapi.json` in each
@@ -87,9 +93,10 @@ page could hold every connection of a process.
   the number of rows to write.
 - **The test holds itself to its purpose.** A second test adds a route that reads the title of
   each task of a page alone, a route that starts those reads at once in a `TaskGroup`, and a route
-  that reads them through the loader. It asserts that the first two grow with the rows, that only
-  the second holds more than one connection, and that the loader's route reads as much past a page
-  as at one row. Another test holds a connection while a route reads, in shared work that the
+  that reads them through the loader. It asserts that the first two grow with the rows, and that
+  the loader's route reads as much past a page as at one row. Each reads on the one connection of
+  the request's snapshot (0033), so the test holds a route that writes while it reads to more than
+  one connection. Another test holds a connection while a route reads, in shared work that the
   lifespan starts, and in shared work that work beside the request starts. It asserts that the
   route holds one connection at a time, and counts the same on each read.
 
@@ -104,7 +111,8 @@ page could hold every connection of a process.
   connection for each in one turn. The project above uses many stores in one request.
 - **A cache of each value for the whole request.** The rule of a constant count needs only the
   keys of one turn. A cache must forget what a write changes. A trigger, a job and another store
-  also write, and nothing could check that each one clears the cache.
+  also write, and nothing could check that each one clears the cache. 0033 keeps each answer of a
+  GET request in a READ ONLY snapshot, where nothing changes.
 - **A refusal value for a key, which the caller checks.** A caller that does not check it passes
   the refusal on as a value. An exception for the key raises in its caller, and code that catches
   a failure at its item today catches it the same way behind a loader.
@@ -114,7 +122,8 @@ page could hold every connection of a process.
 - **One unit of work for the whole request.** It removes the round trips of each store call,
   and it changes `scoped`, the unit that [0017](0017-the-database-records-every-write-and-the-request-layer-every-request.md)
   records, and what `ConnectionLost` means in 0022. It is a decision of its own. One unit for
-  each turn is the part of it that reads need.
+  each turn is the part of it that reads need. 0033 takes one snapshot for the reads of a GET
+  request, and keeps one unit for each write.
 - **Compare a page with ten pages.** A route reads one page, so its reads are the same at both,
   even when it reads each row alone.
 
