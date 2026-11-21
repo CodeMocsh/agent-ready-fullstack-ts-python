@@ -1,4 +1,9 @@
-import type { Query, QueryCacheNotifyEvent, QueryClient } from "@tanstack/react-query";
+import {
+  isCancelledError,
+  type Query,
+  type QueryCacheNotifyEvent,
+  type QueryClient,
+} from "@tanstack/react-query";
 import {
   delay,
   type EventReadPolicy,
@@ -9,7 +14,14 @@ import {
 
 type Permit = { resumed: boolean };
 type Attempt = { permit: Permit | undefined; canceled?: unknown; continuation?: Permit };
-type Pending = { dirty: boolean; done: Promise<void>; canceled?: Attempt };
+type Pending = {
+  changes: number;
+  covered: number;
+  reads: number;
+  done: Promise<void>;
+  canceled?: Attempt;
+};
+export type Covering = { pending: Pending; changes: number } | undefined;
 type Outcome = { ok: true } | { ok: false; failure: unknown };
 
 function outcome(work: Promise<unknown>): Promise<Outcome> {
@@ -21,6 +33,11 @@ function outcome(work: Promise<unknown>): Promise<Outcome> {
 
 function assertSuccessful(result: Outcome): void {
   if (!result.ok) throw result.failure;
+}
+
+function assertNotRefused(result: Outcome, started: boolean): void {
+  if (started || result.ok || isCancelledError(result.failure)) return;
+  throw result.failure;
 }
 
 export class EventRefreshStopped extends Error {
@@ -91,9 +108,19 @@ export class EventRefresh {
     lifetime.throwIfAborted();
     const newer = this.take(query);
     if (newer !== undefined) read.permit = newer;
-    const pending = this.pending.get(query);
-    if (pending !== undefined) pending.dirty = false;
     this.last.set(query, performance.now());
+  }
+
+  covering(query: Query, page: boolean): Covering {
+    const pending = this.pending.get(query);
+    if (pending === undefined || page) return undefined;
+    pending.reads += 1;
+    return { pending, changes: pending.changes };
+  }
+
+  covered(covering: Covering, signal: AbortSignal): void {
+    if (covering === undefined || signal.aborted) return;
+    covering.pending.covered = Math.max(covering.pending.covered, covering.changes);
   }
 
   change(query: Query): Promise<void> {
@@ -102,10 +129,10 @@ export class EventRefresh {
     query.invalidate();
     const existing = this.pending.get(query);
     if (existing !== undefined) {
-      existing.dirty = true;
+      existing.changes += 1;
       return existing.done;
     }
-    const pending: Pending = { dirty: true, done: Promise.resolve() };
+    const pending: Pending = { changes: 1, covered: 0, reads: 0, done: Promise.resolve() };
     this.pending.set(query, pending);
     pending.done = Promise.resolve().then(() => this.drain(query, pending));
     return pending.done;
@@ -135,7 +162,7 @@ export class EventRefresh {
     const pending = this.pending.get(query);
     if (pending !== undefined) {
       pending.canceled = read;
-      pending.dirty = true;
+      pending.changes += 1;
     }
     query.invalidate();
     this.continueCanceled(query, read, signal);
@@ -153,7 +180,7 @@ export class EventRefresh {
   private settled(query: Query, pending: Pending, result: Outcome): boolean {
     if (this.pending.get(query) !== pending) return false;
     this.assertNotCanceled(query, pending);
-    if (pending.dirty) {
+    if (pending.covered < pending.changes) {
       query.invalidate();
       return true;
     }
@@ -188,16 +215,20 @@ export class EventRefresh {
   }
 
   private needsRead(query: Query, pending: Pending): boolean {
-    return pending.dirty && this.pending.get(query) === pending && query.isActive();
+    return (
+      pending.covered < pending.changes && this.pending.get(query) === pending && query.isActive()
+    );
   }
 
   private async readChanges(query: Query, pending: Pending): Promise<void> {
     while (this.needsRead(query, pending)) {
+      const reads = pending.reads;
       const result = await until(
         outcome(query.fetch(undefined, { cancelRefetch: false })),
         this.budget.lifetime.signal,
       );
       if (!this.settled(query, pending, result)) return;
+      assertNotRefused(result, pending.reads !== reads);
     }
   }
 }
